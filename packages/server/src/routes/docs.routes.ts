@@ -67,6 +67,7 @@ const DIR_ORDER = [
   "characters",
   "chats",
   "lorebooks",
+  "scenarios",
   "agents",
   "media",
   "prompts",

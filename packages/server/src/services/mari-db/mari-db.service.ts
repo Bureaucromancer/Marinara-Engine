@@ -281,7 +281,10 @@ async function readPackageVersion(cwd: string): Promise<string | null> {
 // db/schema/* — these are plain text() columns whose JSON-ness only exists in
 // their doc comments, so this map cannot be derived automatically. Keep it in
 // sync with the schema when columns change.
-const JSON_COLUMNS: Record<string, readonly string[]> = {
+// Exported so scripts/regressions/scenario-compat.regression.ts can assert this
+// stays in step with the schema — the sync the comment above asks for is
+// otherwise entirely manual.
+export const JSON_COLUMNS: Record<string, readonly string[]> = {
   characters: ["data"],
   character_card_versions: ["data"],
   persona_card_versions: ["data"],

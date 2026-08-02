@@ -37,6 +37,7 @@ import { HelpTooltip } from "../ui/HelpTooltip";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { api } from "../../lib/api-client";
 import { cn } from "../../lib/utils";
+import { useTranslation as useUiTranslation } from "react-i18next";
 
 const TABS = [
   { id: "overview", label: "Overview", icon: Settings2 },
@@ -83,6 +84,7 @@ function ChipListField({
   onChange: (next: string[]) => void;
   placeholder?: string;
 }) {
+  const { t: localizeUi } = useUiTranslation();
   const [draft, setDraft] = useState("");
   const commit = () => {
     const parts = draft
@@ -101,7 +103,7 @@ function ChipListField({
         {values.map((value) => (
           <span key={value} className="mari-editor-chip mari-editor-chip--accent">
             {value}
-            <button onClick={() => onChange(values.filter((item) => item !== value))} aria-label="Remove">
+            <button onClick={() => onChange(values.filter((item) => item !== value))} aria-label={localizeUi("settings.notifications.customSound.actions.remove")}>
               <X size="0.625rem" />
             </button>
           </span>
@@ -125,6 +127,7 @@ function ChipListField({
 }
 
 export function ScenarioEditor() {
+  const { t: localizeUi } = useUiTranslation();
   const scenarioId = useUIStore((s) => s.scenarioDetailId);
   const closeDetail = useUIStore((s) => s.closeScenarioDetail);
   const setEditorDirty = useUIStore((s) => s.setEditorDirty);
@@ -211,9 +214,9 @@ export function ScenarioEditor() {
 
   useEffect(() => {
     if (!isError) return;
-    toast.error("Scenario not found");
+    toast.error(localizeUi("ui.scenarios.scenarioeditor.scenarioNotFound"));
     closeDetail();
-  }, [isError, closeDetail]);
+  }, [isError, closeDetail, localizeUi]);
 
   const updateSetting = useCallback(
     (patch: Partial<ScenarioSetting>) => {
@@ -227,7 +230,7 @@ export function ScenarioEditor() {
   const handleSave = useCallback(async () => {
     if (!scenario) return;
     if (!name.trim()) {
-      toast.error("Scenario needs a name");
+      toast.error(localizeUi("ui.scenarios.scenarioeditor.scenarioNeedsAName"));
       return;
     }
     setSaving(true);
@@ -260,9 +263,9 @@ export function ScenarioEditor() {
         generated: generatedRef.current,
       });
       setDirty(false);
-      toast.success("Scenario saved");
+      toast.success(localizeUi("ui.scenarios.scenarioeditor.scenarioSaved"));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save scenario");
+      toast.error(error instanceof Error ? error.message :localizeUi("ui.scenarios.scenarioeditor.failedToSaveScenario"));
     } finally {
       setSaving(false);
     }
@@ -288,15 +291,15 @@ export function ScenarioEditor() {
     alternateGreetings,
     lorebookIds,
     updateScenario,
+    localizeUi,
   ]);
 
   const handleClearProvenance = useCallback(async () => {
     if (
       !(await showConfirmDialog({
-        title: "Clear AI attribution",
-        message:
-          "Remove the record of which fields were AI-generated? The field values are not changed. This cannot be undone.",
-        confirmLabel: "Clear",
+        title:localizeUi("ui.scenarios.scenarioeditor.clearAiAttribution"),
+        message:localizeUi("ui.scenarios.scenarioeditor.removeTheRecordOfWhichFieldsWereAiGenerated"),
+        confirmLabel:localizeUi("lorebook.editor.batch.clear"),
         tone: "destructive",
       }))
     ) {
@@ -305,7 +308,7 @@ export function ScenarioEditor() {
     generatedRef.current = null;
     setGeneratedCount(0);
     markDirty();
-  }, [markDirty]);
+  }, [markDirty, localizeUi]);
 
   const handleClose = useCallback(() => {
     if (dirty) {
@@ -319,16 +322,16 @@ export function ScenarioEditor() {
     if (!scenario) return;
     if (
       await showConfirmDialog({
-        title: "Delete scenario",
-        message: `Delete ${scenario.name}? This cannot be undone.`,
-        confirmLabel: "Delete",
+        title:localizeUi("ui.scenarios.scenarioeditor.deleteScenario"),
+        message:localizeUi("ui.scenarios.scenarioeditor.deleteValue1ThisCannotBeUndone", { value1: scenario.name }),
+        confirmLabel:localizeUi("lorebook.editor.batch.delete"),
         tone: "destructive",
       })
     ) {
       await deleteScenario.mutateAsync(scenario.id);
       closeDetail();
     }
-  }, [scenario, deleteScenario, closeDetail]);
+  }, [scenario, deleteScenario, closeDetail, localizeUi]);
 
   const handleExport = useCallback(
     async (format: ExportFormatChoice) => {
@@ -341,10 +344,10 @@ export function ScenarioEditor() {
           `${scenario.name || "scenario"}.${extension}`,
         );
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to export scenario");
+        toast.error(error instanceof Error ? error.message :localizeUi("ui.scenarios.scenarioeditor.failedToExportScenario"));
       }
     },
-    [scenario],
+    [scenario, localizeUi],
   );
 
   const lorebookNameById = useMemo(
@@ -366,7 +369,7 @@ export function ScenarioEditor() {
   return (
     <div className="mari-editor-panel-root flex h-full min-h-0 flex-col">
       <header className="mari-editor-header">
-        <button onClick={handleClose} className="mari-editor-action" title="Back" aria-label="Back">
+        <button onClick={handleClose} className="mari-editor-action" title={localizeUi("ui.noodle.agegate.back")} aria-label={localizeUi("ui.noodle.agegate.back")}>
           <ArrowLeft size="1rem" />
         </button>
         <div className="mari-editor-icon-tile mari-panel-gradient-surface mari-panel-gradient--scenarios">
@@ -375,9 +378,9 @@ export function ScenarioEditor() {
         <div className="min-w-0 flex-1">
           <h1 className="mari-editor-title truncate">{name || "Untitled scenario"}</h1>
           <p className="mari-editor-meta truncate">
-            {scenario.source === "import" ? "Imported" : "Created here"}
-            {scenario.originalFilename ? ` · ${scenario.originalFilename}` : ""}
-            {generatedCount > 0 ? ` · ${generatedCount} AI-generated field(s)` : ""}
+            {scenario.source === "import" ?localizeUi("ui.scenarios.scenarioeditor.imported") :localizeUi("ui.scenarios.scenarioeditor.createdHere")}
+            {scenario.originalFilename ?localizeUi("ui.characters.characterversionhistorypanel.value1", { value1: scenario.originalFilename }) : ""}
+            {generatedCount > 0 ?localizeUi("ui.scenarios.scenarioeditor.value1AiGeneratedFieldS", { value1: generatedCount }) : ""}
           </p>
         </div>
         <div className="mari-editor-actions">
@@ -385,19 +388,19 @@ export function ScenarioEditor() {
             onClick={handleSave}
             disabled={!dirty || saving}
             className="mari-editor-action mari-editor-action--primary disabled:cursor-not-allowed disabled:opacity-50"
-            title="Save"
+            title={localizeUi("ui.cardversionhistory.save")}
           >
             {saving ? <Loader2 size="1rem" className="animate-spin" /> : <Save size="1rem" />}
           </button>
           <button
             onClick={() => setShowExportDialog(true)}
             className="mari-editor-action"
-            title="Export"
-            aria-label="Export"
+            title={localizeUi("ui.characters.spritestab.export")}
+            aria-label={localizeUi("ui.characters.spritestab.export")}
           >
             <Download size="1rem" />
           </button>
-          <button onClick={handleDelete} className="mari-editor-action" title="Delete" aria-label="Delete">
+          <button onClick={handleDelete} className="mari-editor-action" title={localizeUi("lorebook.editor.batch.delete")} aria-label={localizeUi("lorebook.editor.batch.delete")}>
             <Trash2 size="1rem" className="text-[var(--destructive)]" />
           </button>
         </div>
@@ -405,10 +408,8 @@ export function ScenarioEditor() {
 
       {showUnsavedWarning && (
         <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] bg-amber-500/10 px-4 py-2 text-xs">
-          <span className="flex-1">You have unsaved changes.</span>
-          <button onClick={() => setShowUnsavedWarning(false)} className="mari-chrome-control mari-chrome-control--compact">
-            Keep editing
-          </button>
+          <span className="flex-1">{localizeUi("ui.agents.agenteditor.youHaveUnsavedChanges")}</span>
+          <button onClick={() => setShowUnsavedWarning(false)} className="mari-chrome-control mari-chrome-control--compact">{localizeUi("ui.agents.agenteditor.keepEditing")}</button>
           <button
             onClick={() => {
               setShowUnsavedWarning(false);
@@ -416,9 +417,7 @@ export function ScenarioEditor() {
               closeDetail();
             }}
             className="mari-chrome-control mari-chrome-control--compact mari-chrome-control--danger"
-          >
-            Discard and close
-          </button>
+          >{localizeUi("ui.scenarios.scenarioeditor.discardAndClose")}</button>
           <button
             onClick={async () => {
               await handleSave();
@@ -426,9 +425,7 @@ export function ScenarioEditor() {
               closeDetail();
             }}
             className="mari-chrome-control mari-chrome-control--compact mari-chrome-control--selected"
-          >
-            Save and close
-          </button>
+          >{localizeUi("ui.scenarios.scenarioeditor.saveAndClose")}</button>
         </div>
       )}
 
@@ -440,7 +437,7 @@ export function ScenarioEditor() {
             {activeTab === "overview" && (
               <>
                 <div className="mari-editor-panel">
-                  <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">Name</label>
+                  <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">{localizeUi("settings.customGenerationParameters.name")}</label>
                   <input
                     value={name}
                     onChange={(event) => {
@@ -451,7 +448,7 @@ export function ScenarioEditor() {
                   />
                 </div>
                 <div className="mari-editor-panel">
-                  <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">Description</label>
+                  <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">{localizeUi("chat.settings.inlineEditor.fields.description")}</label>
                   <ExpandableTextarea
                     value={description}
                     onChange={(value) => {
@@ -459,14 +456,12 @@ export function ScenarioEditor() {
                       markDirty();
                     }}
                     rows={3}
-                    placeholder="A short preview shown on library cards."
+                    placeholder={localizeUi("ui.scenarios.scenarioeditor.aShortPreviewShownOnLibraryCards")}
                   />
                 </div>
                 <div className="flex gap-2">
                   <div className="mari-editor-panel flex-1">
-                    <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">
-                      Genre
-                      <HelpTooltip text="Feeds the genre field when a game is set up from this scenario." />
+                    <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">{localizeUi("ui.scenarios.scenarioeditor.genre")}<HelpTooltip text={localizeUi("ui.scenarios.scenarioeditor.feedsTheGenreFieldWhenAGameIsSet")} />
                     </label>
                     <input
                       value={genre}
@@ -486,9 +481,7 @@ export function ScenarioEditor() {
                     </datalist>
                   </div>
                   <div className="mari-editor-panel flex-1">
-                    <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">
-                      Content rating
-                      <HelpTooltip text="Left unspecified, whatever starts a story from this scenario will ask instead of assuming." />
+                    <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">{localizeUi("ui.scenarios.scenarioeditor.contentRating")}<HelpTooltip text={localizeUi("ui.scenarios.scenarioeditor.leftUnspecifiedWhateverStartsAStoryFromThisScenario")} />
                     </label>
                     <select
                       value={contentRating}
@@ -498,20 +491,20 @@ export function ScenarioEditor() {
                       }}
                       className="mari-editor-field w-full px-2 py-1.5 text-xs"
                     >
-                      <option value="">Unspecified</option>
-                      <option value="sfw">SFW</option>
-                      <option value="nsfw">NSFW</option>
+                      <option value="">{localizeUi("ui.scenarios.scenarioeditor.unspecified")}</option>
+                      <option value="sfw">{localizeUi("ui.game.gamesetupwizard.sfw")}</option>
+                      <option value="nsfw">{localizeUi("ui.botBrowser.botbrowserview.nsfw")}</option>
                     </select>
                   </div>
                 </div>
                 <ChipListField
-                  label="Tags"
+                  label={localizeUi("ui.characters.metadatatab.tags")}
                   values={tags}
                   onChange={(next) => {
                     setTags(next);
                     markDirty();
                   }}
-                  placeholder="Add tags, comma separated"
+                  placeholder={localizeUi("ui.scenarios.scenarioeditor.addTagsCommaSeparated")}
                 />
                 <div className="mari-editor-panel flex items-center gap-2">
                   <input
@@ -523,24 +516,19 @@ export function ScenarioEditor() {
                       markDirty();
                     }}
                   />
-                  <label htmlFor="scenario-favorite" className="text-xs">
-                    Favorite
-                  </label>
+                  <label htmlFor="scenario-favorite" className="text-xs">{localizeUi("ui.characters.cardlibrarydetailcard.favorite")}</label>
                 </div>
 
                 {generatedCount > 0 && (
                   <div className="mari-editor-panel flex flex-wrap items-center gap-2">
                     <Sparkles size="0.875rem" className="text-[var(--primary)]" />
                     <span className="flex-1 text-xs">
-                      {generatedCount} field(s) are recorded as AI-generated.
-                      <HelpTooltip text="Provenance travels with the scenario when it is exported. Clearing it does not change any field values." />
+                      {generatedCount} {localizeUi("ui.scenarios.scenarioeditor.fieldSAreRecordedAsAiGenerated")}<HelpTooltip text={localizeUi("ui.scenarios.scenarioeditor.provenanceTravelsWithTheScenarioWhenItIsExported")} />
                     </span>
                     <button
                       onClick={handleClearProvenance}
                       className="mari-chrome-control mari-chrome-control--compact"
-                    >
-                      Clear AI attribution
-                    </button>
+                    >{localizeUi("ui.scenarios.scenarioeditor.clearAiAttribution")}</button>
                   </div>
                 )}
               </>
@@ -548,11 +536,9 @@ export function ScenarioEditor() {
 
             {activeTab === "setting" && (
               <>
-                <p className="text-[0.6875rem] text-[var(--muted-foreground)]">
-                  Write the setting directly. Every field here is optional and hand-authored.
-                </p>
+                <p className="text-[0.6875rem] text-[var(--muted-foreground)]">{localizeUi("ui.scenarios.scenarioeditor.writeTheSettingDirectlyEveryFieldHereIsOptional")}</p>
                 <div className="mari-editor-panel">
-                  <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">Setting name</label>
+                  <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">{localizeUi("ui.scenarios.scenarioeditor.settingName")}</label>
                   <input
                     value={setting.name}
                     onChange={(event) => updateSetting({ name: event.target.value })}
@@ -560,17 +546,17 @@ export function ScenarioEditor() {
                   />
                 </div>
                 <div className="mari-editor-panel">
-                  <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">Description</label>
+                  <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">{localizeUi("chat.settings.inlineEditor.fields.description")}</label>
                   <ExpandableTextarea
                     value={setting.description}
                     onChange={(value) => updateSetting({ description: value })}
                     rows={8}
-                    placeholder="The world, its rules, and its atmosphere."
-                    title="Setting description"
+                    placeholder={localizeUi("ui.scenarios.scenarioeditor.theWorldItsRulesAndItsAtmosphere")}
+                    title={localizeUi("ui.scenarios.scenarioeditor.settingDescription")}
                   />
                 </div>
                 <div className="mari-editor-panel">
-                  <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">Atmosphere</label>
+                  <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">{localizeUi("settings.sections.atmosphere.title")}</label>
                   <ExpandableTextarea
                     value={setting.atmosphere}
                     onChange={(value) => updateSetting({ atmosphere: value })}
@@ -578,29 +564,27 @@ export function ScenarioEditor() {
                   />
                 </div>
                 <ChipListField
-                  label="Themes"
+                  label={localizeUi("ui.scenarios.scenarioeditor.themes")}
                   values={setting.themes}
                   onChange={(next) => updateSetting({ themes: next })}
-                  placeholder="Add themes, comma separated"
+                  placeholder={localizeUi("ui.scenarios.scenarioeditor.addThemesCommaSeparated")}
                 />
                 <ChipListField
-                  label="Potential conflicts"
+                  label={localizeUi("ui.scenarios.scenarioeditor.potentialConflicts")}
                   values={setting.potentialConflicts}
                   onChange={(next) => updateSetting({ potentialConflicts: next })}
-                  placeholder="Add story hooks, comma separated"
+                  placeholder={localizeUi("ui.scenarios.scenarioeditor.addStoryHooksCommaSeparated")}
                 />
                 <div className="mari-editor-panel">
                   <div className="mb-2 flex items-center justify-between">
-                    <label className="text-[0.6875rem] text-[var(--muted-foreground)]">Key locations</label>
+                    <label className="text-[0.6875rem] text-[var(--muted-foreground)]">{localizeUi("ui.scenarios.scenarioeditor.keyLocations")}</label>
                     <button
                       onClick={() =>
                         updateSetting({ keyLocations: [...setting.keyLocations, { name: "", description: "" }] })
                       }
                       className="mari-chrome-control mari-chrome-control--compact"
                     >
-                      <Plus size="0.6875rem" />
-                      Add
-                    </button>
+                      <Plus size="0.6875rem" />{localizeUi("ui.characters.metadatatab.add")}</button>
                   </div>
                   <div className="flex flex-col gap-2">
                     {setting.keyLocations.map((location, index) => (
@@ -612,7 +596,7 @@ export function ScenarioEditor() {
                             next[index] = { ...location, name: event.target.value };
                             updateSetting({ keyLocations: next });
                           }}
-                          placeholder="Name"
+                          placeholder={localizeUi("settings.customGenerationParameters.name")}
                           className="mari-editor-field w-1/3 px-2 py-1.5 text-xs"
                         />
                         <input
@@ -622,7 +606,7 @@ export function ScenarioEditor() {
                             next[index] = { ...location, description: event.target.value };
                             updateSetting({ keyLocations: next });
                           }}
-                          placeholder="Description"
+                          placeholder={localizeUi("chat.settings.inlineEditor.fields.description")}
                           className="mari-editor-field flex-1 px-2 py-1.5 text-xs"
                         />
                         <button
@@ -630,7 +614,7 @@ export function ScenarioEditor() {
                             updateSetting({ keyLocations: setting.keyLocations.filter((_, i) => i !== index) })
                           }
                           className="mari-chrome-control mari-chrome-control--small p-1.5"
-                          aria-label="Remove location"
+                          aria-label={localizeUi("ui.scenarios.scenarioeditor.removeLocation")}
                         >
                           <Trash2 size="0.75rem" className="text-[var(--destructive)]" />
                         </button>
@@ -645,7 +629,7 @@ export function ScenarioEditor() {
               <>
                 <div className="mari-editor-panel">
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="text-xs font-semibold">Protagonist</span>
+                    <span className="text-xs font-semibold">{localizeUi("ui.scenarios.scenarioeditor.protagonist")}</span>
                     <button
                       onClick={() => {
                         setHasProtagonist(!hasProtagonist);
@@ -653,7 +637,7 @@ export function ScenarioEditor() {
                       }}
                       className="mari-chrome-control mari-chrome-control--compact"
                     >
-                      {hasProtagonist ? "Remove" : "Add protagonist"}
+                      {hasProtagonist ?localizeUi("settings.notifications.customSound.actions.remove") :localizeUi("ui.scenarios.scenarioeditor.addProtagonist")}
                     </button>
                   </div>
                   {hasProtagonist ? (
@@ -664,7 +648,7 @@ export function ScenarioEditor() {
                           setProtagonistName(event.target.value);
                           markDirty();
                         }}
-                        placeholder="Name"
+                        placeholder={localizeUi("settings.customGenerationParameters.name")}
                         className="mari-editor-field w-full px-2 py-1.5 text-xs"
                       />
                       <ExpandableTextarea
@@ -674,7 +658,7 @@ export function ScenarioEditor() {
                           markDirty();
                         }}
                         rows={2}
-                        placeholder="Who they are"
+                        placeholder={localizeUi("ui.scenarios.scenarioeditor.whoTheyAre")}
                       />
                       <ExpandableTextarea
                         value={protagonistBackstory}
@@ -683,7 +667,7 @@ export function ScenarioEditor() {
                           markDirty();
                         }}
                         rows={2}
-                        placeholder="Backstory"
+                        placeholder={localizeUi("chat.settings.inlineEditor.fields.backstory")}
                       />
                       <ExpandableTextarea
                         value={protagonistMotivation}
@@ -692,7 +676,7 @@ export function ScenarioEditor() {
                           markDirty();
                         }}
                         rows={2}
-                        placeholder="What drives them"
+                        placeholder={localizeUi("ui.scenarios.scenarioeditor.whatDrivesThem")}
                       />
                       <input
                         value={protagonistAppearance}
@@ -700,29 +684,27 @@ export function ScenarioEditor() {
                           setProtagonistAppearance(event.target.value);
                           markDirty();
                         }}
-                        placeholder="Appearance (optional)"
+                        placeholder={localizeUi("ui.scenarios.scenarioeditor.appearanceOptional")}
                         className="mari-editor-field w-full px-2 py-1.5 text-xs"
                       />
                       <ChipListField
-                        label="Traits"
+                        label={localizeUi("ui.game.gamecharactersheet.traits")}
                         values={protagonistTraits}
                         onChange={(next) => {
                           setProtagonistTraits(next);
                           markDirty();
                         }}
-                        placeholder="Add traits, comma separated"
+                        placeholder={localizeUi("ui.scenarios.scenarioeditor.addTraitsCommaSeparated")}
                       />
                     </div>
                   ) : (
-                    <p className="text-[0.6875rem] text-[var(--muted-foreground)]">
-                      No protagonist. Normal for a second-person scenario.
-                    </p>
+                    <p className="text-[0.6875rem] text-[var(--muted-foreground)]">{localizeUi("ui.scenarios.scenarioeditor.noProtagonistNormalForASecondPersonScenario")}</p>
                   )}
                 </div>
 
                 <div className="mari-editor-panel">
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="text-xs font-semibold">Supporting cast</span>
+                    <span className="text-xs font-semibold">{localizeUi("ui.scenarios.scenarioeditor.supportingCast")}</span>
                     <button
                       onClick={() => {
                         setNpcs([...npcs, blankNpc()]);
@@ -730,9 +712,7 @@ export function ScenarioEditor() {
                       }}
                       className="mari-chrome-control mari-chrome-control--compact"
                     >
-                      <Plus size="0.6875rem" />
-                      Add
-                    </button>
+                      <Plus size="0.6875rem" />{localizeUi("ui.characters.metadatatab.add")}</button>
                   </div>
                   <div className="flex flex-col gap-3">
                     {npcs.map((npc, index) => (
@@ -746,7 +726,7 @@ export function ScenarioEditor() {
                               setNpcs(next);
                               markDirty();
                             }}
-                            placeholder="Name"
+                            placeholder={localizeUi("settings.customGenerationParameters.name")}
                             className="mari-editor-field flex-1 px-2 py-1.5 text-xs"
                           />
                           <input
@@ -757,7 +737,7 @@ export function ScenarioEditor() {
                               setNpcs(next);
                               markDirty();
                             }}
-                            placeholder="Role"
+                            placeholder={localizeUi("ui.characters.advancedtab.role")}
                             className="mari-editor-field w-1/3 px-2 py-1.5 text-xs"
                           />
                           <button
@@ -766,7 +746,7 @@ export function ScenarioEditor() {
                               markDirty();
                             }}
                             className="mari-chrome-control mari-chrome-control--small p-1.5"
-                            aria-label="Remove cast member"
+                            aria-label={localizeUi("ui.scenarios.scenarioeditor.removeCastMember")}
                           >
                             <Trash2 size="0.75rem" className="text-[var(--destructive)]" />
                           </button>
@@ -779,7 +759,7 @@ export function ScenarioEditor() {
                             setNpcs(next);
                             markDirty();
                           }}
-                          placeholder="Description"
+                          placeholder={localizeUi("chat.settings.inlineEditor.fields.description")}
                           className="mari-editor-field mb-2 w-full px-2 py-1.5 text-xs"
                         />
                         <input
@@ -790,18 +770,16 @@ export function ScenarioEditor() {
                             setNpcs(next);
                             markDirty();
                           }}
-                          placeholder="Relationship to the protagonist"
+                          placeholder={localizeUi("ui.scenarios.scenarioeditor.relationshipToTheProtagonist")}
                           className="mari-editor-field w-full px-2 py-1.5 text-xs"
                         />
                         {npc.characterId && (
-                          <p className="mt-2 text-[0.625rem] text-[var(--muted-foreground)]">
-                            Linked to a character card.
-                          </p>
+                          <p className="mt-2 text-[0.625rem] text-[var(--muted-foreground)]">{localizeUi("ui.scenarios.scenarioeditor.linkedToACharacterCard")}</p>
                         )}
                       </div>
                     ))}
                     {npcs.length === 0 && (
-                      <p className="text-[0.6875rem] text-[var(--muted-foreground)]">No cast members yet.</p>
+                      <p className="text-[0.6875rem] text-[var(--muted-foreground)]">{localizeUi("ui.scenarios.scenarioeditor.noCastMembersYet")}</p>
                     )}
                   </div>
                 </div>
@@ -811,7 +789,7 @@ export function ScenarioEditor() {
             {activeTab === "opening" && (
               <>
                 <div className="mari-editor-panel">
-                  <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">First message</label>
+                  <label className="mb-1 block text-[0.6875rem] text-[var(--muted-foreground)]">{localizeUi("ui.scenarios.scenarioeditor.firstMessage")}</label>
                   <ExpandableTextarea
                     value={firstMessage}
                     onChange={(value) => {
@@ -819,13 +797,13 @@ export function ScenarioEditor() {
                       markDirty();
                     }}
                     rows={6}
-                    placeholder="The opening narration. Leave empty to open with a generated scene."
-                    title="First message"
+                    placeholder={localizeUi("ui.scenarios.scenarioeditor.theOpeningNarrationLeaveEmptyToOpenWithA")}
+                    title={localizeUi("ui.scenarios.scenarioeditor.firstMessage")}
                   />
                 </div>
                 <div className="mari-editor-panel">
                   <div className="mb-2 flex items-center justify-between">
-                    <label className="text-[0.6875rem] text-[var(--muted-foreground)]">Alternate greetings</label>
+                    <label className="text-[0.6875rem] text-[var(--muted-foreground)]">{localizeUi("ui.scenarios.scenarioeditor.alternateGreetings")}</label>
                     <button
                       onClick={() => {
                         setAlternateGreetings([...alternateGreetings, ""]);
@@ -833,9 +811,7 @@ export function ScenarioEditor() {
                       }}
                       className="mari-chrome-control mari-chrome-control--compact"
                     >
-                      <Plus size="0.6875rem" />
-                      Add
-                    </button>
+                      <Plus size="0.6875rem" />{localizeUi("ui.characters.metadatatab.add")}</button>
                   </div>
                   {!firstMessage.trim() && alternateGreetings.length > 0 && (
                     <button
@@ -845,9 +821,7 @@ export function ScenarioEditor() {
                         markDirty();
                       }}
                       className="mari-chrome-control mari-chrome-control--compact mb-2"
-                    >
-                      Promote the first alternate to the opening
-                    </button>
+                    >{localizeUi("ui.scenarios.scenarioeditor.promoteTheFirstAlternateToTheOpening")}</button>
                   )}
                   <div className="flex flex-col gap-2">
                     {alternateGreetings.map((greeting, index) => (
@@ -869,7 +843,7 @@ export function ScenarioEditor() {
                             markDirty();
                           }}
                           className="mari-chrome-control mari-chrome-control--small h-fit p-1.5"
-                          aria-label="Remove greeting"
+                          aria-label={localizeUi("ui.characters.dialoguetab.removeGreeting")}
                         >
                           <Trash2 size="0.75rem" className="text-[var(--destructive)]" />
                         </button>
@@ -882,9 +856,7 @@ export function ScenarioEditor() {
 
             {activeTab === "links" && (
               <div className="mari-editor-panel">
-                <label className="mb-2 block text-[0.6875rem] text-[var(--muted-foreground)]">
-                  Linked lorebooks
-                  <HelpTooltip text="Links travel as ids. On another install they only resolve if the same lorebook is already there." />
+                <label className="mb-2 block text-[0.6875rem] text-[var(--muted-foreground)]">{localizeUi("ui.scenarios.scenarioeditor.linkedLorebooks")}<HelpTooltip text={localizeUi("ui.scenarios.scenarioeditor.linksTravelAsIdsOnAnotherInstallTheyOnly")} />
                 </label>
                 <div className="mb-3 flex flex-wrap gap-1">
                   {lorebookIds.map((id) => {
@@ -896,15 +868,15 @@ export function ScenarioEditor() {
                           "mari-editor-chip",
                           missing ? "opacity-60" : "mari-editor-chip--accent",
                         )}
-                        title={missing ? "This lorebook is not on this install" : undefined}
+                        title={missing ?localizeUi("ui.scenarios.scenarioeditor.thisLorebookIsNotOnThisInstall") : undefined}
                       >
-                        {missing ? `Missing (${id})` : lorebookNameById.get(id)}
+                        {missing ?localizeUi("ui.scenarios.scenarioeditor.missingValue1", { value1: id }) : lorebookNameById.get(id)}
                         <button
                           onClick={() => {
                             setLorebookIds(lorebookIds.filter((value) => value !== id));
                             markDirty();
                           }}
-                          aria-label="Unlink lorebook"
+                          aria-label={localizeUi("ui.scenarios.scenarioeditor.unlinkLorebook")}
                         >
                           <X size="0.625rem" />
                         </button>
@@ -912,7 +884,7 @@ export function ScenarioEditor() {
                     );
                   })}
                   {lorebookIds.length === 0 && (
-                    <p className="text-[0.6875rem] text-[var(--muted-foreground)]">No lorebooks linked.</p>
+                    <p className="text-[0.6875rem] text-[var(--muted-foreground)]">{localizeUi("ui.scenarios.scenarioeditor.noLorebooksLinked")}</p>
                   )}
                 </div>
                 <select
@@ -924,9 +896,9 @@ export function ScenarioEditor() {
                     markDirty();
                   }}
                   className="mari-editor-field w-full px-2 py-1.5 text-xs"
-                  aria-label="Link a lorebook"
+                  aria-label={localizeUi("ui.scenarios.scenarioeditor.linkALorebook")}
                 >
-                  <option value="">Link a lorebook…</option>
+                  <option value="">{localizeUi("ui.scenarios.scenarioeditor.linkALorebook_f582099")}</option>
                   {lorebooks
                     .filter((book) => !lorebookIds.includes(book.id))
                     .map((book) => (
@@ -943,8 +915,8 @@ export function ScenarioEditor() {
 
       <ExportFormatDialog
         open={showExportDialog}
-        title="Export Scenario"
-        description="Native keeps every Marinara field. Compatible JSON matches the scenario shape other roleplay tools read."
+        title={localizeUi("ui.scenarios.scenarioeditor.exportScenario")}
+        description={localizeUi("ui.scenarios.scenarioeditor.nativeKeepsEveryMarinaraFieldCompatibleJsonMatchesThe")}
         nativeDescription="Keeps the structured setting, cast links, play hints and AI attribution."
         compatibleDescription="Flattens the setting to a single field for tools that read the folderless scenario shape."
         notice={

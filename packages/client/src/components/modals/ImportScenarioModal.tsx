@@ -15,6 +15,7 @@ import { Download, FileJson, CheckCircle, XCircle, Loader2, Link2Off } from "luc
 import { useQueryClient } from "@tanstack/react-query";
 import { isCompatibleScenarioShape } from "@marinara-engine/shared";
 import { api } from "../../lib/api-client";
+import { useTranslation as useUiTranslation } from "react-i18next";
 
 interface Props {
   open: boolean;
@@ -29,6 +30,7 @@ interface ImportResultRow {
 }
 
 export function ImportScenarioModal({ open, onClose }: Props) {
+  const { t: localizeUi } = useUiTranslation();
   const fileRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "done">("idle");
   const [results, setResults] = useState<ImportResultRow[]>([]);
@@ -112,7 +114,7 @@ export function ImportScenarioModal({ open, onClose }: Props) {
   };
 
   return (
-    <Modal open={open} onClose={close} title="Import Scenario">
+    <Modal open={open} onClose={close} title={localizeUi("ui.modals.importscenariomodal.importScenario")}>
       <div className="flex flex-col gap-4">
         <div
           onDrop={handleDrop}
@@ -129,10 +131,9 @@ export function ImportScenarioModal({ open, onClose }: Props) {
           }`}
         >
           <Download size="2rem" className={dragOver ? "text-[var(--primary)]" : "text-[var(--muted-foreground)]"} />
-          <p className="text-sm font-medium">Drop one or more scenario files here, or click to browse</p>
+          <p className="text-sm font-medium">{localizeUi("ui.modals.importscenariomodal.dropOneOrMoreScenarioFilesHereOrClick")}</p>
           <span className="flex items-center gap-1 rounded-full bg-[var(--secondary)] px-2.5 py-1 text-xs text-[var(--muted-foreground)]">
-            <FileJson size="0.75rem" /> JSON
-          </span>
+            <FileJson size="0.75rem" /> {localizeUi("ui.agents.tooleditor.json")}</span>
         </div>
 
         <input
@@ -149,8 +150,7 @@ export function ImportScenarioModal({ open, onClose }: Props) {
 
         {status === "loading" && (
           <div className="flex items-center gap-2 rounded-lg bg-[var(--secondary)] p-3 text-xs">
-            <Loader2 size="0.875rem" className="animate-spin text-[var(--primary)]" /> Importing…
-          </div>
+            <Loader2 size="0.875rem" className="animate-spin text-[var(--primary)]" /> {localizeUi("ui.panels.backgroundpicker.importing")}</div>
         )}
 
         {status === "done" && results.length > 0 && (
@@ -167,9 +167,8 @@ export function ImportScenarioModal({ open, onClose }: Props) {
               ) : (
                 <XCircle size="0.875rem" />
               )}
-              {results.filter((result) => result.success).length} succeeded,{" "}
-              {results.filter((result) => !result.success).length} failed
-            </div>
+              {results.filter((result) => result.success).length} {localizeUi("ui.modals.importcharactermodal.succeeded")}{" "}
+              {results.filter((result) => !result.success).length} {localizeUi("ui.modals.importcharactermodal.failed")}</div>
             <div className="max-h-52 overflow-y-auto rounded-lg border border-[var(--border)]">
               {results.map((result) => (
                 <div
@@ -188,7 +187,7 @@ export function ImportScenarioModal({ open, onClose }: Props) {
                       <div className="mt-1 flex items-start gap-1 text-[0.6875rem] text-amber-500">
                         <Link2Off size="0.6875rem" className="mt-0.5 shrink-0" />
                         <span>
-                          {result.droppedLinks.length} link(s) could not be found here and were dropped:{" "}
+                          {result.droppedLinks.length} {localizeUi("ui.modals.importscenariomodal.linkSCouldNotBeFoundHereAndWere")}{" "}
                           {result.droppedLinks.map((link) => link.ref).join(", ")}
                         </span>
                       </div>
@@ -204,9 +203,7 @@ export function ImportScenarioModal({ open, onClose }: Props) {
           <button
             onClick={close}
             className="rounded-lg px-4 py-2 text-xs font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]"
-          >
-            Close
-          </button>
+          >{localizeUi("capabilities.actions.close")}</button>
         </div>
       </div>
     </Modal>

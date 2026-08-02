@@ -55,6 +55,7 @@ import { SmoothFolderContent } from "../ui/SmoothFolderContent";
 import { TouchDragHandle } from "../ui/TouchDragHandle";
 import { useLocalizedUiText } from "../../localization/use-localized-ui-text";
 import { PanelLoadMoreBar } from "./PanelLoadMoreBar";
+import { useTranslation as useUiTranslation } from "react-i18next";
 
 const FAVORITE_FILTERS: Array<{ id: CharacterPanelFavoriteFilter; label: string }> = [
   { id: "all", label: "All" },
@@ -88,6 +89,7 @@ function usePanelMobileOverlay() {
 }
 
 export function ScenariosPanel() {
+  const { t: localizeUi } = useUiTranslation();
   const localize = useLocalizedUiText();
   const searchQuery = useUIStore((s) => s.scenarioPanelSearch);
   const setSearchQuery = useUIStore((s) => s.setScenarioPanelSearch);
@@ -140,9 +142,9 @@ export function ScenariosPanel() {
     async (tag: string) => {
       if (
         !(await showConfirmDialog({
-          title: "Remove tag",
-          message: `Remove "${tag}" from all scenarios?`,
-          confirmLabel: "Remove",
+          title:localizeUi("ui.panels.scenariospanel.removeTag"),
+          message:localizeUi("ui.panels.scenariospanel.removeValue1FromAllScenarios", { value1: tag }),
+          confirmLabel:localizeUi("settings.notifications.customSound.actions.remove"),
           tone: "destructive",
         }))
       ) {
@@ -156,10 +158,10 @@ export function ScenariosPanel() {
         }
         if (activeTag === tag) setActiveTag(null);
       } catch {
-        toast.error("Failed to remove tag from some scenarios");
+        toast.error(localizeUi("ui.panels.scenariospanel.failedToRemoveTagFromSomeScenarios"));
       }
     },
-    [sort, updateScenario, activeTag, setActiveTag],
+    [sort, updateScenario, activeTag, setActiveTag, localizeUi],
   );
 
   // Search and favourites are applied server-side; the tag filter is local
@@ -206,13 +208,13 @@ export function ScenariosPanel() {
         { ids: [...selectedScenarioIds], format: "native" },
         "marinara-scenarios.zip",
       );
-      toast.success(`Exported ${selectedScenarioIds.size} scenario(s)`);
+      toast.success(localizeUi("ui.panels.scenariospanel.exportedValue1ScenarioS", { value1: selectedScenarioIds.size }));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to export scenarios");
+      toast.error(error instanceof Error ? error.message :localizeUi("ui.panels.scenariospanel.failedToExportScenarios"));
     } finally {
       setExportingSelected(false);
     }
-  }, [selectedScenarioIds]);
+  }, [selectedScenarioIds, localizeUi]);
 
   const handleDeleteSelected = useCallback(async () => {
     const ids = [...selectedScenarioIds];
@@ -220,9 +222,9 @@ export function ScenariosPanel() {
 
     if (
       !(await showConfirmDialog({
-        title: "Delete scenarios",
-        message: `Delete ${ids.length} scenario(s)? This cannot be undone.`,
-        confirmLabel: "Delete",
+        title:localizeUi("ui.panels.scenariospanel.deleteScenarios"),
+        message:localizeUi("ui.panels.scenariospanel.deleteValue1ScenarioSThisCannotBeUndone", { value1: ids.length }),
+        confirmLabel:localizeUi("lorebook.editor.batch.delete"),
         tone: "destructive",
       }))
     ) {
@@ -233,14 +235,14 @@ export function ScenariosPanel() {
     const failedIds = ids.filter((_, index) => results[index]?.status === "rejected");
     const deletedCount = ids.length - failedIds.length;
 
-    if (deletedCount > 0) toast.success(`Deleted ${deletedCount} scenario(s)`);
+    if (deletedCount > 0) toast.success(localizeUi("ui.panels.scenariospanel.deletedValue1ScenarioS", { value1: deletedCount }));
     if (failedIds.length > 0) {
       setSelectedScenarioIds(new Set(failedIds));
-      toast.error(`Failed to delete ${failedIds.length} scenario(s)`);
+      toast.error(localizeUi("ui.panels.scenariospanel.failedToDeleteValue1ScenarioS", { value1: failedIds.length }));
       return;
     }
     exitSelectionMode();
-  }, [selectedScenarioIds, deleteScenario, exitSelectionMode]);
+  }, [selectedScenarioIds, deleteScenario, exitSelectionMode, localizeUi]);
 
   const handlePickScenarioImage = useCallback((scenarioId: string) => {
     imageTargetScenarioIdRef.current = scenarioId;
@@ -254,13 +256,13 @@ export function ScenariosPanel() {
     async (scenario: Scenario) => {
       try {
         const created = await duplicateScenario.mutateAsync(scenario.id);
-        toast.success(`Copied ${scenario.name}`);
+        toast.success(localizeUi("ui.panels.scenariospanel.copiedValue1", { value1: scenario.name }));
         openScenarioDetail(created.id);
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to copy scenario");
+        toast.error(error instanceof Error ? error.message :localizeUi("ui.panels.scenariospanel.failedToCopyScenario"));
       }
     },
-    [duplicateScenario, openScenarioDetail],
+    [duplicateScenario, openScenarioDetail, localizeUi],
   );
 
   const handleScenarioImageSelected = useCallback(
@@ -271,7 +273,7 @@ export function ScenariosPanel() {
       imageTargetScenarioIdRef.current = null;
 
       if (!file.type.startsWith("image/")) {
-        toast.error("Please choose an image file");
+        toast.error(localizeUi("ui.panels.scenariospanel.pleaseChooseAnImageFile"));
         return;
       }
 
@@ -281,14 +283,14 @@ export function ScenariosPanel() {
         if (!image) return;
         try {
           await uploadScenarioImage.mutateAsync({ id: scenarioId, image });
-          toast.success("Scenario image updated");
+          toast.success(localizeUi("ui.panels.scenariospanel.scenarioImageUpdated"));
         } catch (error) {
-          toast.error(error instanceof Error ? error.message : "Failed to update scenario image");
+          toast.error(error instanceof Error ? error.message :localizeUi("ui.panels.scenariospanel.failedToUpdateScenarioImage"));
         }
       };
       reader.readAsDataURL(file);
     },
-    [uploadScenarioImage],
+    [uploadScenarioImage, localizeUi],
   );
 
   const handleToggleFavorite = useCallback(
@@ -388,9 +390,9 @@ export function ScenariosPanel() {
         onDelete={async () => {
           if (
             await showConfirmDialog({
-              title: "Delete scenario",
-              message: `Delete ${scenario.name}? This cannot be undone.`,
-              confirmLabel: "Delete",
+              title:localizeUi("ui.panels.scenariospanel.deleteScenario"),
+              message:localizeUi("ui.panels.scenariospanel.deleteValue1ThisCannotBeUndone", { value1: scenario.name }),
+              confirmLabel:localizeUi("lorebook.editor.batch.delete"),
               tone: "destructive",
             })
           ) {
@@ -435,6 +437,7 @@ export function ScenariosPanel() {
       selectionMode,
       startScenarioTouchDrag,
       toggleSelection,
+      localizeUi,
     ],
   );
 
@@ -452,14 +455,14 @@ export function ScenariosPanel() {
         <button
           onClick={() => openModal("create-scenario")}
           className="mari-panel-gradient-button mari-panel-gradient--scenarios flex-1"
-          title="New scenario"
+          title={localizeUi("ui.panels.scenariospanel.newScenario")}
         >
           <Plus size="0.8125rem" />
         </button>
         <button
           onClick={() => openModal("import-scenario")}
           className="mari-chrome-control mari-chrome-control--primary flex-1"
-          title="Import scenario"
+          title={localizeUi("ui.panels.scenariospanel.importScenario")}
         >
           <Download size="0.8125rem" />
         </button>
@@ -469,7 +472,7 @@ export function ScenariosPanel() {
             "mari-chrome-control mari-chrome-control--primary flex-1",
             selectionMode && "mari-chrome-control--selected",
           )}
-          title="Select scenarios"
+          title={localizeUi("ui.panels.scenariospanel.selectScenarios")}
         >
           <Check size="0.8125rem" />
         </button>
@@ -493,7 +496,7 @@ export function ScenariosPanel() {
             value={sort}
             onChange={(event) => setSort(event.target.value as ScenarioPanelSort)}
             className="mari-chrome-field mari-chrome-sort-field mari-accent-animated h-10 rounded-xl pl-2 pr-7 text-xs md:h-9"
-            aria-label="Sort scenarios"
+            aria-label={localizeUi("ui.panels.scenariospanel.sortScenarios")}
           >
             {SORT_OPTIONS.map((option) => (
               <option key={option.id} value={option.id}>
@@ -510,12 +513,10 @@ export function ScenariosPanel() {
 
       <div className="flex gap-1">
         <button onClick={handleCreateFolder} className="mari-chrome-control mari-chrome-control--small flex-1 justify-start">
-          <FolderPlus size="0.75rem" />
-          New Folder
-        </button>
+          <FolderPlus size="0.75rem" />{localizeUi("ui.panels.backgroundpicker.newFolder")}</button>
       </div>
       {scenarioFolders.length > 0 && (
-        <p className="mari-folder-helper">Drag and drop scenarios to folders, double-click or double-tap to rename</p>
+        <p className="mari-folder-helper">{localizeUi("ui.panels.scenariospanel.dragAndDropScenariosToFoldersDoubleClickOr")}</p>
       )}
 
       <div className="flex flex-wrap items-center gap-1">
@@ -535,9 +536,7 @@ export function ScenariosPanel() {
           onClick={() => setTagsExpanded(!tagsExpanded)}
           className={cn("mari-chrome-control mari-chrome-control--compact", activeTag && "mari-chrome-control--selected")}
         >
-          <Tag size="0.6875rem" />
-          Tags
-        </button>
+          <Tag size="0.6875rem" />{localizeUi("ui.characters.metadatatab.tags")}</button>
       </div>
 
       {tagsExpanded && (
@@ -547,9 +546,7 @@ export function ScenariosPanel() {
               onClick={() => setActiveTag(null)}
               className="mari-chrome-control mari-chrome-control--compact mari-chrome-control--danger"
             >
-              <X size="0.6875rem" />
-              Clear
-            </button>
+              <X size="0.6875rem" />{localizeUi("lorebook.editor.batch.clear")}</button>
           )}
           {allTags.map((tag) => (
             <div
@@ -572,8 +569,8 @@ export function ScenariosPanel() {
                   void handleDeleteTag(tag);
                 }}
                 className="opacity-0 transition-opacity group-hover/tag:opacity-100"
-                title="Remove tag from all scenarios"
-                aria-label="Remove tag from all scenarios"
+                title={localizeUi("ui.panels.scenariospanel.removeTagFromAllScenarios")}
+                aria-label={localizeUi("ui.panels.scenariospanel.removeTagFromAllScenarios")}
               >
                 <X size="0.625rem" />
               </button>
@@ -674,8 +671,8 @@ export function ScenariosPanel() {
                     }
                   }}
                   className="mari-chrome-control mari-chrome-control--small p-1.5"
-                  title="Delete folder"
-                  aria-label="Delete folder"
+                  title={localizeUi("ui.panels.backgroundpicker.deleteFolder")}
+                  aria-label={localizeUi("ui.panels.backgroundpicker.deleteFolder")}
                 >
                   <Trash2 size="0.75rem" className="text-[var(--destructive)]" />
                 </button>
@@ -687,9 +684,7 @@ export function ScenariosPanel() {
               innerClassName="flex flex-col gap-0.5"
             >
               {folderItems.length === 0 ? (
-                <p className="px-2 py-3 text-[0.6875rem] italic text-[var(--muted-foreground)]">
-                  Drop scenarios here
-                </p>
+                <p className="px-2 py-3 text-[0.6875rem] italic text-[var(--muted-foreground)]">{localizeUi("ui.panels.scenariospanel.dropScenariosHere")}</p>
               ) : (
                 folderItems.map(renderScenarioRow)
               )}
@@ -709,10 +704,8 @@ export function ScenariosPanel() {
           <div className="mari-panel-gradient-surface mari-panel-gradient--scenarios flex h-12 w-12 items-center justify-center rounded-2xl shadow-lg">
             <Clapperboard size="1.25rem" />
           </div>
-          <p className="text-sm font-medium">No scenarios yet</p>
-          <p className="max-w-[15rem] text-xs text-[var(--muted-foreground)]">
-            A scenario is a reusable setting, cast and opening you can start again and again.
-          </p>
+          <p className="text-sm font-medium">{localizeUi("ui.panels.scenariospanel.noScenariosYet")}</p>
+          <p className="max-w-[15rem] text-xs text-[var(--muted-foreground)]">{localizeUi("ui.panels.scenariospanel.aScenarioIsAReusableSettingCastAndOpening")}</p>
         </div>
       ) : (
         <>
@@ -732,9 +725,7 @@ export function ScenariosPanel() {
                 handleScenarioDrop(null, ids);
               }}
               className="rounded-xl border border-dashed border-[var(--border)] px-3 py-2 text-center text-[0.6875rem] text-[var(--muted-foreground)]"
-            >
-              Drop here to remove from folder
-            </div>
+            >{localizeUi("ui.panels.scenariospanel.dropHereToRemoveFromFolder")}</div>
           )}
           <div className="stagger-children flex flex-col gap-0.5">{rootScenarios.map(renderScenarioRow)}</div>
         </>
@@ -745,7 +736,7 @@ export function ScenariosPanel() {
           onLoadMore={() => void scenarioPages.fetchNextPage()}
           disabled={scenarioPages.isFetchingNextPage}
         >
-          {scenarioPages.isFetchingNextPage ? "Loading…" : "Load more"}
+          {scenarioPages.isFetchingNextPage ?localizeUi("ui.panels.ttsconfigcard.loading") :localizeUi("ui.gameAssets.assetgrid.loadMore")}
         </PanelLoadMoreBar>
       )}
 
@@ -795,6 +786,7 @@ function ScenarioRow({
   onDragEnd,
   onTouchStart,
 }: ScenarioRowProps) {
+  const { t: localizeUi } = useUiTranslation();
   const imageClasses =
     "relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg mari-panel-gradient-surface mari-panel-gradient--scenarios";
   const imageContent = scenario.imagePath ? (
@@ -834,7 +826,7 @@ function ScenarioRow({
             "flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
             isSelected ? "border-[var(--primary)] bg-[var(--primary)]" : "border-[var(--border)]",
           )}
-          aria-label="Select scenario"
+          aria-label={localizeUi("ui.panels.scenariorow.selectScenario")}
         >
           {isSelected && <Check size="0.625rem" className="text-white" />}
         </button>
@@ -851,8 +843,8 @@ function ScenarioRow({
             onImagePick();
           }}
           className={cn(imageClasses, "transition-transform hover:scale-105")}
-          title="Change scenario image"
-          aria-label="Change scenario image"
+          title={localizeUi("ui.panels.scenariorow.changeScenarioImage")}
+          aria-label={localizeUi("ui.panels.scenariorow.changeScenarioImage")}
         >
           {imageContent}
           <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
@@ -877,8 +869,8 @@ function ScenarioRow({
               onToggleFavorite();
             }}
             className="mari-chrome-control mari-chrome-control--small p-1.5 active:scale-90"
-            title="Toggle favorite"
-            aria-label="Toggle favorite"
+            title={localizeUi("ui.panels.scenariorow.toggleFavorite")}
+            aria-label={localizeUi("ui.panels.scenariorow.toggleFavorite")}
           >
             <Star
               size="0.75rem"
@@ -893,8 +885,8 @@ function ScenarioRow({
               onDuplicate();
             }}
             className="mari-chrome-control mari-chrome-control--small p-1.5 active:scale-90"
-            title="Duplicate"
-            aria-label="Duplicate"
+            title={localizeUi("ui.presets.sectionstab.duplicate")}
+            aria-label={localizeUi("ui.presets.sectionstab.duplicate")}
           >
             <Copy size="0.75rem" className="text-[var(--muted-foreground)]" />
           </button>
@@ -904,8 +896,8 @@ function ScenarioRow({
               onDelete();
             }}
             className="mari-chrome-control mari-chrome-control--small p-1.5 active:scale-90"
-            title="Delete"
-            aria-label="Delete"
+            title={localizeUi("lorebook.editor.batch.delete")}
+            aria-label={localizeUi("lorebook.editor.batch.delete")}
           >
             <Trash2 size="0.75rem" className="text-[var(--destructive)]" />
           </button>

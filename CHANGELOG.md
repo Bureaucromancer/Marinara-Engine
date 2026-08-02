@@ -4,6 +4,10 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 
 ## [Unreleased]
 
+### Added
+
+- Added Scenarios: a library of reusable settings, each with its own cast, opening message, play hints and linked lorebooks, with folders, tags, favourites, and JSON import and export in both a full-fidelity Marinara format and a flatter format compatible with other roleplay tools. Scenarios are stored and editable in this release; starting a chat or game from one arrives later.
+
 ## [2.4.0]
 
 ### Added
