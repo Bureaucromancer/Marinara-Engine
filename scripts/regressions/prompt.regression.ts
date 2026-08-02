@@ -3261,6 +3261,9 @@ const cases: RegressionCase[] = [
         editorSource,
         /\.\.\.\(localMaxTokens !== "" \? \{ maxTokens: clampAgentMaxTokens\(localMaxTokens\) \} : \{\}\)/u,
       );
+      const sharedScopeIndex = storyboardEditorSource.indexOf('id="shared"');
+      const roleplayScopeIndex = storyboardEditorSource.indexOf('id="roleplay"');
+      const gameScopeIndex = storyboardEditorSource.indexOf('id="game"');
       const roleplayLibraryIndex = storyboardEditorSource.indexOf("ui.agents.storyboard.roleplayPromptLibrary");
       const sharedFormatterIndex = storyboardEditorSource.indexOf("ui.agents.storyboard.sharedProviderFormatters");
       const defaultImagePromptIndex = storyboardEditorSource.indexOf("ui.agents.storyboard.defaultImagePrompt");
@@ -3268,8 +3271,22 @@ const cases: RegressionCase[] = [
       assert.ok(roleplayLibraryIndex >= 0, "Storyboard editor should expose a separate Roleplay prompt library");
       assert.ok(sharedFormatterIndex >= 0, "Storyboard editor should identify shared provider formatters");
       assert.ok(
-        roleplayLibraryIndex < sharedFormatterIndex && sharedFormatterIndex < defaultImagePromptIndex,
-        "Roleplay planning prompts should stay separate from the shared provider formatters",
+        sharedScopeIndex >= 0 && sharedScopeIndex < roleplayScopeIndex && roleplayScopeIndex < gameScopeIndex,
+        "Storyboard editor should present Shared, Roleplay, and Game Mode scopes in that order",
+      );
+      const sharedScopeSource = storyboardEditorSource.slice(sharedScopeIndex, roleplayScopeIndex);
+      const roleplayScopeSource = storyboardEditorSource.slice(roleplayScopeIndex, gameScopeIndex);
+      const gameScopeSource = storyboardEditorSource.slice(gameScopeIndex);
+      assert.match(sharedScopeSource, /settings\.imageConnectionId/u);
+      assert.match(sharedScopeSource, /settings\.autoGenerateMode/u);
+      assert.match(sharedScopeSource, /settings\.illustrationTemplateId/u);
+      assert.match(roleplayScopeSource, /settings\.runInterval/u);
+      assert.match(roleplayScopeSource, /settings\.roleplayEpisodeTemplateId/u);
+      assert.match(gameScopeSource, /settings\.illustrationPlannerTemplateId/u);
+      assert.match(gameScopeSource, /settings\.viewerDisplayMode/u);
+      assert.ok(
+        sharedFormatterIndex < roleplayLibraryIndex && defaultImagePromptIndex < roleplayLibraryIndex,
+        "Shared provider formatters should stay inside Shared before Roleplay prompts",
       );
       assert.match(editorSource, /includeCharacterAppearance:\s*settings\.includeCharacterAppearance/u);
       assert.match(editorSource, /useAvatarReferences:\s*settings\.useAvatarReferences/u);
