@@ -2,6 +2,7 @@
 // Layout: Main App Shell (Discord-like three-column)
 // ──────────────────────────────────────────────
 import { ChatSidebar } from "./ChatSidebar";
+import { useQueryClient } from "@tanstack/react-query";
 import { TopBar } from "./TopBar";
 import { SpotifyMobileWidget } from "../spotify/SpotifyMiniPlayer";
 import { YouTubeMobileWidget } from "../chat/YouTubePlayer";
@@ -22,6 +23,7 @@ import {
 import { useChatStore } from "../../stores/chat.store";
 import { useBackgroundAutonomousPolling } from "../../hooks/use-background-autonomous";
 import { useClearAutonomousUnread, useUpdateChatMetadata } from "../../hooks/use-chats";
+import { lorebookKeys } from "../../hooks/use-lorebooks";
 import { useIdleDetection } from "../../hooks/use-idle-detection";
 import { dispatchChatVisualViewportChange } from "../../hooks/use-visual-viewport-chat-bottom";
 import { usePageActivity } from "../../hooks/use-page-activity";
@@ -223,6 +225,7 @@ function SidePanelFallback() {
 
 export function AppShell() {
   const { t: localizeUi } = useUiTranslation();
+  const queryClient = useQueryClient();
   const capabilityAgents = useCapabilityAgentRegistry();
   const installedCapabilities = useCapabilityClientModules();
   const updateChatMetadata = useUpdateChatMetadata();
@@ -355,6 +358,17 @@ export function AppShell() {
   const openAgentCatalog = useUIStore((s) => s.openAgentCatalog);
   const setTrackerPanelOpen = useUIStore((s) => s.setTrackerPanelOpen);
   const restoreTrackerPanelOpenForChat = useUIStore((s) => s.restoreTrackerPanelOpenForChat);
+  const refreshLorebooks = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: lorebookKeys.all }),
+    [queryClient],
+  );
+  const openSpatialLorebook = useCallback(
+    (lorebookId: string) => {
+      void refreshLorebooks();
+      openLorebookDetail(lorebookId);
+    },
+    [openLorebookDetail, refreshLorebooks],
+  );
   const [sidebarDragWidth, setSidebarDragWidth] = useState<number | null>(null);
   const [rightPanelDragWidth, setRightPanelDragWidth] = useState<number | null>(null);
   const sidebarDragWidthRef = useRef<number | null>(null);
@@ -754,7 +768,8 @@ export function AppShell() {
           debugMode,
           confirmAction: showConfirmDialog,
           onDirtyChange: setEditorDirty,
-          onOpenLorebook: openLorebookDetail,
+          onOpenLorebook: openSpatialLorebook,
+          onLorebooksChanged: refreshLorebooks,
         }}
       />
     ) : (
@@ -1478,7 +1493,8 @@ export function AppShell() {
             confirmAction: showConfirmDialog,
             onClearPendingDraftReview: clearPendingSpatialMapDraftReview,
             onDirtyChange: setEditorDirty,
-            onOpenLorebook: openLorebookDetail,
+            onOpenLorebook: openSpatialLorebook,
+            onLorebooksChanged: refreshLorebooks,
             onClose: closeSpatialMapDetail,
           }}
         />
