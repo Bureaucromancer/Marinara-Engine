@@ -469,9 +469,7 @@ export function StoryboardAgentSettingsPanel({
             defaults={defaults.illustrationTemplates}
             prefix="storyboard-image"
             onChange={(templates) => {
-              const selected = templates.some((template) => template.id === settings.illustrationTemplateId)
-                ? settings.illustrationTemplateId
-                : (templates[0]?.id ?? null);
+              const selected = preserveTemplateSelection(templates, settings.illustrationTemplateId);
               update({ illustrationTemplates: templates, illustrationTemplateId: selected });
             }}
           />
@@ -482,9 +480,7 @@ export function StoryboardAgentSettingsPanel({
             defaults={defaults.videoTemplates}
             prefix="storyboard-video"
             onChange={(templates) => {
-              const selected = templates.some((template) => template.id === settings.videoTemplateId)
-                ? settings.videoTemplateId
-                : (templates[0]?.id ?? null);
+              const selected = preserveTemplateSelection(templates, settings.videoTemplateId);
               update({ videoTemplates: templates, videoTemplateId: selected });
             }}
           />
