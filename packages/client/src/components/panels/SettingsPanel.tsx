@@ -5342,6 +5342,8 @@ function AddonsSettings() {
   );
 }
 
+const THEME_PREVIEW_DEBOUNCE_MS = 300;
+
 function ThemesSettings({ showIntro = true }: { showIntro?: boolean } = {}) {
   const { t: localizeUi } = useUiTranslation();
   const { data: syncedThemes = [], isLoading } = useThemes();
@@ -5359,26 +5361,39 @@ function ThemesSettings({ showIntro = true }: { showIntro?: boolean } = {}) {
   const [themeCss, setThemeCss] = useState("");
   const [livePreview, setLivePreview] = useState(true);
 
-  // Inject live preview CSS
+  // Replacing a dense app-level stylesheet invalidates styles across the full
+  // document. Keep typing immediate and apply only the settled preview instead
+  // of forcing that work for every character entered.
   useEffect(() => {
+    const previewStyleId = "marinara-css-editor-preview";
+    const existingStyle = document.getElementById(previewStyleId) as HTMLStyleElement | null;
+
     if (!editorOpen || !livePreview) {
-      const el = document.getElementById("marinara-css-editor-preview");
-      if (el) el.textContent = "";
+      existingStyle?.remove();
       return;
     }
-    let style = document.getElementById("marinara-css-editor-preview") as HTMLStyleElement | null;
-    if (!style) {
-      style = document.createElement("style");
-      style.id = "marinara-css-editor-preview";
+
+    const style = existingStyle ?? document.createElement("style");
+    if (!existingStyle) {
+      style.id = previewStyleId;
+      document.head.appendChild(style);
     }
-    style.textContent = sanitizeAppCss(themeCss);
-    // Always (re-)append so it's the last <style> in <head>,
-    // overriding the active-theme injector's saved CSS.
-    document.head.appendChild(style);
-    return () => {
-      style!.textContent = "";
-    };
+
+    const previewTimeout = window.setTimeout(() => {
+      style.textContent = sanitizeAppCss(themeCss);
+      // Keep the preview after the active-theme injector's saved CSS.
+      document.head.appendChild(style);
+    }, THEME_PREVIEW_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(previewTimeout);
   }, [editorOpen, livePreview, themeCss]);
+
+  useEffect(
+    () => () => {
+      document.getElementById("marinara-css-editor-preview")?.remove();
+    },
+    [],
+  );
 
   const openNewTheme = useCallback(() => {
     setEditingId(null);
