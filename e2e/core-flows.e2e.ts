@@ -244,6 +244,60 @@ test("turning off the custom mouse pointer persists immediately and after reload
     .toBeNull();
 });
 
+test("custom theme live preview batches stylesheet updates while typing", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[data-tour="panel-settings"]').click();
+  await page.getByRole("tab", { name: "Addons" }).click();
+  await page.getByRole("button", { name: "Create Theme" }).click();
+
+  const themeCssEditor = page.getByPlaceholder("/* Enter your CSS here... */");
+  await expect(themeCssEditor).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => document.getElementById("marinara-css-editor-preview")?.textContent?.length ?? 0))
+    .toBeGreaterThan(0);
+
+  await page.evaluate(() => {
+    const previewStyle = document.getElementById("marinara-css-editor-preview");
+    if (!previewStyle) throw new Error("Expected the custom theme preview stylesheet");
+
+    const trackedWindow = window as Window & {
+      __themePreviewMutationCount?: number;
+      __themePreviewObserver?: MutationObserver;
+    };
+    trackedWindow.__themePreviewMutationCount = 0;
+    trackedWindow.__themePreviewObserver = new MutationObserver(() => {
+      trackedWindow.__themePreviewMutationCount = (trackedWindow.__themePreviewMutationCount ?? 0) + 1;
+    });
+    trackedWindow.__themePreviewObserver.observe(previewStyle, {
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+  });
+
+  const previewMarker = "\n:root { --issue-4452-preview: ready; }";
+  await themeCssEditor.pressSequentially(previewMarker, { delay: 2 });
+  expect(
+    await page.evaluate(
+      () =>
+        (window as Window & { __themePreviewMutationCount?: number }).__themePreviewMutationCount ?? 0,
+    ),
+  ).toBe(0);
+
+  await expect
+    .poll(() => page.evaluate(() => document.getElementById("marinara-css-editor-preview")?.textContent ?? ""))
+    .toContain("--issue-4452-preview: ready");
+  expect(
+    await page.evaluate(
+      () =>
+        (window as Window & { __themePreviewMutationCount?: number }).__themePreviewMutationCount ?? 0,
+    ),
+  ).toBe(1);
+
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect.poll(() => page.locator("#marinara-css-editor-preview").count()).toBe(0);
+});
+
 test("gradient Accent Pulse keeps animating while Appearance settings are open", async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.includes("desktop"), "Accent Pulse preview is covered on desktop.");
 
@@ -2241,7 +2295,7 @@ test("Character and Persona avatar actions stay separated and visually balanced"
     version: string,
   ) => {
     await page.locator(`[data-tour="panel-${panel}"]`).click();
-    await page.getByText(resourceName, { exact: true }).first().click();
+    await page.getByText(resourceName, { exact: true }).first().click({ position: { x: 2, y: 2 } });
 
     const editor = page.locator(".mari-editor-shell");
     await expect(editor).toBeVisible();
