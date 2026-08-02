@@ -199,6 +199,7 @@ import {
   buildInitialAgentAddSetupState,
 } from "../../packages/client/src/components/chat/AgentAddSetupFields.js";
 import { resolveSpriteTransition } from "../../packages/client/src/lib/sprite-transition.js";
+import { resolveSpriteExpressionState } from "../../packages/client/src/lib/sprite-expression-state.js";
 import {
   parseIllustratorPromptReviewOverride,
   resolveIllustratorPromptSubmission,
@@ -309,6 +310,36 @@ assert.equal(shouldSuppressAutonomousMessages("dnd"), true);
 assert.equal(resolveSpriteTransition("full-body", "none"), "crossfade");
 assert.equal(resolveSpriteTransition("full-body", "shake"), "shake");
 assert.equal(resolveSpriteTransition("expressions", "none"), "none");
+assert.deepEqual(
+  resolveSpriteExpressionState([
+    { extra: { spriteExpressions: { "character-a": "happy" } } },
+    { extra: {} },
+  ]),
+  { "character-a": "happy" },
+);
+assert.deepEqual(
+  resolveSpriteExpressionState(
+    [
+      { extra: { spriteExpressions: { "character-a": "happy" } } },
+      { extra: { spriteExpressions: { persona: "excited" } } },
+      { extra: JSON.stringify({ spriteExpressions: { "character-c": "angry" } }) },
+    ],
+    { "character-b": "thinking" },
+  ),
+  {
+    "character-a": "happy",
+    "character-b": "thinking",
+    "character-c": "angry",
+    persona: "excited",
+  },
+);
+assert.deepEqual(
+  resolveSpriteExpressionState([
+    { extra: { spriteExpressions: { "character-a": "happy" } } },
+    { extra: { spriteExpressions: { "character-a": "neutral" } } },
+  ]),
+  { "character-a": "neutral" },
+);
 assert.deepEqual(findMissingComfyReferenceSlots(comfyReferenceWorkflow, "reference_image", 1), [1]);
 assert.deepEqual(findMissingComfyReferenceSlots(comfyReferenceWorkflow, "reference_image_name", 1), [2]);
 assert.equal(numberedComfyReferencePlaceholder("reference_image_name", 2), "%reference_image_name_03%");
