@@ -58,10 +58,10 @@ export const NOODLE_IMAGE_POST: PromptOverrideKeyDef<NoodleImagePostCtx> = {
     [
       ctx.draftPrompt.trim() || `A social-media-ready image posted by ${ctx.authorName}.`,
       ctx.characterDescription,
-      ctx.characterPersonality
-        ? `Character personality and traits: ${ctx.characterPersonality}\nLet these traits naturally influence the subject, image quality, camera habits, mood, and composition.`
-        : "",
-      ctx.characterImageInstructions ? `Character-specific image instructions: ${ctx.characterImageInstructions}` : "",
+      // Bare values only: labels and "let these traits influence..." framing are instructions to a
+      // language model, and nothing downstream re-reads this string — it goes to the image model.
+      ctx.characterPersonality,
+      ctx.characterImageInstructions,
     ]
       .map((part) => part.trim())
       .filter(Boolean)
