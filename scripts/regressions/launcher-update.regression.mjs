@@ -114,6 +114,9 @@ try {
   writeFileSync(join(installFixtureRoot, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\r\n");
   assert.equal(workspaceLockfileMatches(installFixtureRoot), true);
 
+  writeFileSync(join(installFixtureRoot, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\r");
+  assert.equal(workspaceLockfileMatches(installFixtureRoot), true);
+
   writeFileSync(join(installedLockfileDir, "lock.yaml"), "lockfileVersion: '8.0'\n");
   assert.equal(workspaceLockfileMatches(installFixtureRoot), false);
 
