@@ -4591,8 +4591,27 @@ try {
     );
     assert.match(
       source,
-      /pointer-events-none[^"\n]*group-hover(?:\/member)?:opacity-100[^"\n]*\[@media\(pointer:coarse\)\]:opacity-100[^"\n]*group-hover(?:\/member)?:\[&_button\]:pointer-events-auto[^"\n]*max-md:\[&_button\]:pointer-events-auto[^"\n]*\[@media\(pointer:coarse\)\]:\[&_button\]:pointer-events-auto/u,
+      /pointer-events-none[^"\n]*group-hover(?:\/member)?:opacity-100[^"\n]*\[@media\(pointer:fine\)\]:group-focus-within(?:\/member)?:opacity-100[^"\n]*\[@media\(pointer:coarse\)\]:opacity-100[^"\n]*group-hover(?:\/member)?:\[&_button\]:pointer-events-auto[^"\n]*\[@media\(pointer:fine\)\]:group-focus-within(?:\/member)?:\[&_button\]:pointer-events-auto[^"\n]*max-md:\[&_button\]:pointer-events-auto[^"\n]*\[@media\(pointer:coarse\)\]:\[&_button\]:pointer-events-auto/u,
       `${panelName} action overlays must activate button hit targets only when their actions are visible`,
+    );
+    const hiddenActionOverlayCount = source.match(/pointer-events-none[^"\n]*opacity-0/gu)?.length ?? 0;
+    const focusVisibleOverlayCount =
+      source.match(
+        /pointer-events-none[^"\n]*\[@media\(pointer:fine\)\]:group-focus-within(?:\/member)?:opacity-100/gu,
+      )?.length ?? 0;
+    const focusInteractiveOverlayCount =
+      source.match(
+        /pointer-events-none[^"\n]*\[@media\(pointer:fine\)\]:group-focus-within(?:\/member)?:\[&_button\]:pointer-events-auto/gu,
+      )?.length ?? 0;
+    assert.equal(
+      focusVisibleOverlayCount,
+      hiddenActionOverlayCount,
+      `${panelName} must reveal every fine-pointer action overlay while it contains keyboard focus`,
+    );
+    assert.equal(
+      focusInteractiveOverlayCount,
+      hiddenActionOverlayCount,
+      `${panelName} must keep every focused fine-pointer action overlay interactive`,
     );
   }
 
