@@ -293,6 +293,16 @@ const JSON_COLUMNS: Record<string, readonly string[]> = {
   message_swipes: ["extra"],
   memory_chunks: ["embedding"],
   lorebooks: ["scope", "tags"],
+  scenarios: [
+    "setting",
+    "generated",
+    "protagonist",
+    "npcs",
+    "alternateGreetings",
+    "lorebookIds",
+    "tags",
+    "metadata",
+  ],
   lorebook_entries: [
     "keys",
     "secondaryKeys",

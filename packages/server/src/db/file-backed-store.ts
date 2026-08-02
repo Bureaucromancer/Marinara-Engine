@@ -174,6 +174,7 @@ export const FILE_BACKED_TABLES = [
   "noodle_activity_digests",
   "noodle_refresh_runs",
   "lorebooks",
+  "scenarios",
   "lorebook_character_links",
   "lorebook_persona_links",
   "lorebook_folders",

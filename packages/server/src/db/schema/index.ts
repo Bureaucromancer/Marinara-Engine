@@ -6,6 +6,7 @@ export * from "./conversation-calls.js";
 export * from "./chat-presets.js";
 export * from "./characters.js";
 export * from "./lorebooks.js";
+export * from "./scenarios.js";
 export * from "./prompts.js";
 export * from "./connections.js";
 export * from "./connection-folders.js";

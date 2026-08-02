@@ -15,6 +15,7 @@ type ExpungeScope =
   | "characters"
   | "personas"
   | "lorebooks"
+  | "scenarios"
   | "presets"
   | "connections"
   | "automation"
@@ -25,6 +26,7 @@ const ALL_EXPUNGE_SCOPES: ExpungeScope[] = [
   "characters",
   "personas",
   "lorebooks",
+  "scenarios",
   "presets",
   "connections",
   "automation",
@@ -101,6 +103,11 @@ export async function adminRoutes(app: FastifyInstance) {
     if (requestedScopes.includes("lorebooks")) {
       await runDelete("lorebook_entries", () => db.delete(schema.lorebookEntries).run());
       await runDelete("lorebooks", () => db.delete(schema.lorebooks).run());
+    }
+
+    if (requestedScopes.includes("scenarios")) {
+      await runDelete("scenarios", () => db.delete(schema.scenarios).run());
+      filesDeleted.scenarioImages = clearDirectory(join(DATA_DIR, "scenarios", "images"));
     }
 
     if (requestedScopes.includes("presets")) {
