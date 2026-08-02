@@ -1633,7 +1633,13 @@ function renderAgentCard({
         )}
       </button>
       <button
-        className={cn("min-w-0 flex-1 text-left", !selectionMode && (onDelete ? "pr-24" : "pr-16"))}
+        className={cn(
+          "min-w-0 flex-1 text-left",
+          !selectionMode &&
+            (onDelete
+              ? "pr-0 max-md:pr-24 [@media(pointer:coarse)]:pr-24"
+              : "pr-0 max-md:pr-16 [@media(pointer:coarse)]:pr-16"),
+        )}
         onClick={(event) => {
           event.stopPropagation();
           if (suppressClickRef?.current) return;

@@ -4564,6 +4564,61 @@ try {
   );
 }
 
+// Issue #4449 — desktop sidebar hover actions overlay row content instead of
+// permanently reserving text width, while touch layouts keep room for visible
+// actions and Conversation Call duration rows size from their panel width.
+{
+  const sidebarPanelSources = new Map(
+    ["Characters", "Personas", "Lorebooks", "Agents", "Presets", "Connections"].map((panelName) => [
+      panelName,
+      readFileSync(
+        join(REPOSITORY_ROOT, `packages/client/src/components/panels/${panelName}Panel.tsx`),
+        "utf8",
+      ),
+    ]),
+  );
+
+  for (const [panelName, source] of sidebarPanelSources) {
+    assert.match(
+      source,
+      /max-md:pr-(?:14|16|20|24|32) \[@media\(pointer:coarse\)\]:pr-(?:14|16|20|24|32)/u,
+      `${panelName} rows must reserve action space only for touch layouts`,
+    );
+    assert.doesNotMatch(
+      source,
+      /\[@media\(pointer:fine\)\]:group-hover:pr-/u,
+      `${panelName} rows must not shrink their text area when desktop hover actions appear`,
+    );
+  }
+
+  const personasPanelSource = sidebarPanelSources.get("Personas")!;
+  assert.match(
+    personasPanelSource,
+    /group group\/member relative flex/u,
+    "Persona folder rows must establish the positioning context for overlaid actions",
+  );
+  assert.match(
+    personasPanelSource,
+    /absolute right-1 top-1\/2 flex -translate-y-1\/2 items-center/u,
+    "Persona folder actions must overlay their row instead of occupying flex width",
+  );
+
+  const settingsPanelSource = readFileSync(
+    join(REPOSITORY_ROOT, "packages/client/src/components/panels/SettingsPanel.tsx"),
+    "utf8",
+  );
+  assert.match(
+    settingsPanelSource,
+    /grid-cols-\[repeat\(auto-fit,minmax\(min\(100%,10rem\),1fr\)\)\]/u,
+    "Conversation Call clip rows must wrap from the panel width instead of a viewport breakpoint",
+  );
+  assert.equal(
+    settingsPanelSource.match(/w-\[3\.75rem\] grid-cols-\[minmax\(0,1fr\)_auto\]/gu)?.length,
+    2,
+    "Conversation Call generated and custom clip duration controls must share the compact width",
+  );
+}
+
 // Issue #4002 — Character Tavern stores card JSON in zTXt (zlib-compressed)
 // PNG chunks; every card-parsing path must read them, and export must strip
 // stale ones so re-exported cards cannot carry outdated compressed data.
