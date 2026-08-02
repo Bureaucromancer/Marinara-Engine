@@ -1064,6 +1064,7 @@ export function CharactersPanel() {
                         openCharacterDetailFromPanel(memberId);
                       }}
                       onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return;
                         if (e.key !== "Enter" && e.key !== " ") return;
                         e.preventDefault();
                         if (selectionMode) {

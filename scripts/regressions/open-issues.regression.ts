@@ -4651,6 +4651,16 @@ try {
     "Persona names must keep a content-sized click target beneath overlaid actions",
   );
   assert.match(
+    charactersPanelSource,
+    /data-touch-drag-card="character"[\s\S]*?onKeyDown=\{\(e\) => \{\s*if \(e\.target !== e\.currentTarget\) return;/u,
+    "Character folder rows must preserve descendant action-button keyboard events",
+  );
+  assert.match(
+    personasPanelSource,
+    /data-touch-drag-card="persona"[\s\S]*?onKeyDown=\{\(e\) => \{\s*if \(e\.target !== e\.currentTarget\) return;/u,
+    "Persona folder rows must preserve descendant action-button keyboard events",
+  );
+  assert.match(
     personasPanelSource,
     /group group\/member relative flex/u,
     "Persona folder rows must establish the positioning context for overlaid actions",
