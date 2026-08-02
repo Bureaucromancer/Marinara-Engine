@@ -7317,17 +7317,26 @@ export async function generateRoutes(app: FastifyInstance) {
               }
             }
 
+            const runCheckpoint = {
+              runId: newId(),
+              agentConfigId: result.agentId,
+              chatId: input.chatId,
+              messageId: resultMessageId,
+              result,
+            };
             try {
               // Persist the agent decision before any background image work so
               // a new message observes the configured run interval immediately.
-              await agentsStore.saveRun({
-                agentConfigId: result.agentId,
-                chatId: input.chatId,
-                messageId: resultMessageId,
-                result,
-              });
+              await agentsStore.saveRun(runCheckpoint);
             } catch {
-              // Non-critical — don't fail the whole generation
+              if (result.agentType === "illustrator" || result.type === "image_prompt") {
+                try {
+                  await agentsStore.saveRun(runCheckpoint);
+                } catch (retryError) {
+                  logger.error(retryError, "[illustrator] Failed to persist cadence checkpoint after retry");
+                  throw retryError;
+                }
+              }
             }
 
             // Validate expression agent results — reject hallucinated expressions and unknown characters

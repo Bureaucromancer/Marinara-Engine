@@ -74,12 +74,11 @@ export function getStreamingCharsPerSecond(streamingSpeed: number, prefersReduce
  */
 export function getRoleplayTypewriterRevealCharsPerSecond(input: RoleplayTypewriterRevealRateInput): number {
   if (!Number.isFinite(input.selectedCharsPerSecond)) return input.selectedCharsPerSecond;
+  if (input.streamComplete) return input.selectedCharsPerSecond;
 
   const minimumRate = Math.min(6, input.selectedCharsPerSecond);
   const queueSmoothedTarget = Math.max(minimumRate, input.pendingCharacters / ROLEPLAY_QUEUE_RESERVE_SECONDS);
-  const targetRate = input.streamComplete
-    ? input.selectedCharsPerSecond
-    : Math.min(input.selectedCharsPerSecond, queueSmoothedTarget);
+  const targetRate = Math.min(input.selectedCharsPerSecond, queueSmoothedTarget);
 
   if (input.previousCharsPerSecond === null || !Number.isFinite(input.previousCharsPerSecond)) {
     return targetRate;

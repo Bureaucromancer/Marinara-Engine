@@ -132,5 +132,10 @@ assert.match(
   /return fetch\(`\/api\/bot-browser\/janny\/download\/\$\{encodeURIComponent\(characterId\)\}`\)/u,
   "Janny imports should retain the server download route as a CORS fallback",
 );
+assert.match(
+  clientSource,
+  /const cardRes = await fetchCompleteJannyCard\(charId\);/u,
+  "Janny detail loading must use the complete PNG card through the browser-first downloader",
+);
 
 console.info("Janny character-import regression passed.");

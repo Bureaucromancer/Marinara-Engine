@@ -263,6 +263,11 @@ assert.ok(
   "Illustrator cadence must be persisted before background image generation begins",
 );
 assert.match(
+  generateRouteSource,
+  /const runCheckpoint = \{[\s\S]{0,180}runId: newId\(\)[\s\S]{0,700}agentsStore\.saveRun\(runCheckpoint\)[\s\S]{0,500}Failed to persist cadence checkpoint after retry[\s\S]{0,80}throw retryError/u,
+  "Illustrator cadence persistence should retry idempotently and fail closed when its checkpoint cannot be saved",
+);
+assert.match(
   echoChamberPanelSource,
   /activeChatId \? \(s\.echoChamberSizeByChatId\[activeChatId\] \?\? null\) : null/u,
   "Echo Chamber should restore the dimensions remembered for the active chat",
@@ -832,6 +837,17 @@ const roleplayDeceleratedRate = getRoleplayTypewriterRevealCharsPerSecond({
 assert.ok(
   roleplayDeceleratedRate > 52 && roleplayDeceleratedRate < 54,
   "Roleplay should slow promptly as its buffered reserve shrinks",
+);
+assert.equal(
+  getRoleplayTypewriterRevealCharsPerSecond({
+    selectedCharsPerSecond: 90,
+    pendingCharacters: 5,
+    previousCharsPerSecond: 6,
+    elapsedMs: 16,
+    streamComplete: true,
+  }),
+  90,
+  "a completed Roleplay stream should drain at the selected speed",
 );
 assert.deepEqual(
   takeTypewriterCharacters("A👩‍🔬B", 2),
