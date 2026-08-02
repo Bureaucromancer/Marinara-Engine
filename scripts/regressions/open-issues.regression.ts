@@ -8,6 +8,7 @@ import type { Chat, ChatMode, Message } from "../../packages/shared/src/types/ch
 import { chatModeSchema } from "../../packages/shared/src/schemas/chat.schema.js";
 import playwrightConfig from "../../playwright.config.js";
 import { resolveDevSharedBuildScript } from "../dev-shared-build.mjs";
+import { validatePullRequestTriage } from "../validate-pr-triage.mjs";
 import { characterCardVersions, characters, chatPresets, chats, messages } from "../../packages/server/src/db/schema/index.js";
 import { eq } from "../../packages/server/src/db/file-query.js";
 import { parseBuildMeta, resolveBuildBranch } from "../../packages/server/src/config/build-info.js";
@@ -1612,13 +1613,7 @@ assert.deepEqual(
   ZAI_IMAGE_MODELS.map((model) => model.id),
   ["glm-image", "cogview-4-250304"],
 );
-const pullRequestTriageWorkflow = readFileSync(
-  new URL("../../.github/workflows/pull-request-triage.yml", import.meta.url),
-  "utf8",
-);
-assert.doesNotMatch(pullRequestTriageWorkflow, /^\s+pull_request_review:/mu);
-assert.match(pullRequestTriageWorkflow, /name: Exempt trusted contributor/u);
-assert.doesNotMatch(pullRequestTriageWorkflow, /Owner approval for outside contributors/u);
+validatePullRequestTriage();
 assert.equal(
   buildAtlasCloudUrl("https://api.atlascloud.ai/v1/", "generateImage"),
   "https://api.atlascloud.ai/api/v1/model/generateImage",
