@@ -480,7 +480,8 @@ function ActiveContextLinksButton({
       setDesktopAnchor(null);
       return;
     }
-    const update = () => {
+    const update = (event?: Event) => {
+      if (event?.target instanceof Node && panelRef.current?.contains(event.target)) return;
       const mobile = window.innerWidth < 768;
       setMobileFrame(mobile ? getMobileFloatingPanelFrame(buttonRef.current, 320) : null);
       setDesktopAnchor(mobile ? null : readChatToolbarFloatingPanelAnchor(buttonRef.current));
@@ -630,15 +631,7 @@ function ActiveContextLinksButton({
     <div className="relative" ref={ref} onClick={(event) => event.stopPropagation()}>
       <button
         ref={buttonRef}
-        onClick={() => {
-          setOpen((prev) => {
-            const nextOpen = !prev;
-            const mobile = typeof window !== "undefined" && window.innerWidth < 768;
-            setMobileFrame(nextOpen && mobile ? getMobileFloatingPanelFrame(buttonRef.current, 320) : null);
-            setDesktopAnchor(nextOpen && !mobile ? readChatToolbarFloatingPanelAnchor(buttonRef.current) : null);
-            return nextOpen;
-          });
-        }}
+        onClick={() => setOpen((prev) => !prev)}
         className={getChatToolbarButtonClass({ compact, open })}
         title={t("chat.toolbar.activeContext")}
         aria-label={t("chat.toolbar.activeContext")}
