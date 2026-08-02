@@ -133,6 +133,28 @@ try {
   assert.equal(sceneChat.mode, "roleplay");
   assert.equal(sceneChat.groupId, null, "A converted scene must not join the conversation branch group");
 
+  const distinctSceneGroupId = "scene-owned-branch-group";
+  const distinctScenePatch = await app.inject({
+    method: "PATCH",
+    url: `/api/chats/${sceneChat.id}`,
+    payload: { groupId: distinctSceneGroupId },
+  });
+  assert.equal(distinctScenePatch.statusCode, 200);
+  const distinctGroupForkResponse = await app.inject({
+    method: "POST",
+    url: "/api/scene/fork",
+    payload: { sceneChatId: sceneChat.id, mode: "clone" },
+  });
+  assert.equal(distinctGroupForkResponse.statusCode, 200);
+  const distinctGroupFork = (
+    await app.inject({ method: "GET", url: `/api/chats/${distinctGroupForkResponse.json().chatId}` })
+  ).json();
+  assert.equal(
+    distinctGroupFork.groupId,
+    distinctSceneGroupId,
+    "Forking a scene with its own branch group must preserve that group",
+  );
+
   const legacyScenePatch = await app.inject({
     method: "PATCH",
     url: `/api/chats/${sceneChat.id}`,

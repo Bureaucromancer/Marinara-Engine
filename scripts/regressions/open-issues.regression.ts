@@ -656,6 +656,10 @@ try {
   await chatPresetStorage.ensureDefaults();
   const originalConversationDefault = await chatPresetStorage.getDefault("conversation");
   assert.ok(originalConversationDefault, "Conversation mode must start with a Default settings profile");
+  await db
+    .update(chatPresets)
+    .set({ name: "Broken Default", settings: JSON.stringify({ connectionId: "must-be-reset" }) })
+    .where(eq(chatPresets.id, originalConversationDefault.id));
   await db.insert(chatPresets).values({
     id: "duplicate-conversation-default",
     name: "Default Copy",
@@ -665,6 +669,17 @@ try {
     settings: JSON.stringify({ connectionId: "must-be-reset" }),
     createdAt: "9999-12-31T23:59:59.000Z",
     updatedAt: "9999-12-31T23:59:59.000Z",
+  });
+  const duplicateDefaultChatId = "duplicate-default-profile-reference";
+  await db.insert(chats).values({
+    id: duplicateDefaultChatId,
+    name: "Duplicate Default profile reference",
+    mode: "conversation",
+    characterIds: "[]",
+    metadata: JSON.stringify({ appliedChatPresetId: "duplicate-conversation-default", preserved: true }),
+    sortOrder: 0,
+    createdAt: "2026-08-02T06:00:00.000Z",
+    updatedAt: "2026-08-02T06:00:00.000Z",
   });
   await chatPresetStorage.ensureDefaults();
   const normalizedConversationProfiles = await chatPresetStorage.listByMode("conversation");
@@ -684,6 +699,16 @@ try {
     isActive: true,
     settings: {},
   });
+  const reboundDefaultChat = (await db.select().from(chats).where(eq(chats.id, duplicateDefaultChatId)))[0];
+  assert.ok(reboundDefaultChat);
+  assert.deepEqual(JSON.parse(reboundDefaultChat.metadata), {
+    appliedChatPresetId: originalConversationDefault.id,
+    preserved: true,
+  });
+  assert.ok(
+    await chatPresetStorage.getById(JSON.parse(reboundDefaultChat.metadata).appliedChatPresetId),
+    "Rebound chat profile references must remain resolvable after duplicate cleanup",
+  );
   await chatPresetStorage.ensureDefaults();
   assert.equal(
     (await chatPresetStorage.listByMode("conversation")).filter((profile) => profile.isDefault).length,
