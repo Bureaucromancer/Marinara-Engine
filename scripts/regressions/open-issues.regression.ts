@@ -1616,22 +1616,17 @@ const pullRequestTriageWorkflow = readFileSync(
   new URL("../../.github/workflows/pull-request-triage.yml", import.meta.url),
   "utf8",
 );
-assert.match(pullRequestTriageWorkflow, /pull_request_review:\s+types: \[submitted, dismissed\]/u);
-assert.match(pullRequestTriageWorkflow, /github\.event\.review\.user\.login == 'SpicyMarinara'/u);
-assert.match(pullRequestTriageWorkflow, /github\.event\.review\.state == 'commented'/u);
-assert.match(pullRequestTriageWorkflow, /'Ignore unrelated triage event'/u);
-assert.match(pullRequestTriageWorkflow, /APPROVAL_EVENT_RELEVANT/u);
-assert.match(pullRequestTriageWorkflow, /if: env\.APPROVAL_EVENT_RELEVANT != 'true'/u);
-assert.match(
-  pullRequestTriageWorkflow,
-  /name: "\$\{\{ github\.event\.pull_request\.base\.ref == 'staging'.*'Ignore unrelated triage event' \}\}"/u,
+const ownerApprovalReviewWorkflow = readFileSync(
+  new URL("../../.github/workflows/owner-approval-review.yml", import.meta.url),
+  "utf8",
 );
-assert.match(
-  pullRequestTriageWorkflow,
-  /github\.event\.action != 'edited' \|\| contains\(toJSON\(github\.event\.changes\), '\\?"base\\?"'\)/u,
-);
-assert.doesNotMatch(pullRequestTriageWorkflow, /github\.event\.changes\.base != null/u);
-assert.doesNotMatch(pullRequestTriageWorkflow, /github\.event\.changes\.base\.ref\.from != ''/u);
+assert.doesNotMatch(pullRequestTriageWorkflow, /^\s+pull_request_review:/mu);
+assert.match(pullRequestTriageWorkflow, /name: Exempt trusted contributor/u);
+assert.match(ownerApprovalReviewWorkflow, /pull_request_review:\s+types: \[submitted, dismissed\]/u);
+assert.match(ownerApprovalReviewWorkflow, /github\.event\.review\.user\.login == 'SpicyMarinara'/u);
+assert.match(ownerApprovalReviewWorkflow, /'Ignore unrelated approval review'/u);
+assert.match(ownerApprovalReviewWorkflow, /REVIEW_EVENT_RELEVANT/u);
+assert.doesNotMatch(ownerApprovalReviewWorkflow, /Branch policy check|Pull Request template check/u);
 assert.equal(
   buildAtlasCloudUrl("https://api.atlascloud.ai/v1/", "generateImage"),
   "https://api.atlascloud.ai/api/v1/model/generateImage",
