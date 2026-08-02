@@ -1538,7 +1538,7 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
         return sortAccountsByDisplayName(left, right);
       })
       .slice(0, 50);
-  }, [accountSearchTerm, accounts, isAccountSearch]);
+  }, [accountSearchTerm, accounts, folderInvitedCharacterIds, isAccountSearch, settings?.allowRandomUsers]);
   const profilePosts = useMemo(
     () => (viewedProfileAccount ? posts.filter((post) => post.authorAccountId === viewedProfileAccount.id) : []),
     [posts, viewedProfileAccount],
