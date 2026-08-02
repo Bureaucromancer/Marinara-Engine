@@ -1616,17 +1616,9 @@ const pullRequestTriageWorkflow = readFileSync(
   new URL("../../.github/workflows/pull-request-triage.yml", import.meta.url),
   "utf8",
 );
-const ownerApprovalReviewWorkflow = readFileSync(
-  new URL("../../.github/workflows/owner-approval-review.yml", import.meta.url),
-  "utf8",
-);
 assert.doesNotMatch(pullRequestTriageWorkflow, /^\s+pull_request_review:/mu);
 assert.match(pullRequestTriageWorkflow, /name: Exempt trusted contributor/u);
-assert.match(ownerApprovalReviewWorkflow, /pull_request_review:\s+types: \[submitted, dismissed\]/u);
-assert.match(ownerApprovalReviewWorkflow, /github\.event\.review\.user\.login == 'SpicyMarinara'/u);
-assert.match(ownerApprovalReviewWorkflow, /'Ignore unrelated approval review'/u);
-assert.match(ownerApprovalReviewWorkflow, /REVIEW_EVENT_RELEVANT/u);
-assert.doesNotMatch(ownerApprovalReviewWorkflow, /Branch policy check|Pull Request template check/u);
+assert.doesNotMatch(pullRequestTriageWorkflow, /Owner approval for outside contributors/u);
 assert.equal(
   buildAtlasCloudUrl("https://api.atlascloud.ai/v1/", "generateImage"),
   "https://api.atlascloud.ai/api/v1/model/generateImage",
