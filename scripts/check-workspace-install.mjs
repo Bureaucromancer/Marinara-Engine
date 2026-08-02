@@ -19,9 +19,11 @@ const checks = [
 
 export function workspaceLockfileMatches(root) {
   try {
-    const expectedLockfile = readFileSync(join(root, "pnpm-lock.yaml"));
-    const installedLockfile = readFileSync(join(root, "node_modules", ".pnpm", "lock.yaml"));
-    return expectedLockfile.equals(installedLockfile);
+    const expectedLockfile = readFileSync(join(root, "pnpm-lock.yaml"), "utf8");
+    const installedLockfile = readFileSync(join(root, "node_modules", ".pnpm", "lock.yaml"), "utf8");
+    return (
+      expectedLockfile.replace(/\r\n?/gu, "\n") === installedLockfile.replace(/\r\n?/gu, "\n")
+    );
   } catch {
     return false;
   }
