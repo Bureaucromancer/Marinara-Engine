@@ -4588,6 +4588,9 @@ test("Roleplay Active Context shows rich lorebook activation provenance", async 
 
     const panel = page.locator('[data-component="RoleplayActiveContextPanel"]');
     await expect(panel).toBeVisible();
+    await expect.poll(() => panel.evaluate((element) => element.parentElement === document.body)).toBe(true);
+    await expect(panel).toHaveCSS("position", "fixed");
+    await expect(panel).toHaveCSS("z-index", "9999");
     await expect(panel.getByText("2 active • ~321 tokens", { exact: true })).toBeVisible();
     await expect(panel.getByRole("region", { name: "Current location lore" })).toContainText("Northland Bank");
     await expect(panel.getByText("Whispered Archive", { exact: true })).toBeVisible();
@@ -4765,6 +4768,9 @@ test("chat toolbar panels close when their trigger is clicked again across modes
     const summaryPanel = page.locator("[data-chat-floating-panel]").filter({ hasText: "Chat Summary" });
     await summaryButton.click();
     await expect(summaryPanel).toBeVisible();
+    await expect.poll(() => summaryPanel.evaluate((element) => element.parentElement === document.body)).toBe(true);
+    await expect(summaryPanel).toHaveCSS("position", "fixed");
+    await expect(summaryPanel).toHaveCSS("z-index", "9999");
     await summaryButton.click();
     await expect(summaryPanel).toHaveCount(0);
 
