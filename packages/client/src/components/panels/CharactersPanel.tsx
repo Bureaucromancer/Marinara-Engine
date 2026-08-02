@@ -1012,7 +1012,7 @@ export function CharactersPanel() {
                     {folderMemberIds.length}
                   </span>
                 )}
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100">
+                <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100 [&_button]:pointer-events-auto">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1247,7 +1247,7 @@ export function CharactersPanel() {
                       {!selectionMode && (
                         <div
                           data-character-row-actions
-                          className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] p-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover/member:opacity-100 max-md:opacity-100"
+                          className="pointer-events-none absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] p-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover/member:opacity-100 max-md:opacity-100 [&_button]:pointer-events-auto"
                         >
                           <ChatResourceActionButton
                             payload={{ version: 1, kind: "character", ids: [memberId], label: memberName }}
@@ -1521,7 +1521,7 @@ export function CharactersPanel() {
               >
                 <div
                   data-character-row-name
-                  className="truncate text-sm font-medium"
+                  className="w-fit max-w-full truncate text-sm font-medium"
                   style={
                     charNameColor
                       ? charNameColor.startsWith("linear-gradient")
@@ -1583,7 +1583,7 @@ export function CharactersPanel() {
               {!selectionMode && (
                 <div
                   data-character-row-actions
-                  className="absolute right-2 top-1/2 grid w-24 -translate-y-1/2 grid-cols-3 gap-0.5 rounded-lg bg-[var(--sidebar)] p-1 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:w-20 max-md:opacity-100"
+                  className="pointer-events-none absolute right-2 top-1/2 grid w-24 -translate-y-1/2 grid-cols-3 gap-0.5 rounded-lg bg-[var(--sidebar)] p-1 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:w-20 max-md:opacity-100 [&_button]:pointer-events-auto"
                 >
                   <ChatResourceActionButton
                     payload={{ version: 1, kind: "character", ids: [char.id], label: charName }}

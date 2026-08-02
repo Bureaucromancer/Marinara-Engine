@@ -4589,9 +4589,25 @@ try {
       /\[@media\(pointer:fine\)\]:group-hover:pr-/u,
       `${panelName} rows must not shrink their text area when desktop hover actions appear`,
     );
+    assert.match(
+      source,
+      /pointer-events-none[^"\n]*group-hover(?:\/member)?:opacity-100[^"\n]*\[&_button\]:pointer-events-auto/u,
+      `${panelName} action overlays must leave row clicks available outside their buttons`,
+    );
   }
 
   const personasPanelSource = sidebarPanelSources.get("Personas")!;
+  const charactersPanelSource = sidebarPanelSources.get("Characters")!;
+  assert.match(
+    charactersPanelSource,
+    /data-character-row-name\s+className="w-fit max-w-full truncate/u,
+    "Character names must keep a content-sized click target beneath overlaid actions",
+  );
+  assert.match(
+    personasPanelSource,
+    /className="w-fit max-w-full truncate text-sm font-medium">\{persona\.name\}/u,
+    "Persona names must keep a content-sized click target beneath overlaid actions",
+  );
   assert.match(
     personasPanelSource,
     /group group\/member relative flex/u,

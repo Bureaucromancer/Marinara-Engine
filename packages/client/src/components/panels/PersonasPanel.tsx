@@ -852,7 +852,7 @@ export function PersonasPanel() {
                   </span>
                 )}
 
-                <div className="absolute right-2 top-1/2 flex -translate-y-1/2 shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100">
+                <div className="pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100 [&_button]:pointer-events-auto">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1010,7 +1010,7 @@ export function PersonasPanel() {
                             </div>
                           </div>
                           {!selectionMode && (
-                            <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] p-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover/member:opacity-100 max-md:opacity-100">
+                            <div className="pointer-events-none absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] p-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover/member:opacity-100 max-md:opacity-100 [&_button]:pointer-events-auto">
                               <ChatResourceActionButton
                                 payload={{ version: 1, kind: "persona", ids: [pid], label: p.name }}
                                 className="flex h-6 min-h-6 w-6 items-center justify-center p-0"
@@ -1209,7 +1209,7 @@ export function PersonasPanel() {
                   !selectionMode && "pr-0 max-md:pr-32 [@media(pointer:coarse)]:pr-32",
                 )}
               >
-                <div className="truncate text-sm font-medium">{persona.name}</div>
+                <div className="w-fit max-w-full truncate text-sm font-medium">{persona.name}</div>
                 {persona.comment && (
                   <div className="truncate text-[0.625rem] italic text-[var(--muted-foreground)]">
                     {persona.comment}
@@ -1225,7 +1225,7 @@ export function PersonasPanel() {
 
               {/* Actions */}
               {!selectionMode && (
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100">
+                <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100 [&_button]:pointer-events-auto">
                   <ChatResourceActionButton
                     payload={{ version: 1, kind: "persona", ids: [persona.id], label: persona.name }}
                   />
