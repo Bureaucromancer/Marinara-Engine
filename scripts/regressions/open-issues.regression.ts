@@ -4591,8 +4591,8 @@ try {
     );
     assert.match(
       source,
-      /pointer-events-none[^"\n]*group-hover(?:\/member)?:opacity-100[^"\n]*\[&_button\]:pointer-events-auto/u,
-      `${panelName} action overlays must leave row clicks available outside their buttons`,
+      /pointer-events-none[^"\n]*group-hover(?:\/member)?:opacity-100[^"\n]*\[@media\(pointer:coarse\)\]:opacity-100[^"\n]*\[&_button\]:pointer-events-auto/u,
+      `${panelName} action overlays must remain visible on coarse pointers and leave row clicks available outside their buttons`,
     );
   }
 

@@ -1012,7 +1012,7 @@ export function CharactersPanel() {
                     {folderMemberIds.length}
                   </span>
                 )}
-                <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100 [&_button]:pointer-events-auto">
+                <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100 [@media(pointer:coarse)]:opacity-100 [&_button]:pointer-events-auto">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1177,7 +1177,7 @@ export function CharactersPanel() {
                       <div
                         className={cn(
                           "min-w-0 flex-1",
-                          !selectionMode && "pr-0 max-md:pr-24 [@media(pointer:coarse)]:pr-24",
+                          !selectionMode && "pr-0 max-md:pr-32 [@media(pointer:coarse)]:pr-32",
                         )}
                       >
                         <span
@@ -1247,7 +1247,7 @@ export function CharactersPanel() {
                       {!selectionMode && (
                         <div
                           data-character-row-actions
-                          className="pointer-events-none absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] p-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover/member:opacity-100 max-md:opacity-100 [&_button]:pointer-events-auto"
+                          className="pointer-events-none absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] p-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover/member:opacity-100 max-md:opacity-100 [@media(pointer:coarse)]:opacity-100 [&_button]:pointer-events-auto"
                         >
                           <ChatResourceActionButton
                             payload={{ version: 1, kind: "character", ids: [memberId], label: memberName }}
@@ -1583,7 +1583,7 @@ export function CharactersPanel() {
               {!selectionMode && (
                 <div
                   data-character-row-actions
-                  className="pointer-events-none absolute right-2 top-1/2 grid w-24 -translate-y-1/2 grid-cols-3 gap-0.5 rounded-lg bg-[var(--sidebar)] p-1 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:w-20 max-md:opacity-100 [&_button]:pointer-events-auto"
+                  className="pointer-events-none absolute right-2 top-1/2 grid w-24 -translate-y-1/2 grid-cols-3 gap-0.5 rounded-lg bg-[var(--sidebar)] p-1 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:w-20 max-md:opacity-100 [@media(pointer:coarse)]:opacity-100 [&_button]:pointer-events-auto"
                 >
                   <ChatResourceActionButton
                     payload={{ version: 1, kind: "character", ids: [char.id], label: charName }}

@@ -1009,7 +1009,7 @@ export function LorebooksPanel() {
                     {folderFilterActive ? folderItems.length : folder.itemIds.length}
                   </span>
                 )}
-                <div className="pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100 [&_button]:pointer-events-auto">
+                <div className="pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100 [@media(pointer:coarse)]:opacity-100 [&_button]:pointer-events-auto">
                   <button
                     onClick={(event) => {
                       event.stopPropagation();
@@ -1263,7 +1263,7 @@ function LorebookRow({
         </div>
       </div>
       {!selectionMode && (
-        <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100 [&_button]:pointer-events-auto">
+        <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100 [@media(pointer:coarse)]:opacity-100 [&_button]:pointer-events-auto">
           <ChatResourceActionButton
             payload={{ version: 1, kind: "lorebook", ids: [lorebook.id], label: lorebook.name }}
           />
