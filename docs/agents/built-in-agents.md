@@ -224,7 +224,8 @@ Plans still or animated visual storyboards from completed Roleplay exchanges and
 - **Integration**: Agent package; Game and Roleplay use the installed package's prompt templates and settings through the Engine's Storyboard host integration.
 - **Where it works**: Roleplay and Game.
 - **Key settings**: choose still or animation planners, image and video connections, keyframe count, duration, display mode, character-reference handling, Roleplay episode and style templates, and Game illustration/video templates.
-- **Compatibility**: Engine `2.3.5` through before `4.0.0`. The package uses `agent-runtime`, `chat-read`, `prompt-context`, `storage`, and `ui` permissions and does not require a restart.
+- **Compatibility**: Engine `2.3.5` through before `3.0.0`. The package uses `agent-runtime`, `chat-read`, `prompt-context`, `storage`, and `ui` permissions and does not require a restart.
+- **Full guide**: [Storyboard Agent: Roleplay and Game Mode](../game/storyboard.md).
 
 ### Calls
 
