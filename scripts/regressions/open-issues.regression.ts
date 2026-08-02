@@ -4581,7 +4581,7 @@ try {
   for (const [panelName, source] of sidebarPanelSources) {
     assert.match(
       source,
-      /max-md:pr-(?:14|16|20|24|32) \[@media\(pointer:coarse\)\]:pr-(?:14|16|20|24|32)/u,
+      /max-md:pr-(?:14|16|20|24|32|36) \[@media\(pointer:coarse\)\]:pr-(?:14|16|20|24|32|36)/u,
       `${panelName} rows must reserve action space only for touch layouts`,
     );
     assert.doesNotMatch(
@@ -4591,13 +4591,36 @@ try {
     );
     assert.match(
       source,
-      /pointer-events-none[^"\n]*group-hover(?:\/member)?:opacity-100[^"\n]*\[@media\(pointer:coarse\)\]:opacity-100[^"\n]*\[&_button\]:pointer-events-auto/u,
-      `${panelName} action overlays must remain visible on coarse pointers and leave row clicks available outside their buttons`,
+      /pointer-events-none[^"\n]*group-hover(?:\/member)?:opacity-100[^"\n]*\[@media\(pointer:coarse\)\]:opacity-100[^"\n]*group-hover(?:\/member)?:\[&_button\]:pointer-events-auto[^"\n]*max-md:\[&_button\]:pointer-events-auto[^"\n]*\[@media\(pointer:coarse\)\]:\[&_button\]:pointer-events-auto/u,
+      `${panelName} action overlays must activate button hit targets only when their actions are visible`,
     );
   }
 
   const personasPanelSource = sidebarPanelSources.get("Personas")!;
   const charactersPanelSource = sidebarPanelSources.get("Characters")!;
+  const presetsPanelSource = sidebarPanelSources.get("Presets")!;
+  for (const panelName of ["Characters", "Personas", "Lorebooks", "Agents", "Presets"]) {
+    assert.match(
+      sidebarPanelSources.get(panelName)!,
+      /group relative flex cursor-pointer[^"\n]*max-md:pr-12 \[@media\(pointer:coarse\)\]:pr-12/u,
+      `${panelName} folder headers must reserve space for always-visible touch actions`,
+    );
+  }
+  assert.match(
+    charactersPanelSource,
+    /max-md:pr-20 \[@media\(pointer:coarse\)\]:pr-24/u,
+    "Character rows must match their coarse-pointer padding to the desktop-width action toolbar",
+  );
+  assert.match(
+    charactersPanelSource,
+    /group-hover\/member:opacity-100[^"\n]*max-md:static max-md:translate-y-0[^"\n]*\[@media\(pointer:coarse\)\]:static \[@media\(pointer:coarse\)\]:translate-y-0/u,
+    "Character folder-member actions must participate in touch layout instead of overflowing their row",
+  );
+  assert.match(
+    presetsPanelSource,
+    /max-md:pr-36 \[@media\(pointer:coarse\)\]:pr-36/u,
+    "Preset rows must reserve space for the complete selected-preset touch toolbar",
+  );
   assert.match(
     charactersPanelSource,
     /data-character-row-name\s+className="w-fit max-w-full truncate/u,

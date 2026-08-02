@@ -2241,7 +2241,7 @@ test("Character and Persona avatar actions stay separated and visually balanced"
     version: string,
   ) => {
     await page.locator(`[data-tour="panel-${panel}"]`).click();
-    await page.getByText(resourceName, { exact: true }).first().click();
+    await page.getByText(resourceName, { exact: true }).first().click({ position: { x: 2, y: 2 } });
 
     const editor = page.locator(".mari-editor-shell");
     await expect(editor).toBeVisible();
