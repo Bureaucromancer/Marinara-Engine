@@ -222,6 +222,28 @@ const DIR_LABELS_BY_DOCS_LANG: Record<string, Record<string, string>> = {
     integrations: "集成",
     development: "开发",
   },
+  hi: {
+    "": "गाइड",
+    home: "होम",
+    installation: "इंस्टॉलेशन",
+    connections: "कनेक्शन",
+    conversation: "Conversation",
+    roleplay: "Roleplay",
+    game: "Game Mode",
+    characters: "कैरेक्टर",
+    chats: "चैट",
+    lorebooks: "लोरबुक",
+    agents: "एजेंट",
+    media: "मीडिया",
+    prompts: "प्रॉम्प्ट",
+    noodle: "Noodle",
+    appearance: "अपीयरेंस",
+    settings: "सेटिंग्स",
+    data: "डेटा",
+    extending: "एक्सटेंशन",
+    integrations: "इंटीग्रेशन",
+    development: "डेवलपमेंट",
+  },
 };
 
 function dirLabel(dir: string, docsLanguage: string) {
