@@ -7317,17 +7317,17 @@ export async function generateRoutes(app: FastifyInstance) {
               }
             }
 
-            if (result.agentType !== "illustrator" && result.type !== "image_prompt") {
-              try {
-                await agentsStore.saveRun({
-                  agentConfigId: result.agentId,
-                  chatId: input.chatId,
-                  messageId: resultMessageId,
-                  result,
-                });
-              } catch {
-                // Non-critical — don't fail the whole generation
-              }
+            try {
+              // Persist the agent decision before any background image work so
+              // a new message observes the configured run interval immediately.
+              await agentsStore.saveRun({
+                agentConfigId: result.agentId,
+                chatId: input.chatId,
+                messageId: resultMessageId,
+                result,
+              });
+            } catch {
+              // Non-critical — don't fail the whole generation
             }
 
             // Validate expression agent results — reject hallucinated expressions and unknown characters
@@ -8429,18 +8429,6 @@ export async function generateRoutes(app: FastifyInstance) {
                     "[illustrator] Skipping foreground image because automatic Roleplay Storyboard owns this response",
                   );
                 }
-                if (resultMessageId) {
-                  try {
-                    await agentsStore.saveRun({
-                      agentConfigId: result.agentId,
-                      chatId: input.chatId,
-                      messageId: resultMessageId,
-                      result,
-                    });
-                  } catch (err) {
-                    logger.warn(err, "[illustrator] Failed to persist Storyboard-suppressed run");
-                  }
-                }
               }
 
               if (!storyboardSuppressesForeground && shouldGenerate && imagePrompt) {
@@ -8712,18 +8700,6 @@ export async function generateRoutes(app: FastifyInstance) {
                         imageResults.length,
                         (illData.reason as string)?.slice(0, 80) ?? imagePrompt.slice(0, 80),
                       );
-                      if (resultMessageId) {
-                        try {
-                          await agentsStore.saveRun({
-                            agentConfigId: result.agentId,
-                            chatId: input.chatId,
-                            messageId: resultMessageId,
-                            result,
-                          });
-                        } catch (err) {
-                          logger.warn(err, "[illustrator] Failed to persist successful illustration run");
-                        }
-                      }
                     } catch (illErr) {
                       logger.error(illErr, "[illustrator] Image generation failed");
                       reply.raw.write(
