@@ -134,8 +134,10 @@ export function applyInlineMarkdown(text: string, keyPrefix: string, _depth = 0)
       }
     } else if (match[5] != null) {
       // ── Inline code: `code` (no recursion — content is literal) ──
+      // dir="ltr": code is LTR syntax; inside an RTL paragraph the bidi
+      // algorithm would otherwise reorder it (`--flag value` → `flag value--`).
       nodes.push(
-        <code key={`${keyPrefix}c${key++}`} className="mari-md-inline-code">
+        <code key={`${keyPrefix}c${key++}`} className="mari-md-inline-code" dir="ltr">
           {decodeChatTextHtmlEntities(match[5])}
         </code>,
       );
@@ -233,14 +235,15 @@ interface ListItem {
 
 // ── Table helpers ──
 
-/** Parse alignment from separator cells (e.g. :---, :---:, ---:). */
-function parseTableAlign(sep: string): "left" | "center" | "right" | undefined {
+/** Parse alignment from separator cells (e.g. :---, :---:, ---:). Logical
+ * values so `:---` means "reading start" in RTL content too. */
+function parseTableAlign(sep: string): "start" | "center" | "end" | undefined {
   const trimmed = sep.trim();
   const left = trimmed.startsWith(":");
   const right = trimmed.endsWith(":");
   if (left && right) return "center";
-  if (right) return "right";
-  if (left) return "left";
+  if (right) return "end";
+  if (left) return "start";
   return undefined;
 }
 
@@ -249,7 +252,7 @@ function parseTableAlign(sep: string): "left" | "center" | "right" | undefined {
 function renderCodeBlock(lines: string[], lang: string, blockKey: string): ReactNode {
   const code = lines.join("\n");
   return (
-    <pre key={blockKey} className="mari-md-codeblock">
+    <pre key={blockKey} className="mari-md-codeblock" dir="ltr">
       {lang && <span className="mari-md-codeblock-lang">{lang}</span>}
       <code>{code}</code>
     </pre>
@@ -684,7 +687,9 @@ export function applyInlineMarkdownHTML(html: string): string {
         return `<pre class="mari-md-codeblock">${langLabel}<code>${code}</code></pre>`;
       },
     )
-    // Inline code: `code`
+    // Inline code: `code`. No dir attribute here — this path is re-sanitized by
+    // sanitizeChatHtml, whose attribute allowlist strips `dir`; the LTR forcing
+    // for this path comes from the .mari-md-codeblock/.mari-md-inline-code CSS.
     .replace(/`([^`\n]+)`/g, '<code class="mari-md-inline-code">$1</code>');
 
   if (shouldConvertLatexSymbols()) {
