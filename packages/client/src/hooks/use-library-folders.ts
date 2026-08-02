@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-export type LibraryFolderScope = "lorebooks" | "presets" | "agents";
+export type LibraryFolderScope = "lorebooks" | "scenarios" | "presets" | "agents";
 
 export type LibraryFolder = {
   id: string;
@@ -38,7 +38,12 @@ function readFolders(): LibraryFolder[] {
       (folder): folder is LibraryFolder =>
         folder &&
         typeof folder === "object" &&
-        (folder.scope === "lorebooks" || folder.scope === "presets" || folder.scope === "agents") &&
+        // Must stay in step with LibraryFolderScope: a scope missing here is
+        // silently dropped on reload, so folders appear to save and then vanish.
+        (folder.scope === "lorebooks" ||
+          folder.scope === "scenarios" ||
+          folder.scope === "presets" ||
+          folder.scope === "agents") &&
         typeof folder.id === "string" &&
         typeof folder.name === "string" &&
         Array.isArray(folder.itemIds),
