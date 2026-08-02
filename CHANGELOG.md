@@ -4,6 +4,12 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 
 ## [Unreleased]
 
+## [2.4.1]
+
+### Changed
+
+- Advanced the stable release identity to v2.4.1 across the Engine, PWA manifest, Windows installer, Android bootstrap APK, update checks, Home page, and release references. Android uses `versionName` `2.4.1` with `versionCode` `42` so it updates over every previously published APK.
+
 ## [2.4.0]
 
 ### Added
