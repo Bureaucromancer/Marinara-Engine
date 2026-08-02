@@ -20,11 +20,11 @@ try {
   app = await buildApp();
   await app.ready();
 
-  const create = async (name: string) => {
+  const create = async (name: string, mode: "conversation" | "roleplay" = "roleplay") => {
     const response = await app!.inject({
       method: "POST",
       url: "/api/chats",
-      payload: { name, mode: "roleplay", characterIds: [] },
+      payload: { name, mode, characterIds: [] },
     });
     assert.equal(response.statusCode, 200);
     return response.json();
@@ -95,6 +95,64 @@ try {
     childMessageId: branch.metadata.branchMessageId,
   });
   assert.deepEqual((await persistence.getChat(branch.id))?.branch, listedBranch?.branch);
+
+  const conversation = await create("Conversation scene origin", "conversation");
+  await addMessage(conversation.id, "Convert this conversation into a scene");
+  const conversationBranchResponse = await app.inject({
+    method: "POST",
+    url: `/api/chats/${conversation.id}/branch`,
+    payload: {},
+  });
+  assert.equal(conversationBranchResponse.statusCode, 200);
+  const groupedConversation = (await app.inject({ method: "GET", url: `/api/chats/${conversation.id}` })).json();
+  assert.equal(typeof groupedConversation.groupId, "string");
+
+  const sceneCreateResponse = await app.inject({
+    method: "POST",
+    url: "/api/scene/create",
+    payload: {
+      originChatId: conversation.id,
+      initiatorCharId: null,
+      plan: {
+        name: "Converted roleplay scene",
+        description: "A quiet laboratory after midnight.",
+        scenario: "Verify cross-mode lineage remains separate.",
+        firstMessage: "The instruments hum softly.",
+        background: null,
+        characterIds: [],
+        systemPrompt: "Keep the scene concise.",
+        rating: "sfw",
+        relationshipHistory: "A regression fixture.",
+        participationGuide: "Continue the scene.",
+      },
+    },
+  });
+  assert.equal(sceneCreateResponse.statusCode, 200);
+  const sceneChatId = sceneCreateResponse.json().chatId;
+  const sceneChat = (await app.inject({ method: "GET", url: `/api/chats/${sceneChatId}` })).json();
+  assert.equal(sceneChat.mode, "roleplay");
+  assert.equal(sceneChat.groupId, null, "A converted scene must not join the conversation branch group");
+
+  const legacyScenePatch = await app.inject({
+    method: "PATCH",
+    url: `/api/chats/${sceneChat.id}`,
+    payload: { groupId: groupedConversation.groupId },
+  });
+  assert.equal(legacyScenePatch.statusCode, 200);
+  const sceneForkResponse = await app.inject({
+    method: "POST",
+    url: "/api/scene/fork",
+    payload: { sceneChatId: sceneChat.id, mode: "convert" },
+  });
+  assert.equal(sceneForkResponse.statusCode, 200);
+  const forkedSceneChat = (
+    await app.inject({ method: "GET", url: `/api/chats/${sceneForkResponse.json().chatId}` })
+  ).json();
+  assert.equal(
+    forkedSceneChat.groupId,
+    null,
+    "Forking a legacy converted scene must not retain a cross-mode branch group",
+  );
 
   const exportResponse = await app.inject({
     method: "GET",

@@ -198,6 +198,7 @@ function serializeRegexScript(script: RegexScriptRow) {
       ? script.applyMode
       : readRegexApplyMode(script as unknown as Record<string, unknown>),
     targetCharacterIds: parseStringArray(script.targetCharacterIds),
+    targetPromptPresetIds: parseStringArray(script.targetPromptPresetIds),
     order: script.order,
     minDepth: script.minDepth,
     maxDepth: script.maxDepth,
@@ -266,6 +267,7 @@ function normalizeRegexImportEntry(entry: unknown, fallbackOrder: number) {
     promptOnly: readRegexApplyMode(entry) === "prompt",
     applyMode: readRegexApplyMode(entry),
     targetCharacterIds: parseStringArray(entry.targetCharacterIds),
+    targetPromptPresetIds: parseStringArray(entry.targetPromptPresetIds),
     order: typeof entry.order === "number" ? fallbackOrder + entry.order : fallbackOrder,
     minDepth: parseNullableNumber(entry.minDepth),
     maxDepth: parseNullableNumber(entry.maxDepth),

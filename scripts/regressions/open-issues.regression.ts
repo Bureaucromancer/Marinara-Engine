@@ -8,7 +8,7 @@ import type { Chat, ChatMode, Message } from "../../packages/shared/src/types/ch
 import { chatModeSchema } from "../../packages/shared/src/schemas/chat.schema.js";
 import playwrightConfig from "../../playwright.config.js";
 import { resolveDevSharedBuildScript } from "../dev-shared-build.mjs";
-import { characterCardVersions, characters, chats, messages } from "../../packages/server/src/db/schema/index.js";
+import { characterCardVersions, characters, chatPresets, chats, messages } from "../../packages/server/src/db/schema/index.js";
 import { eq } from "../../packages/server/src/db/file-query.js";
 import { parseBuildMeta, resolveBuildBranch } from "../../packages/server/src/config/build-info.js";
 
@@ -186,6 +186,8 @@ import { createCustomToolsStorage } from "../../packages/server/src/services/sto
 import { createCharactersStorage } from "../../packages/server/src/services/storage/characters.storage.js";
 import { createLorebooksStorage } from "../../packages/server/src/services/storage/lorebooks.storage.js";
 import { createNoodleStorage } from "../../packages/server/src/services/storage/noodle.storage.js";
+import { createChatPresetsStorage } from "../../packages/server/src/services/storage/chat-presets.storage.js";
+import { buildGoogleModelsPageUrl } from "../../packages/server/src/routes/connections.routes.js";
 import { buildReferencedCharacterContext } from "../../packages/server/src/services/prompt/macro-context.js";
 import { resolveRunPodComfyUiTimeoutSeconds } from "../../packages/server/src/services/image/runpod-comfyui.service.js";
 import {
@@ -650,6 +652,44 @@ try {
   const characterStorage = createCharactersStorage(db);
   const lorebookStorage = createLorebooksStorage(db);
   const noodleStorage = createNoodleStorage(db);
+  const chatPresetStorage = createChatPresetsStorage(db);
+  await chatPresetStorage.ensureDefaults();
+  const originalConversationDefault = await chatPresetStorage.getDefault("conversation");
+  assert.ok(originalConversationDefault, "Conversation mode must start with a Default settings profile");
+  await db.insert(chatPresets).values({
+    id: "duplicate-conversation-default",
+    name: "Default Copy",
+    mode: "conversation",
+    isDefault: "true",
+    isActive: "true",
+    settings: JSON.stringify({ connectionId: "must-be-reset" }),
+    createdAt: "9999-12-31T23:59:59.000Z",
+    updatedAt: "9999-12-31T23:59:59.000Z",
+  });
+  await chatPresetStorage.ensureDefaults();
+  const normalizedConversationProfiles = await chatPresetStorage.listByMode("conversation");
+  assert.equal(
+    normalizedConversationProfiles.filter((profile) => profile.isDefault).length,
+    1,
+    "Default settings profile repair must remove duplicate built-ins",
+  );
+  assert.equal(
+    normalizedConversationProfiles.filter((profile) => profile.isActive).length,
+    1,
+    "Default settings profile repair must leave exactly one active profile",
+  );
+  assert.deepEqual(await chatPresetStorage.getDefault("conversation"), {
+    ...originalConversationDefault,
+    name: "Default",
+    isActive: true,
+    settings: {},
+  });
+  await chatPresetStorage.ensureDefaults();
+  assert.equal(
+    (await chatPresetStorage.listByMode("conversation")).filter((profile) => profile.isDefault).length,
+    1,
+    "Default settings profile repair must be idempotent",
+  );
   const storageTrimFixture = await characterStorage.create({
     ...characterDataSchema.parse({ name: "Storage trim fixture" }),
     name: "  Storage trim fixture  ",
@@ -1229,6 +1269,17 @@ try {
   else process.env.FILE_STORAGE_DIR = previousFileStorageDir;
   rmSync(characterUpdateStorageRoot, { recursive: true, force: true });
 }
+
+const googleModelsPageUrl = buildGoogleModelsPageUrl(
+  "https://gemini-proxy.example.test/v1beta",
+  "/models",
+  "next page/token",
+);
+assert.equal(
+  googleModelsPageUrl,
+  "https://gemini-proxy.example.test/v1beta/models?pageSize=1000&pageToken=next%20page%2Ftoken",
+);
+assert.equal(new URL(googleModelsPageUrl).searchParams.has("key"), false, "Gemini API keys must stay out of model URLs");
 
 const professorMariAboutMeCommands = parseCharacterCommands(
   '[update_character: name="Luna", about_me="fate dealer. tea hoarder. 🔮"]\n' +

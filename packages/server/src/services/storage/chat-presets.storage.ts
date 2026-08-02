@@ -340,7 +340,23 @@ export function createChatPresetsStorage(db: DB) {
             .where(
               and(eq(chatPresets.mode, mode), eq(chatPresets.isDefault, "true")),
             )) as ChatPresetRow[];
-          let defaultId = defaultRows[0]?.id ?? null;
+          const canonicalDefault = [...defaultRows].sort(
+            (left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+          )[0];
+          let defaultId = canonicalDefault?.id ?? null;
+          if (canonicalDefault) {
+            if (canonicalDefault.name !== "Default" || canonicalDefault.settings !== "{}") {
+              await tx
+                .update(chatPresets)
+                .set({ name: "Default", settings: JSON.stringify({}) })
+                .where(eq(chatPresets.id, canonicalDefault.id));
+            }
+            for (const duplicate of defaultRows) {
+              if (duplicate.id !== canonicalDefault.id) {
+                await tx.delete(chatPresets).where(eq(chatPresets.id, duplicate.id));
+              }
+            }
+          }
           if (!defaultId) {
             const id = newId();
             const ts = now();
