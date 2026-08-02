@@ -7,12 +7,32 @@ import { mkdir, readFile, writeFile } from "fs/promises";
 import { extname, join } from "path";
 import { createScenarioSchema, updateScenarioSchema } from "@marinara-engine/shared";
 import { createScenariosStorage } from "../services/storage/scenarios.storage.js";
+import {
+  buildCompatibleScenarioExport,
+  buildNativeScenarioEnvelope,
+} from "../services/export/scenario-export.js";
 import { normalizeTimestampOverrides } from "../services/import/import-timestamps.js";
 import { DATA_DIR } from "../utils/data-dir.js";
 import { assertInsideDir, extensionFromImageMime, isAllowedImageBuffer } from "../utils/security.js";
 import { parseLibraryPageQuery } from "../utils/list-pagination.js";
+import AdmZip from "adm-zip";
 
 const SCENARIO_IMAGES_DIR = join(DATA_DIR, "scenarios", "images");
+
+type ExportFormat = "native" | "compatible";
+
+function toSafeExportName(name: string, fallback: string) {
+  const sanitized = name
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return sanitized || fallback;
+}
+
+function resolveExportFormat(query: unknown, fallback: ExportFormat = "native"): ExportFormat {
+  const raw = query && typeof query === "object" ? (query as Record<string, unknown>).format : undefined;
+  return raw === "compatible" ? "compatible" : fallback;
+}
 
 function parseImageUpload(image: string): { buffer: Buffer; hintedExt: string } {
   let base64 = image;
@@ -125,5 +145,59 @@ export async function scenariosRoutes(app: FastifyInstance) {
   app.delete<{ Params: { id: string } }>("/:id", async (req, reply) => {
     await storage.remove(req.params.id);
     return reply.status(204).send();
+  });
+
+  // ── Export ──
+  //
+  // Linked lorebooks and characters travel as plain ids in both lanes; nothing
+  // is embedded, so links only resolve on an install that already has them.
+  // The client warns before exporting a scenario that has any.
+
+  app.get<{ Params: { id: string }; Querystring: { format?: ExportFormat } }>("/:id/export", async (req, reply) => {
+    const scenario = await storage.getById(req.params.id);
+    if (!scenario) return reply.status(404).send({ error: "Scenario not found" });
+
+    const format = resolveExportFormat(req.query);
+    const filename = encodeURIComponent(scenario.name || "scenario");
+    if (format === "compatible") {
+      return reply
+        .header("Content-Disposition", `attachment; filename="${filename}.json"`)
+        .send(buildCompatibleScenarioExport(scenario));
+    }
+    return reply
+      .header("Content-Disposition", `attachment; filename="${filename}.marinara.json"`)
+      .send(buildNativeScenarioEnvelope(scenario));
+  });
+
+  app.post("/export-bulk", async (req, reply) => {
+    const { ids, format = "native" } = req.body as { ids?: string[]; format?: ExportFormat };
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return reply.status(400).send({ error: "ids array is required" });
+    }
+
+    const zip = new AdmZip();
+    let exportedCount = 0;
+    for (const id of ids) {
+      const scenario = await storage.getById(id);
+      if (!scenario) continue;
+      const safeName = toSafeExportName(scenario.name || "scenario", `scenario-${exportedCount + 1}`);
+      const payload =
+        format === "compatible" ? buildCompatibleScenarioExport(scenario) : buildNativeScenarioEnvelope(scenario);
+      const extension = format === "compatible" ? "json" : "marinara.json";
+      zip.addFile(`${safeName}.${extension}`, Buffer.from(JSON.stringify(payload, null, 2), "utf-8"));
+      exportedCount++;
+    }
+
+    if (exportedCount === 0) {
+      return reply.status(404).send({ error: "No scenarios found for the provided ids" });
+    }
+
+    return reply
+      .header("Content-Type", "application/zip")
+      .header(
+        "Content-Disposition",
+        `attachment; filename="${format === "compatible" ? "compatible-scenarios.zip" : "marinara-scenarios.zip"}"`,
+      )
+      .send(zip.toBuffer());
   });
 }
