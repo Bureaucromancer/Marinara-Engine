@@ -76,9 +76,9 @@ function TemplateCollectionEditor({
   };
 
   return (
-    <div className="space-y-3 rounded-xl bg-[var(--secondary)]/55 p-3 ring-1 ring-[var(--border)]">
+    <div className="min-w-0 max-w-full space-y-3 overflow-hidden rounded-xl bg-[var(--secondary)]/55 p-3 ring-1 ring-[var(--border)]">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
+        <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold text-[var(--foreground)]">{title}</p>
           <p className="mt-0.5 text-[0.625rem] leading-relaxed text-[var(--muted-foreground)]">{description}</p>
         </div>
@@ -97,7 +97,7 @@ function TemplateCollectionEditor({
               },
             ]);
           }}
-          className="flex items-center gap-1.5 rounded-lg bg-[var(--background)] px-2.5 py-1.5 text-[0.6875rem] font-medium ring-1 ring-[var(--border)] hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg bg-[var(--background)] px-3 py-2 text-[0.6875rem] font-medium ring-1 ring-[var(--border)] hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Plus size="0.6875rem" /> {localizeUi("ui.agents.agenteditor.addOption")}
         </button>
@@ -109,7 +109,7 @@ function TemplateCollectionEditor({
         return (
           <div
             key={template.id}
-            className="space-y-2 rounded-xl bg-[var(--background)]/70 p-3 ring-1 ring-[var(--border)]"
+            className="min-w-0 max-w-full space-y-2 overflow-hidden rounded-xl bg-[var(--background)]/70 p-3 ring-1 ring-[var(--border)]"
           >
             <div className="flex items-center gap-2">
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[var(--secondary)] text-[0.6875rem] text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
@@ -126,7 +126,7 @@ function TemplateCollectionEditor({
                   type="button"
                   disabled={matchesDefault}
                   onClick={() => update(template.id, { promptTemplate: defaultTemplate.promptTemplate })}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted-foreground)] hover:bg-[var(--accent)] disabled:opacity-35"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[var(--muted-foreground)] hover:bg-[var(--accent)] disabled:opacity-35"
                   title={localizeUi("ui.agents.agenteditor.restoreDefaultPrompt")}
                 >
                   <RotateCcw size="0.75rem" />
@@ -136,7 +136,7 @@ function TemplateCollectionEditor({
                 type="button"
                 disabled={required && templates.length <= 1}
                 onClick={() => onChange(templates.filter((entry) => entry.id !== template.id))}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted-foreground)] hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-35"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[var(--muted-foreground)] hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-35"
                 title={localizeUi("ui.agents.agenteditor.removePromptOption")}
               >
                 <Trash2 size="0.75rem" />
@@ -145,7 +145,7 @@ function TemplateCollectionEditor({
             <input
               value={template.description ?? ""}
               onChange={(event) => update(template.id, { description: event.target.value })}
-              className="w-full rounded-lg bg-[var(--secondary)] px-2.5 py-1.5 text-xs ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+              className="min-w-0 max-w-full w-full rounded-lg bg-[var(--secondary)] px-2.5 py-1.5 text-xs ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
               placeholder={localizeUi("ui.agents.agenteditor.shortDescriptionShownInChatSettings")}
             />
             <MacroTextarea
@@ -155,7 +155,10 @@ function TemplateCollectionEditor({
               onExpandedClose={() => restoreRequiredPrompt(template)}
               rows={7}
               title={template.name}
-              className="w-full resize-y rounded-lg bg-[var(--secondary)] px-3 py-2 font-mono text-xs leading-relaxed ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+              className="min-w-0 max-w-full w-full resize-y rounded-lg bg-[var(--secondary)] px-3 py-2 font-mono text-xs leading-relaxed ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+              wrapperClassName="min-w-0 max-w-full"
+              buttonClassName="flex min-h-11 min-w-11 items-center justify-center"
+              controlPaddingClassName="pr-12"
               placeholder={localizeUi("ui.agents.agenteditor.writeThePromptTemplateForThisOption")}
             />
           </div>
@@ -177,7 +180,7 @@ function ToggleRow({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--secondary)]/55 px-3 py-2.5 ring-1 ring-[var(--border)]">
+    <label className="flex min-w-0 max-w-full cursor-pointer items-start justify-between gap-4 overflow-hidden rounded-xl bg-[var(--secondary)]/55 px-3 py-2.5 ring-1 ring-[var(--border)]">
       <span className="min-w-0">
         <span className="block text-xs font-medium text-[var(--foreground)]">{label}</span>
         <span className="mt-0.5 block text-[0.625rem] leading-relaxed text-[var(--muted-foreground)]">
@@ -217,7 +220,7 @@ export function StoryboardAgentSettingsPanel({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 max-w-full space-y-4 overflow-hidden [&_button]:max-w-full [&_input]:min-w-0 [&_input]:max-w-full [&_label]:min-w-0 [&_section]:min-w-0 [&_select]:min-w-0 [&_select]:max-w-full [&_textarea]:min-w-0 [&_textarea]:max-w-full">
       <div className="rounded-xl border border-[var(--primary)]/25 bg-[var(--primary)]/8 p-3">
         <div className="flex items-start gap-2">
           <PanelsTopLeft size="0.875rem" className="mt-0.5 shrink-0 text-[var(--primary)]" />
