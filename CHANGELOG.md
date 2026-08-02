@@ -4,6 +4,14 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 
 ## [Unreleased]
 
+### Added
+
+- Added the **Hindi** documentation language pack, covering all 124 in-app guides (developer docs included) in natural Hindi, with English UI control names preserved for following instructions against the interface and Hindi sidebar category labels in the docs viewer. Select it under **Settings → General → Documentation Language** via **Download & Replace**.
+
+### Fixed
+
+- Sorted the **Settings → General → Language** dropdown by language code with English pinned first, matching the Documentation Language selector. The previous native-label sort used a different collation per entry, which scrambled the order across scripts.
+
 ## [2.4.1]
 
 ### Added

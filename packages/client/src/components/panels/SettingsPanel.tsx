@@ -524,7 +524,7 @@ const SETTINGS_SEARCHABLE_CONTROLS: readonly SettingsSearchableControlMeta[] = [
     sectionId: "application",
     label: "Documentation Language",
     description: "Choose the language for Marinara's built-in guides.",
-    aliases: ["documentation", "guides", "docs", "manual", "spanish", "español", "german", "deutsch", "french", "français", "portuguese", "português", "brazilian", "polish", "polski", "russian", "русский", "japanese", "日本語", "korean", "한국어", "chinese", "simplified", "简体中文", "中文"],
+    aliases: ["documentation", "guides", "docs", "manual", "spanish", "español", "german", "deutsch", "french", "français", "portuguese", "português", "brazilian", "polish", "polski", "russian", "русский", "japanese", "日本語", "korean", "한국어", "chinese", "simplified", "简体中文", "中文", "hindi", "हिन्दी"],
     kind: "Select",
   },
   {
