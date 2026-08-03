@@ -137,10 +137,20 @@ export const capabilityPackageManifestV2Schema = capabilityPackageManifestBaseSc
   })
   .strict();
 
-export const capabilityPackageManifestSchema = z.discriminatedUnion("schemaVersion", [
-  capabilityPackageManifestV1Schema,
-  capabilityPackageManifestV2Schema,
-]);
+export const capabilityPackageManifestSchema = z
+  .discriminatedUnion("schemaVersion", [capabilityPackageManifestV1Schema, capabilityPackageManifestV2Schema])
+  .superRefine((manifest, ctx) => {
+    // A game-surface package draws the whole mode from its client bundle: without a client entrypoint the
+    // module loader skips it, so it would be offered in the setup wizard and then render nothing. Caught
+    // here so it fails at install with a clear reason rather than as an empty screen later.
+    if (manifest.contributions?.slots?.includes("game-surface") && !manifest.entrypoints.client) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["entrypoints", "client"],
+        message: 'A package declaring the "game-surface" slot must provide a client entrypoint to render it',
+      });
+    }
+  });
 
 export const capabilityCatalogPackageSchema = z
   .object({

@@ -64,15 +64,20 @@ export function registerCapabilityPromptContext(
 const CONTRIBUTOR_TIMEOUT_MS = 2_000;
 
 /**
- * Reject if `value` has not settled within {@link CONTRIBUTOR_TIMEOUT_MS}. A synchronous return is passed
- * straight through, and the timer is cleared on settle and unref'd so a pending deadline never holds the
- * event loop open during shutdown.
+ * Reject if `value` has not settled within {@link CONTRIBUTOR_TIMEOUT_MS}. A primitive is passed straight
+ * through, and the timer is cleared on settle and unref'd so a pending deadline never holds the event loop
+ * open during shutdown.
+ *
+ * Anything that can defer races the deadline, not just a native Promise: `Promise.resolve` ADOPTS a
+ * thenable, so a hand-rolled one that never settles would slip past the guard and hang the turn — which is
+ * the exact failure this exists to prevent.
  */
 function withDeadline<T>(value: Promise<T> | T, packageId: string): Promise<T> {
-  if (!(value instanceof Promise)) return Promise.resolve(value);
+  const canDefer = value !== null && (typeof value === "object" || typeof value === "function");
+  if (!canDefer) return Promise.resolve(value);
   let timer: NodeJS.Timeout;
   return Promise.race([
-    value,
+    Promise.resolve(value),
     new Promise<never>((_resolve, reject) => {
       timer = setTimeout(
         () => reject(new Error(`prompt-context contributor ${packageId} exceeded ${CONTRIBUTOR_TIMEOUT_MS}ms`)),
