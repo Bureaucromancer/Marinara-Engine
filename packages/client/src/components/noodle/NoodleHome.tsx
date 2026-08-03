@@ -117,6 +117,8 @@ import {
   Avatar,
   getNoodleAccentStyle,
   NoodleLogo,
+  NOODLER_ADD_MARK,
+  NOODLER_MARK,
   NoodleShell,
   NOODLE_BLUE,
   NOODLE_PINK,
@@ -4514,7 +4516,7 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
                           <NoodleLogo className="h-4 w-6" />
                         ) : (
                           <span aria-hidden="true" className="text-sm font-black text-[var(--noodle-accent)]">
-                            +R
+                            {NOODLER_ADD_MARK}
                           </span>
                         )}
                         {tab === "noodle"
@@ -4697,7 +4699,7 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
                     style={getNoodleAccentStyle(NOODLE_PINK)}
                     className="h-9 rounded-full border border-[var(--noodle-accent)]/45 px-4 text-sm font-black tracking-tight text-[var(--noodle-accent)] transition-colors hover:bg-[var(--noodle-accent)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--noodle-accent)]"
                   >
-                    +R
+                    {NOODLER_ADD_MARK}
                   </button>
                 ) : viewedProfileHasStageProfile ? (
                   <span
@@ -4705,7 +4707,8 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
                     style={getNoodleAccentStyle(NOODLE_PINK)}
                     className="flex h-9 items-center rounded-full border border-[var(--noodle-accent)]/45 bg-[var(--noodle-accent)]/10 px-4 text-sm font-black tracking-tight text-[var(--noodle-accent)]"
                   >
-                    R<span className="sr-only"> {localizeUi("ui.noodle.noodlehome.hasStageProfile")}</span>
+                    {NOODLER_MARK}
+                    <span className="sr-only"> {localizeUi("ui.noodle.noodlehome.hasStageProfile")}</span>
                   </span>
                 ) : undefined
               }

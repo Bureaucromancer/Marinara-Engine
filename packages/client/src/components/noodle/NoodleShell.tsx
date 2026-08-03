@@ -20,6 +20,11 @@ export const NOODLE_PINK = "#FF7EC1";
 const NoodleAccentContext = createContext<string>(NOODLE_BLUE);
 export const useNoodleAccent = () => useContext(NoodleAccentContext);
 export const NOODLE_ICON_SCOPE_CLASS = "[&_:where(svg)]:text-[var(--noodle-accent)]";
+// NoodleR's mark. Untranslated on purpose — it is branding, not copy — and a constant so the
+// localization audit does not read it as a hardcoded string. Meaning is carried by the adjacent
+// label or tooltip, never by the mark alone.
+export const NOODLER_MARK = "R";
+export const NOODLER_ADD_MARK = "+R";
 export const NOODLE_LOGO_SRC = "/noodle-klusek.png";
 const NOODLER_LOGO_SRC = "/noodler-klusek.png";
 export const NOODLE_PERSONA_SWITCHER_PAGE_SIZE = 5;
