@@ -190,6 +190,7 @@ import { createNoodleStorage } from "../../packages/server/src/services/storage/
 import { createChatPresetsStorage } from "../../packages/server/src/services/storage/chat-presets.storage.js";
 import { buildGoogleModelsPageUrl } from "../../packages/server/src/routes/connections.routes.js";
 import { buildReferencedCharacterContext } from "../../packages/server/src/services/prompt/macro-context.js";
+import { assemblePrompt } from "../../packages/server/src/services/prompt/assembler.js";
 import { resolveRunPodComfyUiTimeoutSeconds } from "../../packages/server/src/services/image/runpod-comfyui.service.js";
 import {
   findMissingComfyReferenceSlots,
@@ -846,7 +847,83 @@ try {
   assert.match(referencedContext.content, /Blonde hair and a blue summer dress\./u);
   assert.match(referencedContext.content, /REFERENCED_LOREBOOK_MEMORY/u);
   assert.doesNotMatch(referencedContext.content, /REFERENCED_GREETING_MUST_STAY_OUT/u);
-  assert.doesNotMatch(referencedContext.content, /REFERENCED_EXAMPLE_MUST_STAY_OUT/u);
+  assert.match(referencedContext.content, /REFERENCED_EXAMPLE_MUST_STAY_OUT/u);
+
+  const macroLorebook = await lorebookStorage.create(
+    createLorebookSchema.parse({
+      name: "Active character references",
+      category: "character",
+      characterIds: [storageTrimFixture.id],
+    }),
+  );
+  await lorebookStorage.createEntry(
+    createLorebookEntrySchema.parse({
+      lorebookId: macroLorebook.id,
+      name: "Cafe companion",
+      content: `The cafe companion is {{${referencedCharacter.id}}}.`,
+      keys: ["cafe"],
+    }),
+  );
+  const assembledReference = await assemblePrompt({
+    db,
+    preset: {
+      id: "character-reference-preset",
+      name: "Character reference fixture",
+      sectionOrder: JSON.stringify(["lorebook", "history"]),
+      groupOrder: JSON.stringify([]),
+      wrapFormat: "xml",
+      parameters: JSON.stringify({}),
+      variableGroups: JSON.stringify([]),
+      variableValues: JSON.stringify({}),
+    },
+    sections: [
+      {
+        id: "lorebook",
+        presetId: "character-reference-preset",
+        identifier: "lorebook",
+        name: "Lorebook",
+        content: "",
+        role: "system",
+        enabled: "true",
+        isMarker: "true",
+        groupId: null,
+        markerConfig: JSON.stringify({ type: "lorebook" }),
+        injectionPosition: "relative",
+        injectionDepth: 0,
+        injectionOrder: 0,
+        forbidOverrides: "false",
+      },
+      {
+        id: "history",
+        presetId: "character-reference-preset",
+        identifier: "chatHistory",
+        name: "Chat History",
+        content: "",
+        role: "system",
+        enabled: "true",
+        isMarker: "true",
+        groupId: null,
+        markerConfig: JSON.stringify({ type: "chat_history" }),
+        injectionPosition: "relative",
+        injectionDepth: 0,
+        injectionOrder: 1,
+        forbidOverrides: "false",
+      },
+    ],
+    groups: [],
+    choiceBlocks: [],
+    chatChoices: {},
+    chatId: "character-reference-regression",
+    characterIds: [storageTrimFixture.id],
+    personaName: "Mari",
+    personaDescription: "",
+    chatMessages: [{ role: "user", content: "I went to the cafe." }],
+  });
+  const assembledReferenceText = assembledReference.messages.map((message) => message.content).join("\n");
+  assert.match(assembledReferenceText, /The cafe companion is Susie\./u);
+  assert.match(assembledReferenceText, /A trusted friend from the western district\./u);
+  assert.match(assembledReferenceText, /REFERENCED_EXAMPLE_MUST_STAY_OUT/u);
+  assert.doesNotMatch(assembledReferenceText, /REFERENCED_GREETING_MUST_STAY_OUT/u);
 
   await lorebookStorage.update(hiddenCharacterLorebook.id, { hiddenFromLibrary: false });
   assert.equal(

@@ -118,6 +118,7 @@ import {
   clampRoleplaySummaryMaxTokens,
   formatRoleplaySummaryChatLog,
   resolveChatSummaryPrompt,
+  resolveChatSummaryCombinePrompt,
 } from "../services/generation/roleplay-summary-runtime.js";
 import { resolveLorebookTokenBudget } from "../services/generation/lorebook-generation-runtime.js";
 import { resolveGameGmPromptTemplate } from "../services/generation/game-gm-prompt-runtime.js";
@@ -3964,6 +3965,7 @@ export async function chatsRoutes(app: FastifyInstance) {
         chatMetadata: chatMeta,
         globalSettingsValue: globalSummaryPromptSettings,
       });
+      const combinePrompt = resolveChatSummaryCombinePrompt(globalSummaryPromptSettings);
       const sourceText = selectedEntries
         .map((entry, index) => `Summary ${index + 1} — ${entry.title}:\n${entry.content}`)
         .join("\n\n");
@@ -3972,9 +3974,7 @@ export async function chatsRoutes(app: FastifyInstance) {
           { role: "system", content: summaryPrompt },
           {
             role: "user",
-            content:
-              "Condense the ordered summaries below into one summary. Preserve durable facts, relationships, decisions, and chronological order. Return the same summary format requested by the system prompt.\n\n" +
-              sourceText,
+            content: `${combinePrompt}\n\n${sourceText}`,
           },
         ],
         {

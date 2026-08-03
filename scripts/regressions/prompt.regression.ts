@@ -24,6 +24,8 @@ import {
   normalizeChatSummaryPromptSettings,
   normalizeStoryboardAgentSettings,
   LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID,
+  DEFAULT_AGENT_TOOLS,
+  DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT,
   DEFAULT_CHAT_SUMMARY_PROMPT,
   DEFAULT_LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT,
   normalizeCharacterTrackerCustomFieldDefaults,
@@ -631,8 +633,10 @@ import {
   appendContinuationMessageContent,
   CONTINUE_ASSISTANT_MESSAGE_DIRECT_PROMPT,
   formatRoleplaySummaryChatLog,
+  resolveChatSummaryCombinePrompt,
   resolveChatSummaryPrompt,
 } from "../../packages/server/src/services/generation/roleplay-summary-runtime.js";
+import { isChatToolEnabledByDefault } from "../../packages/server/src/services/generation/tool-resolution-runtime.js";
 import { scopeIndividualGroupMessagesForTarget } from "../../packages/server/src/services/generation/prompt-message-scope.js";
 import { resolveGenerationPromptPresetChoices } from "../../packages/server/src/routes/generate/prompt-preset-selection.js";
 import {
@@ -6775,7 +6779,11 @@ Use HTML sparingly and diegetically. Do not replace normal prose/dialogue unless
   {
     name: "chat summary prompt settings reject malformed values and preserve only valid active templates",
     run() {
-      const emptySettings = { templates: [], activeTemplateId: null };
+      const emptySettings = {
+        templates: [],
+        activeTemplateId: null,
+        combinePrompt: DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT,
+      };
       assert.deepEqual(normalizeChatSummaryPromptSettings("{not json"), emptySettings);
       assert.deepEqual(
         normalizeChatSummaryPromptSettings({
@@ -6798,15 +6806,26 @@ Use HTML sparingly and diegetically. Do not replace normal prose/dialogue unless
           ],
           activeTemplateId: " summary ",
         }),
-        { templates, activeTemplateId: "summary" },
+        { templates, activeTemplateId: "summary", combinePrompt: DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT },
       );
       assert.deepEqual(normalizeChatSummaryPromptSettings({ templates, activeTemplateId: "missing" }), {
         templates,
         activeTemplateId: null,
+        combinePrompt: DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT,
       });
       assert.deepEqual(
         normalizeChatSummaryPromptSettings({ templates, activeTemplateId: LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID }),
-        { templates, activeTemplateId: LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID },
+        {
+          templates,
+          activeTemplateId: LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID,
+          combinePrompt: DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT,
+        },
+      );
+      assert.equal(
+        resolveChatSummaryCombinePrompt(
+          JSON.stringify({ templates, activeTemplateId: null, combinePrompt: " Merge these notes. " }),
+        ),
+        "Merge these notes.",
       );
       assert.equal(
         resolveChatSummaryPrompt({
@@ -6835,6 +6854,15 @@ Use HTML sparingly and diegetically. Do not replace normal prose/dialogue unless
         }),
         DEFAULT_CHAT_SUMMARY_PROMPT,
       );
+    },
+  },
+  {
+    name: "Spotify tools stay agent-owned when chat function calls are enabled",
+    run() {
+      for (const toolName of DEFAULT_AGENT_TOOLS.spotify ?? []) {
+        assert.equal(isChatToolEnabledByDefault(toolName), false, `${toolName} must require Music DJ selection`);
+      }
+      assert.equal(isChatToolEnabledByDefault("roll_dice"), true);
     },
   },
   {

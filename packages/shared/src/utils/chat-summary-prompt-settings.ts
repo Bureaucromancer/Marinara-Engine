@@ -1,5 +1,8 @@
 import type { ChatSummaryPromptSettings, ChatSummaryPromptTemplate } from "../types/chat.js";
-import { LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID } from "../constants/agent-prompts.js";
+import {
+  DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT,
+  LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID,
+} from "../constants/agent-prompts.js";
 
 export function isLongTermMemoryChatSummaryPromptAllowed(chatMetadata: Record<string, unknown>): boolean {
   return (
@@ -36,7 +39,7 @@ export function normalizeChatSummaryPromptSettings(value: unknown): ChatSummaryP
     }
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { templates: [], activeTemplateId: null };
+    return { templates: [], activeTemplateId: null, combinePrompt: DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT };
   }
 
   const record = parsed as Record<string, unknown>;
@@ -47,6 +50,10 @@ export function normalizeChatSummaryPromptSettings(value: unknown): ChatSummaryP
       : null;
   return {
     templates,
+    combinePrompt:
+      typeof record.combinePrompt === "string" && record.combinePrompt.trim()
+        ? record.combinePrompt.trim()
+        : DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT,
     activeTemplateId:
       activeTemplateId &&
       (activeTemplateId === LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID ||

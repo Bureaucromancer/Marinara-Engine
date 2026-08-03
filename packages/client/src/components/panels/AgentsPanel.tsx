@@ -32,7 +32,11 @@ import {
   useUploadAgentImage,
   type AgentConfigRow,
 } from "../../hooks/use-agents";
-import { useCapabilityAgentRegistry, useCapabilityCatalog } from "../../hooks/use-capability-packages";
+import {
+  useCapabilityAgentRegistry,
+  useCapabilityCatalog,
+  useUninstallCapabilityPackage,
+} from "../../hooks/use-capability-packages";
 import {
   BUILT_IN_AGENTS,
   DEFAULT_AGENT_TOOLS,
@@ -219,6 +223,7 @@ export function AgentsPanel() {
   const importAgent = useImportAgent();
   const { data: agentImportPolicy, isLoading: agentImportPolicyLoading } = useAgentImportPolicy();
   const deleteAgent = useDeleteAgent();
+  const uninstallCapabilityPackage = useUninstallCapabilityPackage();
   const uploadAgentImage = useUploadAgentImage();
   const { data: agentFolders = [] } = useLibraryFolders("agents");
   const createAgentFolder = useCreateLibraryFolder("agents");
@@ -292,6 +297,15 @@ export function AgentsPanel() {
   const builtInAgentIds = useMemo(
     () => new Set(availableBuiltInAgents.map((agent) => agent.id)),
     [availableBuiltInAgents],
+  );
+  const packageIdByAgentType = useMemo(
+    () =>
+      new Map(
+        (capabilityAgents ?? []).flatMap((agent) =>
+          agent.packageId ? ([[agent.id, agent.packageId]] as const) : [],
+        ),
+      ),
+    [capabilityAgents],
   );
   const catalogArtworkByAgentId = useMemo(
     () =>
@@ -434,6 +448,53 @@ export function AgentsPanel() {
     [selectableAgents, selectedAgentIds],
   );
 
+  const removeAgentResource = useCallback(
+    (agent: AgentConfigRow) => {
+      const packageId = packageIdByAgentType.get(agent.type);
+      return packageId
+        ? uninstallCapabilityPackage.mutateAsync(packageId)
+        : deleteAgent.mutateAsync(builtInAgentIds.has(agent.type) ? agent.type : agent.id);
+    },
+    [builtInAgentIds, deleteAgent, packageIdByAgentType, uninstallCapabilityPackage],
+  );
+
+  const confirmAndRemoveAgent = useCallback(
+    async (agent: AgentConfigRow) => {
+      const name = getAgentLibraryDisplayName(agent);
+      const packageId = packageIdByAgentType.get(agent.type);
+      const confirmed = await showConfirmDialog({
+        title: packageId
+          ? localizeUi("ui.agents.agentcatalogview.uninstallValue1", { value1: name })
+          : localizeUi("ui.panels.agentspanel.deleteAgent"),
+        message: packageId
+          ? localizeUi("ui.agents.agentcatalogview.theDownloadedPackageActiveChatSelectionsAndAgentConfiguration")
+          : builtInAgentIds.has(agent.type)
+            ? localizeUi("ui.panels.agentspanel.deleteBuiltInValue1", { value1: name })
+            : localizeUi("ui.panels.agentspanel.deleteValue1", { value1: name }),
+        confirmLabel: packageId
+          ? localizeUi("ui.agents.agentcatalogview.uninstall")
+          : localizeUi("lorebook.editor.batch.delete"),
+        tone: "destructive",
+      });
+      if (!confirmed) return;
+      try {
+        await removeAgentResource(agent);
+        if (packageId) {
+          toast.success(localizeUi("ui.agents.agentcatalogview.value1Uninstalled", { value1: name }));
+        }
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : packageId
+              ? localizeUi("ui.agents.agentcatalogview.agentUninstallFailed")
+              : localizeUi("ui.panels.agentspanel.failedToDeleteValue1AgentValue2", { value1: 1, value2: "" }),
+        );
+      }
+    },
+    [builtInAgentIds, localizeUi, packageIdByAgentType, removeAgentResource],
+  );
+
   const handleCreateAgent = () => {
     // Create a new custom agent immediately in DB then open editor
     openAgentDetail("__new__");
@@ -569,38 +630,53 @@ export function AgentsPanel() {
   );
 
   const handleDeleteSelectedAgents = useCallback(async () => {
-    const ids = selectedAgents.map((agent) => agent.id);
-    if (ids.length === 0) return;
-    const agentNoun = ids.length === 1 ? "agent" : "agents";
-    const deleteMessage =
-      `Delete ${ids.length} selected ${agentNoun}? ` + "Basic agents will be hidden from the library and pickers.";
+    if (selectedAgents.length === 0) return;
 
     if (
       !(await showConfirmDialog({
-        title:localizeUi("ui.panels.agentspanel.deleteAgents"),
-        message: deleteMessage,
-        confirmLabel:localizeUi("lorebook.editor.batch.delete"),
+        title: localizeUi("ui.panels.agentspanel.removeAgents"),
+        message: localizeUi("ui.panels.agentspanel.removeSelectedAgents", { count: selectedAgents.length }),
+        confirmLabel: localizeUi("ui.panels.agentspanel.remove"),
         tone: "destructive",
       }))
     ) {
       return;
     }
 
-    const results = await Promise.allSettled(ids.map((id) => deleteAgent.mutateAsync(id)));
-    const failedIds = ids.filter((_, index) => results[index]?.status === "rejected");
-    const deletedCount = ids.length - failedIds.length;
+    const resources = new Map<string, AgentConfigRow[]>();
+    for (const agent of selectedAgents) {
+      const packageId = packageIdByAgentType.get(agent.type);
+      const key = packageId ? `package:${packageId}` : `agent:${agent.id}`;
+      resources.set(key, [...(resources.get(key) ?? []), agent]);
+    }
+    const operations = [...resources.entries()];
+    const results = await Promise.allSettled(operations.map(([, agents]) => removeAgentResource(agents[0]!)));
+    const failedIds = operations.flatMap(([, agents], index) =>
+      results[index]?.status === "rejected" ? agents.map((agent) => agent.id) : [],
+    );
+    const removedCount = selectedAgents.length - failedIds.length;
 
-    if (deletedCount > 0) {
-      toast.success(localizeUi("ui.panels.agentspanel.deletedValue1AgentValue2", { value1: deletedCount, value2: deletedCount === 1 ? "" :localizeUi("ui.noodle.stageprofileview.s") }));
+    if (removedCount > 0) {
+      toast.success(
+        localizeUi("ui.panels.agentspanel.removedValue1AgentValue2", {
+          value1: removedCount,
+          value2: removedCount === 1 ? "" : localizeUi("ui.noodle.stageprofileview.s"),
+        }),
+      );
     }
     if (failedIds.length > 0) {
       setSelectedAgentIds(new Set(failedIds));
-      toast.error(localizeUi("ui.panels.agentspanel.failedToDeleteValue1AgentValue2", { value1: failedIds.length, value2: failedIds.length === 1 ? "" :localizeUi("ui.noodle.stageprofileview.s") }));
+      toast.error(
+        localizeUi("ui.panels.agentspanel.failedToRemoveValue1AgentValue2", {
+          value1: failedIds.length,
+          value2: failedIds.length === 1 ? "" : localizeUi("ui.noodle.stageprofileview.s"),
+        }),
+      );
       return;
     }
 
     exitSelectionMode();
-  }, [deleteAgent, exitSelectionMode, selectedAgents, localizeUi]);
+  }, [exitSelectionMode, localizeUi, packageIdByAgentType, removeAgentResource, selectedAgents]);
 
   const prepareAgentEntries = useCallback(
     (entries: FolderPackageImportEntry[], source: "file" | "folder", skippedFunctionCount = 0) => {
@@ -834,27 +910,13 @@ export function AgentsPanel() {
         nativeDragEnabled: nativeAgentDragEnabled,
         touchSafeDragMode: touchSafeAgentDragMode,
         suppressClickRef: suppressAgentClickRef,
-        onDelete: async () => {
-          const deleteMessage = custom
-            ? `Delete "${agent.name}"?`
-            : `Delete "${agent.name}"? This basic agent will be hidden from the library and pickers.`;
-          if (
-            await showConfirmDialog({
-              title:localizeUi("ui.panels.agentspanel.deleteAgent"),
-              message: deleteMessage,
-              confirmLabel:localizeUi("lorebook.editor.batch.delete"),
-              tone: "destructive",
-            })
-          ) {
-            deleteAgent.mutate(custom ? agent.id : agent.type);
-          }
-        },
+        onDelete: () => void confirmAndRemoveAgent(agent),
       });
     },
     [
       availableBuiltInAgents,
       catalogArtworkByAgentId,
-      deleteAgent,
+      confirmAndRemoveAgent,
       draggedAgentId,
       getDraggedAgentIds,
       getDraggedAgentTypes,
@@ -1257,20 +1319,7 @@ export function AgentsPanel() {
                   nativeDragEnabled: nativeAgentDragEnabled,
                   touchSafeDragMode: touchSafeAgentDragMode,
                   suppressClickRef: suppressAgentClickRef,
-                  onDelete: async () => {
-                    const deleteMessage =
-                      `Delete "${agent.name}"? ` + "This basic agent will be hidden from the library and pickers.";
-                    if (
-                      await showConfirmDialog({
-                        title:localizeUi("ui.panels.agentspanel.deleteAgent"),
-                        message: deleteMessage,
-                        confirmLabel:localizeUi("lorebook.editor.batch.delete"),
-                        tone: "destructive",
-                      })
-                    ) {
-                      deleteAgent.mutate(agent.id);
-                    }
-                  },
+                  onDelete: () => void confirmAndRemoveAgent(sourceAgent),
                 });
               })
             )}
@@ -1340,18 +1389,7 @@ export function AgentsPanel() {
                 nativeDragEnabled: nativeAgentDragEnabled,
                 touchSafeDragMode: touchSafeAgentDragMode,
                 suppressClickRef: suppressAgentClickRef,
-                onDelete: async () => {
-                  if (
-                    await showConfirmDialog({
-                      title:localizeUi("ui.panels.agentspanel.deleteAgent"),
-                      message:localizeUi("ui.panels.agentspanel.deleteValue1", { value1: agent.name }),
-                      confirmLabel:localizeUi("lorebook.editor.batch.delete"),
-                      tone: "destructive",
-                    })
-                  ) {
-                    deleteAgent.mutate(agent.id);
-                  }
-                },
+                onDelete: () => void confirmAndRemoveAgent(agent),
               }),
             )
           )}
