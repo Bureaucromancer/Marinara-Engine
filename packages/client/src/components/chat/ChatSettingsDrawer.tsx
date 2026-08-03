@@ -237,7 +237,13 @@ import {
   resolveDefaultAgentPromptTemplateId,
   resolveAgentPromptTemplate,
 } from "@marinara-engine/shared";
-import type { Chat, CharacterGroup, Lorebook, GameCombatStyle } from "@marinara-engine/shared";
+import type {
+  Chat,
+  CharacterGroup,
+  GameCombatStyle,
+  Lorebook,
+  SpriteCharacterVisualSettings,
+} from "@marinara-engine/shared";
 import {
   isCustomToolSelectable,
   useCustomToolCapabilities,
@@ -252,7 +258,10 @@ import {
   useHapticStartScan,
 } from "../../hooks/use-haptic";
 import { normalizeSpritePlacements } from "./sprite-placement";
-import type { LocalSpriteVisualSettings } from "./local-sprite-visual-settings";
+import {
+  normalizeSpriteCharacterVisualSettingsMap,
+  type LocalSpriteVisualSettings,
+} from "./local-sprite-visual-settings";
 import {
   DEFAULT_SPRITE_DISPLAY_MODES,
   SPRITE_DISPLAY_OPACITY_MAX,
@@ -310,7 +319,8 @@ interface ChatSettingsDrawerProps {
   spriteArrangeMode?: boolean;
   onToggleSpriteArrange?: () => void;
   onResetSpritePlacements?: () => void;
-  onSpriteSideChange?: (side: "left" | "right") => void;
+  onResetSpriteCharacterVisualSettings?: (characterId: string) => void;
+  onSpriteSideChange?: (side: "left" | "right", characterId?: string) => void;
   spriteVisualSettings?: LocalSpriteVisualSettings;
   onSpriteVisualSettingsChange?: (patch: Partial<LocalSpriteVisualSettings>) => void;
   onOpenScheduleEditor?: (characterId: string, options?: { initialDay?: string | null }) => void;
@@ -761,6 +771,7 @@ export function ChatSettingsDrawer({
   spriteArrangeMode = false,
   onToggleSpriteArrange,
   onResetSpritePlacements,
+  onResetSpriteCharacterVisualSettings,
   onSpriteSideChange,
   spriteVisualSettings,
   onSpriteVisualSettingsChange,
@@ -1061,10 +1072,7 @@ export function ChatSettingsDrawer({
     openRightPanel("agents");
     openAgentCatalog();
   }, [onClose, openAgentCatalog, openRightPanel]);
-  const refreshLorebooks = useCallback(
-    () => qc.invalidateQueries({ queryKey: lorebookKeys.all }),
-    [qc],
-  );
+  const refreshLorebooks = useCallback(() => qc.invalidateQueries({ queryKey: lorebookKeys.all }), [qc]);
   const openLorebookFromSettings = useCallback(
     (lorebookId: string) => {
       void refreshLorebooks();
@@ -1216,7 +1224,10 @@ export function ChatSettingsDrawer({
   );
   const gameMusicDjEnabled =
     metadata.gameUseMusicDj === true || gameUseSpotifyMusic || activeAgentIds.includes("youtube");
-  const spriteCharacterIds: string[] = Array.isArray(metadata.spriteCharacterIds) ? metadata.spriteCharacterIds : [];
+  const spriteCharacterIds = useMemo<string[]>(
+    () => (Array.isArray(metadata.spriteCharacterIds) ? metadata.spriteCharacterIds : []),
+    [metadata.spriteCharacterIds],
+  );
   const spriteDisplayModes = normalizeSpriteDisplayModes(metadata.spriteDisplayModes);
   const spritePosition: "left" | "right" =
     spriteVisualSettings?.spritePosition ?? (metadata.spritePosition === "right" ? "right" : "left");
@@ -1258,17 +1269,41 @@ export function ChatSettingsDrawer({
   );
   const expressionAvatarsEnabled =
     (spriteVisualSettings?.expressionAvatarsEnabled ?? metadata.expressionAvatarsEnabled) === true;
+  const hasLocalCharacterVisualSettings =
+    !!spriteVisualSettings && Object.prototype.hasOwnProperty.call(spriteVisualSettings, "characterOverrides");
+  const spriteCharacterVisualSettings = normalizeSpriteCharacterVisualSettingsMap(
+    hasLocalCharacterVisualSettings ? spriteVisualSettings?.characterOverrides : metadata.spriteCharacterVisualSettings,
+  );
+  const [selectedSpriteLayoutCharacterId, setSelectedSpriteLayoutCharacterId] = useState<string | null>(null);
+  const selectedSpriteCharacterVisualSettings = selectedSpriteLayoutCharacterId
+    ? spriteCharacterVisualSettings[selectedSpriteLayoutCharacterId]
+    : undefined;
+  const editedSpritePosition = selectedSpriteLayoutCharacterId
+    ? (selectedSpriteCharacterVisualSettings?.spritePosition ?? spritePosition)
+    : spritePosition;
+  const editedExpressionSpriteScale = selectedSpriteLayoutCharacterId
+    ? (selectedSpriteCharacterVisualSettings?.expressionSpriteScale ?? expressionSpriteScale)
+    : expressionSpriteScale;
+  const editedFullBodySpriteScale = selectedSpriteLayoutCharacterId
+    ? (selectedSpriteCharacterVisualSettings?.fullBodySpriteScale ?? fullBodySpriteScale)
+    : fullBodySpriteScale;
+  const editedExpressionSpriteOpacity = selectedSpriteLayoutCharacterId
+    ? (selectedSpriteCharacterVisualSettings?.expressionSpriteOpacity ?? expressionSpriteOpacity)
+    : expressionSpriteOpacity;
+  const editedFullBodySpriteOpacity = selectedSpriteLayoutCharacterId
+    ? (selectedSpriteCharacterVisualSettings?.fullBodySpriteOpacity ?? fullBodySpriteOpacity)
+    : fullBodySpriteOpacity;
   const [expressionSpriteScalePercent, setExpressionSpriteScalePercent] = useState(() =>
-    Math.round(expressionSpriteScale * 100),
+    Math.round(editedExpressionSpriteScale * 100),
   );
   const [fullBodySpriteScalePercent, setFullBodySpriteScalePercent] = useState(() =>
-    Math.round(fullBodySpriteScale * 100),
+    Math.round(editedFullBodySpriteScale * 100),
   );
   const [expressionSpriteOpacityPercent, setExpressionSpriteOpacityPercent] = useState(() =>
-    Math.round(expressionSpriteOpacity * 100),
+    Math.round(editedExpressionSpriteOpacity * 100),
   );
   const [fullBodySpriteOpacityPercent, setFullBodySpriteOpacityPercent] = useState(() =>
-    Math.round(fullBodySpriteOpacity * 100),
+    Math.round(editedFullBodySpriteOpacity * 100),
   );
   const hasLocalSpritePlacements =
     !!spriteVisualSettings && Object.prototype.hasOwnProperty.call(spriteVisualSettings, "spritePlacements");
@@ -1301,20 +1336,20 @@ export function ChatSettingsDrawer({
   });
 
   useEffect(() => {
-    setExpressionSpriteScalePercent(Math.round(expressionSpriteScale * 100));
-  }, [expressionSpriteScale]);
+    setExpressionSpriteScalePercent(Math.round(editedExpressionSpriteScale * 100));
+  }, [editedExpressionSpriteScale]);
 
   useEffect(() => {
-    setFullBodySpriteScalePercent(Math.round(fullBodySpriteScale * 100));
-  }, [fullBodySpriteScale]);
+    setFullBodySpriteScalePercent(Math.round(editedFullBodySpriteScale * 100));
+  }, [editedFullBodySpriteScale]);
 
   useEffect(() => {
-    setExpressionSpriteOpacityPercent(Math.round(expressionSpriteOpacity * 100));
-  }, [expressionSpriteOpacity]);
+    setExpressionSpriteOpacityPercent(Math.round(editedExpressionSpriteOpacity * 100));
+  }, [editedExpressionSpriteOpacity]);
 
   useEffect(() => {
-    setFullBodySpriteOpacityPercent(Math.round(fullBodySpriteOpacity * 100));
-  }, [fullBodySpriteOpacity]);
+    setFullBodySpriteOpacityPercent(Math.round(editedFullBodySpriteOpacity * 100));
+  }, [editedFullBodySpriteOpacity]);
 
   const agentPromptTemplateSelections = useMemo(
     () => normalizeAgentPromptTemplateSelectionMap(metadata.agentPromptTemplateIds),
@@ -2208,6 +2243,21 @@ export function ChatSettingsDrawer({
       }),
     [chatSpriteSubjects, charName, charTitle],
   );
+  const spriteLayoutSubjects = useMemo(
+    () => agentAddSpriteSubjects.filter((subject) => spriteCharacterIds.includes(subject.id)),
+    [agentAddSpriteSubjects, spriteCharacterIds],
+  );
+
+  useEffect(() => {
+    setSelectedSpriteLayoutCharacterId(null);
+  }, [chat.id]);
+
+  useEffect(() => {
+    setSelectedSpriteLayoutCharacterId((current) => {
+      if (current && spriteLayoutSubjects.some((subject) => subject.id === current)) return current;
+      return null;
+    });
+  }, [spriteLayoutSubjects]);
 
   const charAvatarCrop = useCallback((c: { data: unknown }) => {
     try {
@@ -2400,16 +2450,73 @@ export function ChatSettingsDrawer({
     });
   };
 
+  const updateSpriteCharacterVisualSettings = useCallback(
+    (nextSettings: Record<string, SpriteCharacterVisualSettings>) => {
+      if (onSpriteVisualSettingsChange) {
+        onSpriteVisualSettingsChange({ characterOverrides: nextSettings });
+        return;
+      }
+      updateMeta.mutate({ id: chat.id, spriteCharacterVisualSettings: nextSettings });
+    },
+    [chat.id, onSpriteVisualSettingsChange, updateMeta],
+  );
+
+  const patchSelectedSpriteCharacterVisualSettings = useCallback(
+    (patch: Partial<SpriteCharacterVisualSettings>) => {
+      if (!selectedSpriteLayoutCharacterId) return false;
+      updateSpriteCharacterVisualSettings({
+        ...spriteCharacterVisualSettings,
+        [selectedSpriteLayoutCharacterId]: {
+          ...(spriteCharacterVisualSettings[selectedSpriteLayoutCharacterId] ?? {}),
+          ...patch,
+        },
+      });
+      return true;
+    },
+    [selectedSpriteLayoutCharacterId, spriteCharacterVisualSettings, updateSpriteCharacterVisualSettings],
+  );
+
+  const resetSelectedSpriteCharacterVisualSettings = useCallback(() => {
+    if (!selectedSpriteLayoutCharacterId) return;
+    if (onResetSpriteCharacterVisualSettings) {
+      onResetSpriteCharacterVisualSettings(selectedSpriteLayoutCharacterId);
+      return;
+    }
+    const nextSettings = { ...spriteCharacterVisualSettings };
+    delete nextSettings[selectedSpriteLayoutCharacterId];
+    updateSpriteCharacterVisualSettings(nextSettings);
+  }, [
+    onResetSpriteCharacterVisualSettings,
+    selectedSpriteLayoutCharacterId,
+    spriteCharacterVisualSettings,
+    updateSpriteCharacterVisualSettings,
+  ]);
+
   const setSpriteSide = useCallback(
     (nextSide: "left" | "right") => {
-      if (nextSide === spritePosition) return;
+      if (nextSide === editedSpritePosition) return;
+      if (selectedSpriteLayoutCharacterId) {
+        if (onSpriteSideChange) {
+          onSpriteSideChange(nextSide, selectedSpriteLayoutCharacterId);
+          return;
+        }
+        patchSelectedSpriteCharacterVisualSettings({ spritePosition: nextSide });
+        return;
+      }
       if (onSpriteSideChange) {
         onSpriteSideChange(nextSide);
         return;
       }
       updateMeta.mutate({ id: chat.id, spritePosition: nextSide });
     },
-    [chat.id, onSpriteSideChange, spritePosition, updateMeta],
+    [
+      chat.id,
+      editedSpritePosition,
+      onSpriteSideChange,
+      patchSelectedSpriteCharacterVisualSettings,
+      selectedSpriteLayoutCharacterId,
+      updateMeta,
+    ],
   );
 
   const resetSpritePlacements = useCallback(() => {
@@ -2427,6 +2534,7 @@ export function ChatSettingsDrawer({
         Math.min(SPRITE_DISPLAY_SCALE_PERCENT_MAX, nextPercent),
       );
       setExpressionSpriteScalePercent(clampedPercent);
+      if (patchSelectedSpriteCharacterVisualSettings({ expressionSpriteScale: clampedPercent / 100 })) return;
       if (onSpriteVisualSettingsChange) {
         onSpriteVisualSettingsChange({ expressionSpriteScale: clampedPercent / 100 });
         return;
@@ -2437,7 +2545,7 @@ export function ChatSettingsDrawer({
         spriteScale: clampedPercent / 100,
       });
     },
-    [chat.id, onSpriteVisualSettingsChange, updateMeta],
+    [chat.id, onSpriteVisualSettingsChange, patchSelectedSpriteCharacterVisualSettings, updateMeta],
   );
 
   const setFullBodySpriteScale = useCallback(
@@ -2447,6 +2555,7 @@ export function ChatSettingsDrawer({
         Math.min(SPRITE_DISPLAY_SCALE_PERCENT_MAX, nextPercent),
       );
       setFullBodySpriteScalePercent(clampedPercent);
+      if (patchSelectedSpriteCharacterVisualSettings({ fullBodySpriteScale: clampedPercent / 100 })) return;
       if (onSpriteVisualSettingsChange) {
         onSpriteVisualSettingsChange({ fullBodySpriteScale: clampedPercent / 100 });
         return;
@@ -2456,7 +2565,7 @@ export function ChatSettingsDrawer({
         fullBodySpriteScale: clampedPercent / 100,
       });
     },
-    [chat.id, onSpriteVisualSettingsChange, updateMeta],
+    [chat.id, onSpriteVisualSettingsChange, patchSelectedSpriteCharacterVisualSettings, updateMeta],
   );
 
   const setExpressionSpriteOpacity = useCallback(
@@ -2466,6 +2575,7 @@ export function ChatSettingsDrawer({
         Math.min(SPRITE_DISPLAY_OPACITY_PERCENT_MAX, nextPercent),
       );
       setExpressionSpriteOpacityPercent(clampedPercent);
+      if (patchSelectedSpriteCharacterVisualSettings({ expressionSpriteOpacity: clampedPercent / 100 })) return;
       if (onSpriteVisualSettingsChange) {
         onSpriteVisualSettingsChange({ expressionSpriteOpacity: clampedPercent / 100 });
         return;
@@ -2476,7 +2586,7 @@ export function ChatSettingsDrawer({
         spriteOpacity: clampedPercent / 100,
       });
     },
-    [chat.id, onSpriteVisualSettingsChange, updateMeta],
+    [chat.id, onSpriteVisualSettingsChange, patchSelectedSpriteCharacterVisualSettings, updateMeta],
   );
 
   const setFullBodySpriteOpacity = useCallback(
@@ -2486,6 +2596,7 @@ export function ChatSettingsDrawer({
         Math.min(SPRITE_DISPLAY_OPACITY_PERCENT_MAX, nextPercent),
       );
       setFullBodySpriteOpacityPercent(clampedPercent);
+      if (patchSelectedSpriteCharacterVisualSettings({ fullBodySpriteOpacity: clampedPercent / 100 })) return;
       if (onSpriteVisualSettingsChange) {
         onSpriteVisualSettingsChange({ fullBodySpriteOpacity: clampedPercent / 100 });
         return;
@@ -2495,7 +2606,7 @@ export function ChatSettingsDrawer({
         fullBodySpriteOpacity: clampedPercent / 100,
       });
     },
-    [chat.id, onSpriteVisualSettingsChange, updateMeta],
+    [chat.id, onSpriteVisualSettingsChange, patchSelectedSpriteCharacterVisualSettings, updateMeta],
   );
 
   // ── Character drag-and-drop reordering ──
@@ -3095,35 +3206,32 @@ export function ChatSettingsDrawer({
     [chat.id, fallbackPromptPreset?.id, isConversation, isGame, setPreset, updateMeta],
   );
 
-  const openAgentAddModal = useCallback((agent: AvailableAgent) => {
-    setAgentAddCadenceInputFocused(false);
-    const config = agentConfigsByType.get(agent.id) ?? null;
-    const mergedSettings = mergeBuiltInAgentSettings(agent.id, config?.settings);
-    const intervalMeta = getAgentRunIntervalMeta(agent.id, agent.builtIn);
-    setAgentAddPreview({
-      agent,
-      config,
-      contextSize: normalizePositiveInteger(mergedSettings.contextSize, DEFAULT_AGENT_CONTEXT_SIZE, 200),
-      maxTokens: normalizeAgentMaxTokens(mergedSettings.maxTokens),
-      runInterval: intervalMeta
-        ? normalizePositiveInteger(mergedSettings.runInterval, intervalMeta.defaultValue, intervalMeta.max)
-        : null,
-      setup: buildInitialAgentAddSetupState({
-        agentId: agent.id,
-        settings: mergedSettings,
-        metadata,
-        musicPlayerSource,
-        roleplaySpriteScale,
-        allowSecretPlot: supportsNarrativeDirectorSecretPlot,
-      }),
-    });
-  }, [
-    agentConfigsByType,
-    metadata,
-    musicPlayerSource,
-    roleplaySpriteScale,
-    supportsNarrativeDirectorSecretPlot,
-  ]);
+  const openAgentAddModal = useCallback(
+    (agent: AvailableAgent) => {
+      setAgentAddCadenceInputFocused(false);
+      const config = agentConfigsByType.get(agent.id) ?? null;
+      const mergedSettings = mergeBuiltInAgentSettings(agent.id, config?.settings);
+      const intervalMeta = getAgentRunIntervalMeta(agent.id, agent.builtIn);
+      setAgentAddPreview({
+        agent,
+        config,
+        contextSize: normalizePositiveInteger(mergedSettings.contextSize, DEFAULT_AGENT_CONTEXT_SIZE, 200),
+        maxTokens: normalizeAgentMaxTokens(mergedSettings.maxTokens),
+        runInterval: intervalMeta
+          ? normalizePositiveInteger(mergedSettings.runInterval, intervalMeta.defaultValue, intervalMeta.max)
+          : null,
+        setup: buildInitialAgentAddSetupState({
+          agentId: agent.id,
+          settings: mergedSettings,
+          metadata,
+          musicPlayerSource,
+          roleplaySpriteScale,
+          allowSecretPlot: supportsNarrativeDirectorSecretPlot,
+        }),
+      });
+    },
+    [agentConfigsByType, metadata, musicPlayerSource, roleplaySpriteScale, supportsNarrativeDirectorSecretPlot],
+  );
 
   useEffect(() => {
     setAgentAddPreview(null);
@@ -7287,28 +7395,64 @@ export function ChatSettingsDrawer({
                                 </button>
                               </div>
 
+                              <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+                                <label
+                                  htmlFor={`sprite-layout-apply-to-${chat.id}`}
+                                  className="text-[0.625rem] font-medium text-[var(--muted-foreground)]"
+                                >
+                                  {localizeUi("ui.chat.chatsettingsdrawer.spriteLayoutApplyTo")}
+                                </label>
+                                <select
+                                  id={`sprite-layout-apply-to-${chat.id}`}
+                                  value={selectedSpriteLayoutCharacterId ?? ""}
+                                  onChange={(event) => setSelectedSpriteLayoutCharacterId(event.target.value || null)}
+                                  className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--background)] px-2.5 py-1.5 text-[0.625rem] text-[var(--foreground)] outline-none transition-colors focus:border-[var(--primary)]/60"
+                                >
+                                  <option value="">{localizeUi("ui.chat.chatsettingsdrawer.spriteLayoutAll")}</option>
+                                  {spriteLayoutSubjects.map((subject) => (
+                                    <option key={subject.id} value={subject.id}>
+                                      {subject.name}
+                                    </option>
+                                  ))}
+                                </select>
+                                {selectedSpriteLayoutCharacterId && (
+                                  <button
+                                    type="button"
+                                    onClick={resetSelectedSpriteCharacterVisualSettings}
+                                    disabled={!selectedSpriteCharacterVisualSettings}
+                                    className="rounded-md px-2.5 py-1.5 text-[0.625rem] font-medium text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    {localizeUi("ui.chat.chatsettingsdrawer.useAllSpriteLayoutSettings")}
+                                  </button>
+                                )}
+                              </div>
+
                               <div className="mt-2 flex items-center gap-2">
                                 <span className="text-[0.625rem] font-medium text-[var(--muted-foreground)]">
-                                  {localizeUi("ui.chat.chatsettingsdrawer.defaultSide")}
+                                  {selectedSpriteLayoutCharacterId
+                                    ? localizeUi("ui.chat.chatsettingsdrawer.characterSide")
+                                    : localizeUi("ui.chat.chatsettingsdrawer.defaultSide")}
                                 </span>
                                 <div className="flex rounded-md ring-1 ring-[var(--border)]">
                                   <button
+                                    type="button"
                                     onClick={() => setSpriteSide("left")}
                                     className={cn(
                                       "rounded-l-md px-2.5 py-1 text-[0.625rem] font-medium transition-colors",
-                                      spritePosition === "left"
-                                        ? "bg-[var(--primary)] text-white"
+                                      editedSpritePosition === "left"
+                                        ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
                                         : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
                                     )}
                                   >
                                     {localizeUi("ui.chat.chatsettingsdrawer.left")}
                                   </button>
                                   <button
+                                    type="button"
                                     onClick={() => setSpriteSide("right")}
                                     className={cn(
                                       "rounded-r-md px-2.5 py-1 text-[0.625rem] font-medium transition-colors",
-                                      spritePosition === "right"
-                                        ? "bg-[var(--primary)] text-white"
+                                      editedSpritePosition === "right"
+                                        ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
                                         : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
                                     )}
                                   >

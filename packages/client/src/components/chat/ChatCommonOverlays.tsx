@@ -8,10 +8,7 @@ import type { ChatImage } from "../../hooks/use-gallery";
 import { cn } from "../../lib/utils";
 import { Modal } from "../ui/Modal";
 import { NEUTRAL_PANEL_SHELL } from "../ui/neutral-surface-styles";
-import {
-  getChatFloatingPanelDesktopRight,
-  type ChatToolbarFloatingPanelAnchor,
-} from "./ChatToolbarControls";
+import { getChatFloatingPanelDesktopRight, type ChatToolbarFloatingPanelAnchor } from "./ChatToolbarControls";
 
 const loadChatSettingsDrawer = async () => {
   const module = await import("./ChatSettingsDrawer");
@@ -50,7 +47,8 @@ type SharedSceneSettingsProps = {
   spriteArrangeMode: boolean;
   onToggleSpriteArrange: () => void;
   onResetSpritePlacements: () => void;
-  onSpriteSideChange: (side: SpriteSide) => void;
+  onResetSpriteCharacterVisualSettings?: (characterId: string) => void;
+  onSpriteSideChange: (side: SpriteSide, characterId?: string) => void;
   spriteVisualSettings?: LocalSpriteVisualSettings;
   onSpriteVisualSettingsChange?: (patch: Partial<LocalSpriteVisualSettings>) => void;
 };
@@ -66,8 +64,7 @@ type DeleteDialogProps = {
   onClose: () => void;
 };
 
-const DELETE_DIALOG_ACTION_CLASS =
-  "mari-chrome-control min-h-10 w-full justify-start px-3 py-2 text-left text-xs";
+const DELETE_DIALOG_ACTION_CLASS = "mari-chrome-control min-h-10 w-full justify-start px-3 py-2 text-left text-xs";
 
 function DeleteConfirmationDialog({
   messageId,
@@ -164,11 +161,7 @@ function MultiSelectBar({
           <Trash2 size="0.75rem" />
           <span>{t("chat.delete.selection.delete")}</span>
         </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="mari-chrome-control min-h-10 w-full px-3 py-2 text-xs"
-        >
+        <button type="button" onClick={onCancel} className="mari-chrome-control min-h-10 w-full px-3 py-2 text-xs">
           <X size="0.75rem" />
           <span>{t("chat.delete.selection.cancel")}</span>
         </button>
@@ -229,8 +222,12 @@ function ChatSettingsLoadingFallback({ anchor }: { anchor: ChatFloatingPanelAnch
       style={panelStyle}
     >
       <div className="mari-chrome-text-strong flex shrink-0 items-center gap-2 border-b border-[var(--marinara-chat-chrome-panel-divider)] px-4 py-3 text-sm font-semibold">
-        <Loader2 size="0.875rem" className="mari-chrome-accent-icon animate-spin" />{localizeUi("chat.toolbar.settings")}</div>
-      <div className="mari-chrome-text-muted flex min-h-32 items-center justify-center px-4 py-8 text-xs">{localizeUi("ui.chat.chatsettingsloadingfallback.loadingSettings")}</div>
+        <Loader2 size="0.875rem" className="mari-chrome-accent-icon animate-spin" />
+        {localizeUi("chat.toolbar.settings")}
+      </div>
+      <div className="mari-chrome-text-muted flex min-h-32 items-center justify-center px-4 py-8 text-xs">
+        {localizeUi("ui.chat.chatsettingsloadingfallback.loadingSettings")}
+      </div>
     </div>
   );
 }
@@ -334,6 +331,7 @@ export function ChatCommonOverlays({
             spriteArrangeMode={sceneSettings.spriteArrangeMode}
             onToggleSpriteArrange={sceneSettings.onToggleSpriteArrange}
             onResetSpritePlacements={sceneSettings.onResetSpritePlacements}
+            onResetSpriteCharacterVisualSettings={sceneSettings.onResetSpriteCharacterVisualSettings}
             onSpriteSideChange={sceneSettings.onSpriteSideChange}
             spriteVisualSettings={sceneSettings.spriteVisualSettings}
             onSpriteVisualSettingsChange={sceneSettings.onSpriteVisualSettingsChange}
