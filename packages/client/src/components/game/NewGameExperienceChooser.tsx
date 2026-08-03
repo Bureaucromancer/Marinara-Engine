@@ -58,12 +58,13 @@ export function NewGameExperienceChooser({
   // The same helper GameSurface mounts by, so this list can never offer something that wouldn't render.
   const experiences = useMemo(() => selectGameExperiencePackages(installed), [installed]);
   const activeExperience = experiences.find((e) => e.id === activeId) ?? null;
-  // Resolved, not remembered: the package can be uninstalled while this panel is open, and a stale id
-  // would mount a surface that no longer exists.
-  const selectedId = activeExperience?.id ?? null;
   // Freezes every control that could tear down the run mid-launch: flipping the experience off here
   // would create a game under one mode and set it up as another. The wizard's `isLoading` equivalent.
   const launching = createGame.isPending || gameSetup.isPending;
+  // Resolved, not remembered: the package can be uninstalled while this panel is open, and a stale id
+  // would mount a surface that no longer exists. Pinned while launching, so a refetch of the installed
+  // list cannot unmount the setup that is currently running.
+  const selectedId = activeExperience?.id ?? (launching ? activeId : null);
 
   // Escape closes the package's setup, matching the backdrop click and the wizard this panel replaces.
   useEffect(() => {
