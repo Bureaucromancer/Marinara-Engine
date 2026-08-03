@@ -320,6 +320,7 @@ const GAME_MOBILE_FLOATING_PANEL =
   "fixed z-[9999] h-[min(42rem,calc(100dvh-4.75rem))] w-[min(42rem,calc(100vw-4.75rem))]";
 const GAME_MOBILE_FLOATING_MENU = "fixed z-[9999] max-h-[min(32rem,calc(100dvh-4.75rem))] overflow-y-auto";
 const EXPERIENCE_UNDERLAY_LAYER = "underlay" as const;
+const EMPTY_SPEAKER_AVATARS: ReadonlyMap<string, { url: string }> = new Map();
 /** Classic chrome an experience declares it replaces; anything left undeclared stays Classic. */
 type ExperienceChromeDeclaration = {
   providesInventory?: boolean;
@@ -3404,12 +3405,22 @@ function GameSurfaceComponent({
   /** Seam setter: replaces the pushed portrait map, or clears it when the map is empty or null. */
   const setExperienceSpeakerAvatars = useCallback(
     (value: { speakerAvatars: ReadonlyMap<string, { url: string }>; playerAvatarUrl?: string } | null) => {
-      // Read through, since the value comes from the package: a malformed push clears the seam rather
-      // than throwing inside the host. A player avatar on its own is a valid push — an experience may
-      // have nothing to say about its speakers and still want the player's own dialogue to carry a face.
-      const hasSpeakers = (value?.speakerAvatars?.size ?? 0) > 0;
-      const hasPlayerAvatar = typeof value?.playerAvatarUrl === "string" && value.playerAvatarUrl.trim() !== "";
-      setExperienceAvatars(hasSpeakers || hasPlayerAvatar ? value : null);
+      // NORMALIZED on the way in, because the value comes from the package and is iterated during render:
+      // a `size` check alone would accept any object carrying that property and then throw mid-render.
+      // Storing a real Map (empty when the push has none) keeps the consumer from having to re-check.
+      // A player avatar on its own is a valid push: an experience may have nothing to say about its
+      // speakers and still want the player's own dialogue to carry a face.
+      const speakers = value?.speakerAvatars;
+      const validSpeakers = speakers instanceof Map && speakers.size > 0 ? speakers : null;
+      const playerAvatarUrl =
+        typeof value?.playerAvatarUrl === "string" && value.playerAvatarUrl.trim() !== ""
+          ? value.playerAvatarUrl
+          : undefined;
+      setExperienceAvatars(
+        validSpeakers || playerAvatarUrl
+          ? { speakerAvatars: validSpeakers ?? EMPTY_SPEAKER_AVATARS, playerAvatarUrl }
+          : null,
+      );
     },
     [],
   );
