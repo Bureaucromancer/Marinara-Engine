@@ -2895,7 +2895,7 @@ function CustomQuickRepliesManager() {
                 <button
                   type="button"
                   onClick={() => removeCustomQuickReply(entry.id)}
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--destructive)] transition-colors hover:bg-[var(--destructive)]/10 active:scale-90"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--primary)] transition-colors hover:bg-[var(--primary)]/10 active:scale-90"
                   title={localize("Remove quick reply")}
                   aria-label={localize("Remove quick reply")}
                 >
