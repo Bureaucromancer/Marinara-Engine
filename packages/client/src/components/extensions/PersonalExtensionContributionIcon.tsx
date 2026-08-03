@@ -1,43 +1,21 @@
-import {
-  Bot,
-  BookOpen,
-  Database,
-  Gamepad2,
-  Heart,
-  Image,
-  MessageSquareText,
-  Music,
-  Puzzle,
-  Settings,
-  Sparkles,
-  Star,
-  WandSparkles,
-  Wrench,
-  Zap,
-  type LucideIcon,
-} from "lucide-react";
+import { Puzzle } from "lucide-react";
+import { DynamicIcon, iconNames, type IconName } from "lucide-react/dynamic";
 import type { PersonalExtensionContributionIcon } from "@marinara-engine/shared";
 
-const CONTRIBUTION_ICONS: Record<PersonalExtensionContributionIcon, LucideIcon> = {
-  bot: Bot,
-  book: BookOpen,
-  database: Database,
-  gamepad: Gamepad2,
-  heart: Heart,
-  image: Image,
-  message: MessageSquareText,
-  music: Music,
-  puzzle: Puzzle,
-  settings: Settings,
-  sparkles: Sparkles,
-  star: Star,
-  tool: Wrench,
-  wand: WandSparkles,
-  zap: Zap,
+const CONTRIBUTION_ICON_NAMES = new Set<string>(iconNames);
+const LEGACY_ICON_ALIASES: Record<string, IconName> = {
+  message: "message-square-text",
+  tool: "wrench",
 };
 
+function resolveContributionIcon(icon: PersonalExtensionContributionIcon | undefined): IconName {
+  const name = icon ?? "puzzle";
+  if (CONTRIBUTION_ICON_NAMES.has(name)) return name as IconName;
+  return LEGACY_ICON_ALIASES[name] ?? "puzzle";
+}
+
 export function PersonalExtensionContributionIcon({
-  icon = "puzzle",
+  icon,
   size = "0.875rem",
   className,
 }: {
@@ -45,6 +23,13 @@ export function PersonalExtensionContributionIcon({
   size?: string | number;
   className?: string;
 }) {
-  const Icon = CONTRIBUTION_ICONS[icon] ?? Puzzle;
-  return <Icon aria-hidden="true" className={className} size={size} />;
+  return (
+    <DynamicIcon
+      aria-hidden="true"
+      className={className}
+      fallback={() => <Puzzle aria-hidden="true" className={className} size={size} />}
+      name={resolveContributionIcon(icon)}
+      size={size}
+    />
+  );
 }

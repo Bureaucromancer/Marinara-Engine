@@ -1,12 +1,12 @@
 import { useSyncExternalStore } from "react";
 import {
-  PERSONAL_EXTENSION_CONTRIBUTION_ICONS,
   PERSONAL_EXTENSION_CONTRIBUTION_KINDS,
+  PERSONAL_EXTENSION_CONTRIBUTION_POSITIONS,
+  PERSONAL_EXTENSION_CONTRIBUTION_SURFACES,
   PERSONAL_EXTENSION_UI_ELEMENT_KINDS,
   PERSONAL_EXTENSION_UI_LIMITS,
   type PersonalClientExtensionRuntime,
   type PersonalExtensionContributionDescriptor,
-  type PersonalExtensionContributionIcon,
   type PersonalExtensionHostContribution,
   type PersonalExtensionUiElement,
 } from "@marinara-engine/shared";
@@ -26,8 +26,10 @@ type InternalContribution = PersonalExtensionHostContribution & {
 };
 
 const CONTRIBUTION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
+const CONTRIBUTION_ICON_PATTERN = /^[a-z0-9-]+$/;
 const contributionKinds = new Set<string>(PERSONAL_EXTENSION_CONTRIBUTION_KINDS);
-const contributionIcons = new Set<string>(PERSONAL_EXTENSION_CONTRIBUTION_ICONS);
+const contributionSurfaces = new Set<string>(PERSONAL_EXTENSION_CONTRIBUTION_SURFACES);
+const contributionPositions = new Set<string>(PERSONAL_EXTENSION_CONTRIBUTION_POSITIONS);
 const uiElementKinds = new Set<string>(PERSONAL_EXTENSION_UI_ELEMENT_KINDS);
 const listeners = new Set<() => void>();
 const dispatchers = new Map<string, ContributionDispatcher>();
@@ -206,10 +208,29 @@ export function normalizePersonalExtensionContribution(value: unknown): Personal
   const icon =
     value.icon === undefined
       ? undefined
-      : typeof value.icon === "string" && contributionIcons.has(value.icon)
-        ? (value.icon as PersonalExtensionContributionIcon)
+      : typeof value.icon === "string" &&
+          value.icon.length <= PERSONAL_EXTENSION_UI_LIMITS.iconLength &&
+          CONTRIBUTION_ICON_PATTERN.test(value.icon)
+        ? value.icon
         : null;
   if (!id || !kind || !label || description === null || icon === null) return null;
+
+  let surface: PersonalExtensionContributionDescriptor["surface"];
+  let position: PersonalExtensionContributionDescriptor["position"];
+  if (kind === "button") {
+    const requestedSurface = value.surface ?? "top-bar";
+    if (typeof requestedSurface !== "string" || !contributionSurfaces.has(requestedSurface)) return null;
+    surface = requestedSurface as NonNullable<PersonalExtensionContributionDescriptor["surface"]>;
+    if (surface === "top-bar") {
+      if (value.position !== undefined) return null;
+    } else {
+      const requestedPosition = value.position ?? "header";
+      if (typeof requestedPosition !== "string" || !contributionPositions.has(requestedPosition)) return null;
+      position = requestedPosition as NonNullable<PersonalExtensionContributionDescriptor["position"]>;
+    }
+  } else if (value.surface !== undefined || value.position !== undefined) {
+    return null;
+  }
 
   let elements: PersonalExtensionUiElement[] | undefined;
   if (kind === "panel") {
@@ -247,6 +268,8 @@ export function normalizePersonalExtensionContribution(value: unknown): Personal
     label,
     ...(description ? { description } : {}),
     ...(icon ? { icon } : {}),
+    ...(surface ? { surface } : {}),
+    ...(position ? { position } : {}),
     ...(elements ? { elements } : {}),
   };
 }
