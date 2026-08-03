@@ -639,8 +639,8 @@ function CharacterSprite({
         </div>
       )}
 
-      <div style={{ opacity: resolvedSpriteOpacity }}>
-        <AnimatePresence mode="wait">
+      <div className="grid" style={{ opacity: resolvedSpriteOpacity }}>
+        <AnimatePresence mode="sync">
           <motion.img
             key={`${placementKey}-${expression}`}
             src={spriteUrl}
@@ -651,7 +651,7 @@ function CharacterSprite({
                   : localizeUi("ui.chat.charactersprite.expression"),
               value2: expression,
             })}
-            className={`${sizeClass} w-auto object-contain drop-shadow-[0_0_20px_rgba(0,0,0,0.5)] ${editing ? "cursor-grab active:cursor-grabbing" : ""}`}
+            className={`${sizeClass} col-start-1 row-start-1 w-auto object-contain drop-shadow-[0_0_20px_rgba(0,0,0,0.5)] ${editing ? "cursor-grab active:cursor-grabbing" : ""}`}
             style={spriteScaleStyle}
             draggable={false}
             initial={variant.initial}

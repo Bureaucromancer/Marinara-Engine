@@ -3,6 +3,8 @@
 // ──────────────────────────────────────────────
 
 export type MariWorkspaceToolName =
+  | "docs_search"
+  | "docs_read"
   | "read"
   | "grep"
   | "find"
