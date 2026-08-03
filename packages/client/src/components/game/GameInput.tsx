@@ -401,6 +401,7 @@ export function GameInput({
           view="runtime"
           capabilityProps={{
             chatId: draftKey,
+            chatMode: "game",
             disabled,
             pendingTransition: pendingSpatialTransition,
             onPendingTransitionChange: (pending: unknown) => {

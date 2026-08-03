@@ -2784,6 +2784,7 @@
   "ui.chat.chatsettingsdrawer.whenTheStoryEntersANewLocationLetIllustrator": "When the story enters a new location, let Illustrator create a reusable background, add it to Appearance, and make it active.",
   "ui.chat.chatsettingsdrawer.widgets": "Widgets",
   "ui.chat.chatsettingsdrawer.willBeAppliedTheNextTimeSchedulesAreRegenerated": "Will be applied the next time schedules are regenerated.",
+  "ui.chat.chatsettingsdrawer.worldMapsFeatureSummary": "Adds persistent hierarchical locations, durable shared worlds, reusable artwork, customizable Direct Link lines, and movement to Roleplay and Game.",
   "ui.chat.chatsettingsdrawer.yourInGamePartyPickAPersonaToPlay": "Your in-game party. Pick a persona to play as and manage which characters join the adventure.",
   "ui.chat.chatsettingsdrawer.yourPersonaDefinesWhoYouAreInThisChat": "Your persona defines who you are in this chat. The AI will address you by this persona's name and use its details for context.",
   "ui.chat.chatsettingsdrawer.youtubeModeUsesTheMusicDjAgentSYoutube": "YouTube mode uses the Music DJ agent's YouTube connection and embedded player.",
