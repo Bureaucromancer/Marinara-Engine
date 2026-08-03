@@ -880,8 +880,19 @@ export async function noodleRoutes(app: FastifyInstance) {
         if (isFileUniqueConstraintError(error, "noodle_accounts", ["noodleAccountId"])) {
           const replayed = await noodle.getNoodlerAccountForNoodleAccount(noodleAccountId);
           if (executionId && replayed?.settings.profile.noodlerWizardExecutionId === executionId) {
-            await applyAutoPosting(replayed.id);
-            created.push(replayed.id);
+            // This branch already runs inside the outer catch, so an unguarded throw here would
+            // escape the loop and fail the whole batch instead of this one creator.
+            try {
+              await applyAutoPosting(replayed.id);
+              created.push(replayed.id);
+            } catch (autoPostingError) {
+              logger.error(
+                autoPostingError,
+                "[noodler] Bulk replay could not apply auto-posting for %s",
+                noodleAccountId,
+              );
+              failed.push(noodleAccountId);
+            }
           } else {
             skipped.push(noodleAccountId);
           }
