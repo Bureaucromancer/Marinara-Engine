@@ -201,11 +201,11 @@ try {
     "claimed",
     "an orphan claim exactly at the expiry boundary must be released",
   );
-  await noodle.releaseNoodlerCreatorReplyClaim(
-    ((await db.select().from(noodlerCreatorReplyClaims)).find(
-      (row) => row.parentInteractionId === orphanParent.id,
-    )?.id ?? ""),
+  const orphanClaim = (await db.select().from(noodlerCreatorReplyClaims)).find(
+    (row) => row.parentInteractionId === orphanParent.id,
   );
+  assert.ok(orphanClaim, "the re-claim at the expiry boundary must have left a claim row to release");
+  await noodle.releaseNoodlerCreatorReplyClaim(orphanClaim.id);
   const afterExpiry = new Date(Date.parse(claimedAt) + 25 * 60 * 60 * 1000).toISOString();
   assert.equal(
     (await noodle.claimNoodlerCreatorReply(stage.id, post.id, orphanParent.id, viewer.id, afterExpiry, 10)).status,

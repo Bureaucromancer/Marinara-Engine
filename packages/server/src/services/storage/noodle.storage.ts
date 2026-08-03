@@ -2,7 +2,7 @@
 // Storage: Noodle Fake Social Media
 // ──────────────────────────────────────────────
 import { existsSync } from "node:fs";
-import { and, desc, eq, gt, inArray, isNull, lt } from "../../db/file-query.js";
+import { and, desc, eq, gt, inArray, isNull, lt, or } from "../../db/file-query.js";
 import {
   createNoodlePoll,
   DEFAULT_NOODLER_CREATOR_REPLIES_PER_24_HOURS,
@@ -969,13 +969,35 @@ export function createNoodleStorage(db: DB) {
     tx: Parameters<Parameters<DB["transaction"]>[0]>[0],
     parentId: string,
   ): Promise<void> => {
-    const children = await tx
-      .select()
-      .from(noodleInteractions)
-      .where(eq(noodleInteractions.parentInteractionId, parentId));
-    await tx.delete(noodlerCreatorReplyClaims).where(eq(noodlerCreatorReplyClaims.parentInteractionId, parentId));
-    if (children.length === 0) return;
-    const childIds = children.map((child) => child.id);
+    const parent = (await tx.select().from(noodleInteractions).where(eq(noodleInteractions.id, parentId)))[0];
+    const rows = parent
+      ? await tx.select().from(noodleInteractions).where(eq(noodleInteractions.postId, parent.postId))
+      : [];
+    // The whole descendant subtree goes, not just the direct children (same closure as
+    // deleteInteractionById): a reply to a creator reply would otherwise survive its thread.
+    const removed = new Set([parentId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const row of rows) {
+        if (removed.has(row.id) || !row.parentInteractionId || !removed.has(row.parentInteractionId)) continue;
+        removed.add(row.id);
+        changed = true;
+      }
+    }
+    const removedIds = [...removed];
+    // Claims are keyed by either end of the pair, so a claim whose reply is going away must go
+    // too or it keeps consuming the rolling allowance forever.
+    await tx
+      .delete(noodlerCreatorReplyClaims)
+      .where(
+        or(
+          inArray(noodlerCreatorReplyClaims.parentInteractionId, removedIds),
+          inArray(noodlerCreatorReplyClaims.replyInteractionId, removedIds),
+        ),
+      );
+    const childIds = removedIds.filter((id) => id !== parentId);
+    if (childIds.length === 0) return;
     await tx.delete(noodleActivityDigests).where(inArray(noodleActivityDigests.sourceInteractionId, childIds));
     await tx.delete(noodleInteractions).where(inArray(noodleInteractions.id, childIds));
   };
@@ -1619,13 +1641,18 @@ export function createNoodleStorage(db: DB) {
           });
           return { status: "holding" };
         }
-        const effectiveMs = Math.max(at.getTime(), Date.parse(state.lastObservedBudgetTime));
+        // Same NaN handling as ensureNoodlerReserveState: an unreadable stored timestamp resets
+        // to now instead of poisoning the comparison (and toISOString) with NaN.
+        const observed = Date.parse(state.lastObservedBudgetTime);
+        const effectiveMs = Math.max(at.getTime(), Number.isNaN(observed) ? 0 : observed);
         const effectiveIso = new Date(effectiveMs).toISOString();
         if (effectiveIso !== state.lastObservedBudgetTime) {
           await tx.update(noodlerReserveState).set({ lastObservedBudgetTime: effectiveIso, updatedAt: at.toISOString() }).where(eq(noodlerReserveState.id, NOODLER_RESERVE_STATE_ID));
           state = { ...state, lastObservedBudgetTime: effectiveIso };
         }
-        if (effectiveMs < Date.parse(state.preparationNotBefore)) return { status: "holding" };
+        const notBefore = Date.parse(state.preparationNotBefore);
+        // An unparseable hold must not read as "hold expired"; hold until it is repaired.
+        if (Number.isNaN(notBefore) || effectiveMs < notBefore) return { status: "holding" };
         const cutoff = effectiveMs - ROLLING_DAY_MS;
         // Prune claims that have left the rolling window, in the same transaction that
         // counts them: they can never affect the budget again, and the ledger is scanned
@@ -1902,18 +1929,20 @@ export function createNoodleStorage(db: DB) {
           );
         })
         .map((item) => item.id);
+      const invalidIdSet = new Set(invalidIds);
       // Soonest first, so lowering postsPerDay discards the latest excess items and leaves
       // the imminent ones intact.
       const validFuture = prepared
-        .filter((item) => !invalidIds.includes(item.id) && Date.parse(item.publishAt) > at.getTime())
+        .filter((item) => !invalidIdSet.has(item.id) && Date.parse(item.publishAt) > at.getTime())
         .sort((a, b) => Date.parse(a.publishAt) - Date.parse(b.publishAt));
       const excessIds = validFuture.slice(settings.postsPerDay).map((item) => item.id);
-      const discarded = [...new Set([...invalidIds, ...excessIds])];
+      const discardedSet = new Set([...invalidIds, ...excessIds]);
+      const discarded = [...discardedSet];
       if (discarded.length > 0) {
         await db.transaction(async (tx) =>
           tx.update(noodlerPreparedPosts).set({ state: "discarded", updatedAt: at.toISOString() }).where(inArray(noodlerPreparedPosts.id, discarded)),
         );
-        for (const item of prepared.filter((candidate) => discarded.includes(candidate.id))) {
+        for (const item of prepared.filter((candidate) => discardedSet.has(candidate.id))) {
           unlinkNoodlerMedia(String(parseRecord(item.payload.metadata).noodlerMediaPath ?? "") || null);
         }
       }
@@ -1921,7 +1950,7 @@ export function createNoodleStorage(db: DB) {
       // file that is not there; publishing it would give the post a 404 image route. Drop the
       // reference instead, so the post publishes as text.
       for (const item of items) {
-        if (item.state !== "prepared" || discarded.includes(item.id)) continue;
+        if (item.state !== "prepared" || discardedSet.has(item.id)) continue;
         const mediaPath = item.payload.metadata.noodlerMediaPath;
         if (typeof mediaPath !== "string" || !mediaPath) continue;
         const absolute = resolveNoodlerMediaAbsolutePath(mediaPath);
@@ -1945,7 +1974,7 @@ export function createNoodleStorage(db: DB) {
         .filter(
           (item) =>
             item.state !== "prepared" &&
-            !discarded.includes(item.id) &&
+            !discardedSet.has(item.id) &&
             !(Date.parse(item.updatedAt) > pruneBefore),
         )
         .map((item) => item.id);

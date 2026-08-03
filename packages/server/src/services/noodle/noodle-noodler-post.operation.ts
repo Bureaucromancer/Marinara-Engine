@@ -57,7 +57,7 @@ async function invalidateNearFutureReserve(
   try {
     await noodle.discardPreparedPostsAfterManualPost(accountId, postedAt);
   } catch (error) {
-    logger.error(error, "[noodler] Could not invalidate the reserve after posting for %s", accountId);
+    logger.warn(error, "[noodler] Could not invalidate the reserve after posting for %s", accountId);
   }
 }
 
