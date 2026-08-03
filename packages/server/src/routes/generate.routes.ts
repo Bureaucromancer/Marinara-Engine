@@ -60,7 +60,11 @@ import type {
   ThinkingTagPair,
 } from "@marinara-engine/shared";
 import { createChatsStorage } from "../services/storage/chats.storage.js";
-import { commitSpatialOwnerTurn, SpatialOwnerTurnError } from "../services/spatial-context/owner-turn.js";
+import {
+  commitSpatialOwnerTurn,
+  findAppliedSpatialOwnerTurn,
+  SpatialOwnerTurnError,
+} from "../services/spatial-context/owner-turn.js";
 import { shouldSuppressIllustratorForegroundForStoryboard } from "../services/game/storyboard-agent-settings.js";
 import {
   formatOwnerSpatialBreadcrumb,
@@ -813,6 +817,55 @@ export async function generateRoutes(app: FastifyInstance) {
       releaseActiveGeneration();
       throw err;
     };
+
+    // A browser retry can replay the same queued /impersonate movement after the
+    // first request committed successfully. Resolve that command before any
+    // connection, prompt, provider, or agent work so the retry has no side effects.
+    if (input.impersonate && input.pendingSpatialTransition) {
+      try {
+        const applied = await findAppliedSpatialOwnerTurn({
+          chatId: input.chatId,
+          transition: input.pendingSpatialTransition,
+        });
+        if (applied) {
+          const recoveredMessage = await chats.getMessage(applied.messageId);
+          if (!recoveredMessage || recoveredMessage.chatId !== input.chatId || recoveredMessage.role !== "user") {
+            releaseActiveGeneration();
+            return reply.status(409).send({
+              error: "This movement was already applied, but its saved message could not be recovered.",
+              code: "spatial_transition_already_applied",
+            });
+          }
+
+          startSseReply(reply, { "X-Accel-Buffering": "no" });
+          sendSseEvent(reply, { type: "content_replace", data: recoveredMessage.content });
+          sendSseEvent(reply, {
+            type: "spatial_transition_committed",
+            data: {
+              chatId: input.chatId,
+              commandId: input.pendingSpatialTransition.commandId,
+              currentLocationId: applied.snapshot.currentLocationId,
+              definitionRevision: applied.snapshot.definitionRevision,
+            },
+          });
+          sendSseEvent(reply, { type: "message_saved", data: recoveredMessage });
+          sendSseEvent(reply, { type: "done", data: "" });
+          releaseActiveGeneration();
+          reply.raw.end();
+          return;
+        }
+      } catch (error) {
+        releaseActiveGeneration();
+        if (error instanceof SpatialOwnerTurnError) {
+          return reply.status(error.statusCode).send({
+            error: error.message,
+            code: error.code,
+            ...(error.details ?? {}),
+          });
+        }
+        throw error;
+      }
+    }
 
     if (input.regenerateMessageId) {
       const regenCandidate = await chats.getMessage(input.regenerateMessageId).catch(releaseActiveGenerationAndRethrow);
@@ -6408,6 +6461,7 @@ export async function generateRoutes(app: FastifyInstance) {
                   if (!recoveredMessage) throw error;
                   recoveredAlreadyAppliedSpatialTurn = true;
                   recoveredAlreadyAppliedOwnerTurn = true;
+                  encryptedReasoningCache.delete(input.chatId);
                   savedMsg = recoveredMessage;
                   savedSwipeIndex = recovered.swipeIndex;
                   fullResponse = recoveredMessage.content;
@@ -6844,13 +6898,6 @@ export async function generateRoutes(app: FastifyInstance) {
         // ────────────────────────────────────────
         // Collect parallel results + Phase 3: Post-processing agents
         // ────────────────────────────────────────
-        deferParallelAgentEvents = false;
-        if (recoveredAlreadyAppliedOwnerTurn) {
-          deferredParallelAgentEvents.length = 0;
-          parallelAgentStartPending = false;
-        } else {
-          flushDeferredParallelAgentEvents();
-        }
         // Await parallel agents that were started alongside the generation
         let parallelResults: AgentResult[] = [];
         if (parallelPromise) {
@@ -6860,6 +6907,13 @@ export async function generateRoutes(app: FastifyInstance) {
           } catch {
             // Non-critical — parallel agents may fail independently
           }
+        }
+        deferParallelAgentEvents = false;
+        if (recoveredAlreadyAppliedOwnerTurn) {
+          deferredParallelAgentEvents.length = 0;
+          parallelAgentStartPending = false;
+        } else {
+          flushDeferredParallelAgentEvents();
         }
 
         // Persist successful one-shot Narrative Director runs for agent history.
