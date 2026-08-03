@@ -189,7 +189,11 @@ import { createLorebooksStorage } from "../../packages/server/src/services/stora
 import { createNoodleStorage } from "../../packages/server/src/services/storage/noodle.storage.js";
 import { createChatPresetsStorage } from "../../packages/server/src/services/storage/chat-presets.storage.js";
 import { buildGoogleModelsPageUrl } from "../../packages/server/src/routes/connections.routes.js";
-import { buildReferencedCharacterContext } from "../../packages/server/src/services/prompt/macro-context.js";
+import {
+  buildReferencedCharacterContext,
+  MAX_REFERENCED_CHARACTERS,
+} from "../../packages/server/src/services/prompt/macro-context.js";
+import { assemblePrompt } from "../../packages/server/src/services/prompt/assembler.js";
 import { resolveRunPodComfyUiTimeoutSeconds } from "../../packages/server/src/services/image/runpod-comfyui.service.js";
 import {
   findMissingComfyReferenceSlots,
@@ -789,7 +793,7 @@ try {
       name: "Susie",
       description: "A trusted friend from the western district.",
       first_mes: "REFERENCED_GREETING_MUST_STAY_OUT",
-      mes_example: "REFERENCED_EXAMPLE_MUST_STAY_OUT",
+      mes_example: "REFERENCED_EXAMPLE_SHOULD_APPEAR",
       extensions: {
         appearance: "Blonde hair and a blue summer dress.",
       },
@@ -846,7 +850,124 @@ try {
   assert.match(referencedContext.content, /Blonde hair and a blue summer dress\./u);
   assert.match(referencedContext.content, /REFERENCED_LOREBOOK_MEMORY/u);
   assert.doesNotMatch(referencedContext.content, /REFERENCED_GREETING_MUST_STAY_OUT/u);
-  assert.doesNotMatch(referencedContext.content, /REFERENCED_EXAMPLE_MUST_STAY_OUT/u);
+  assert.match(referencedContext.content, /REFERENCED_EXAMPLE_SHOULD_APPEAR/u);
+
+  const macroLorebook = await lorebookStorage.create(
+    createLorebookSchema.parse({
+      name: "Active character references",
+      category: "character",
+      characterIds: [storageTrimFixture.id],
+    }),
+  );
+  await lorebookStorage.createEntry(
+    createLorebookEntrySchema.parse({
+      lorebookId: macroLorebook.id,
+      name: "Cafe companion",
+      content: `The cafe companion is {{${referencedCharacter.id}}}.`,
+      keys: ["cafe"],
+    }),
+  );
+  const assembleCharacterReferenceFixture = (chatId: string, content: string) =>
+    assemblePrompt({
+      db,
+      preset: {
+        id: "character-reference-preset",
+        name: "Character reference fixture",
+        sectionOrder: JSON.stringify(["lorebook", "history"]),
+        groupOrder: JSON.stringify([]),
+        wrapFormat: "xml",
+        parameters: JSON.stringify({}),
+        variableGroups: JSON.stringify([]),
+        variableValues: JSON.stringify({}),
+      },
+      sections: [
+        {
+          id: "lorebook",
+          presetId: "character-reference-preset",
+          identifier: "lorebook",
+          name: "Lorebook",
+          content: "",
+          role: "system",
+          enabled: "true",
+          isMarker: "true",
+          groupId: null,
+          markerConfig: JSON.stringify({ type: "lorebook" }),
+          injectionPosition: "relative",
+          injectionDepth: 0,
+          injectionOrder: 0,
+          forbidOverrides: "false",
+        },
+        {
+          id: "history",
+          presetId: "character-reference-preset",
+          identifier: "chatHistory",
+          name: "Chat History",
+          content: "",
+          role: "system",
+          enabled: "true",
+          isMarker: "true",
+          groupId: null,
+          markerConfig: JSON.stringify({ type: "chat_history" }),
+          injectionPosition: "relative",
+          injectionDepth: 0,
+          injectionOrder: 1,
+          forbidOverrides: "false",
+        },
+      ],
+      groups: [],
+      choiceBlocks: [],
+      chatChoices: {},
+      chatId,
+      characterIds: [storageTrimFixture.id],
+      personaName: "Mari",
+      personaDescription: "",
+      chatMessages: [{ role: "user", content }],
+    });
+  const assembledReference = await assembleCharacterReferenceFixture(
+    "character-reference-regression",
+    "I went to the cafe.",
+  );
+  const assembledReferenceText = assembledReference.messages.map((message) => message.content).join("\n");
+  assert.match(assembledReferenceText, /The cafe companion is Susie\./u);
+  assert.match(assembledReferenceText, /A trusted friend from the western district\./u);
+  assert.match(assembledReferenceText, /REFERENCED_EXAMPLE_SHOULD_APPEAR/u);
+  assert.doesNotMatch(assembledReferenceText, /REFERENCED_GREETING_MUST_STAY_OUT/u);
+
+  const cappedDirectReferences = [];
+  for (let index = 0; index < MAX_REFERENCED_CHARACTERS; index += 1) {
+    cappedDirectReferences.push(
+      await characterStorage.create(
+        characterDataSchema.parse({
+          name: `Reference cap ${index + 1}`,
+          description: `DIRECT_REFERENCE_${index + 1}_MUST_APPEAR`,
+        }),
+      ),
+    );
+  }
+  const overflowReference = await characterStorage.create(
+    characterDataSchema.parse({
+      name: "Overflow reference must stay out",
+      description: "OVERFLOW_REFERENCE_CONTEXT_MUST_STAY_OUT",
+    }),
+  );
+  await lorebookStorage.createEntry(
+    createLorebookEntrySchema.parse({
+      lorebookId: macroLorebook.id,
+      name: "Reference cap overflow",
+      content: `The overflow reference is {{${overflowReference.id}}}.`,
+      keys: ["reference-cap"],
+    }),
+  );
+  const cappedReferencePrompt = await assembleCharacterReferenceFixture(
+    "character-reference-cap-regression",
+    `${cappedDirectReferences.map((character) => `{{${character.id}}}`).join(" ")} reference-cap`,
+  );
+  const cappedReferenceText = cappedReferencePrompt.messages.map((message) => message.content).join("\n");
+  for (let index = 0; index < MAX_REFERENCED_CHARACTERS; index += 1) {
+    assert.match(cappedReferenceText, new RegExp(`DIRECT_REFERENCE_${index + 1}_MUST_APPEAR`, "u"));
+  }
+  assert.doesNotMatch(cappedReferenceText, /OVERFLOW_REFERENCE_CONTEXT_MUST_STAY_OUT/u);
+  assert.doesNotMatch(cappedReferenceText, /Overflow reference must stay out/u);
 
   await lorebookStorage.update(hiddenCharacterLorebook.id, { hiddenFromLibrary: false });
   assert.equal(
@@ -3860,13 +3981,97 @@ assert.match(
   "The summary UI must submit every selected entry to the combine endpoint",
 );
 assert.match(
+  summaryPopoverSource,
+  /role="tablist"[\s\S]{0,900}summaryPromptView === "summary"[\s\S]{0,900}summaryPromptView === "combine"/u,
+  "The Summary Prompt card must switch between Chat Summary and Combine prompt views",
+);
+assert.match(
+  summaryPopoverSource,
+  /currentChatSummaryPrompt[\s\S]{0,900}\{activeSummaryPrompt\}[\s\S]{0,1500}<textarea/u,
+  "The active Chat Summary prompt must remain visible above its template editor",
+);
+assert.doesNotMatch(
+  summaryPopoverSource,
+  /localizeUi\("ui\.chat\.summarypopover\.templates"\)/u,
+  "The Summary Prompt card must use one Edit path instead of a separate Templates button",
+);
+assert.match(
+  summaryPopoverSource,
+  /<button(?:(?!>)[\s\S])*onClick=\{handleEditVisiblePrompt\}(?:(?!>)[\s\S])*disabled=\{!globalPromptSettingsReady \|\| promptSettingsSaveLocked\}(?:(?!>)[\s\S])*aria-expanded=/u,
+  "The Summary Prompt Edit action must expose disclosure semantics for its editor",
+);
+const promptSettingsPersistSource = summaryPopoverSource.slice(
+  summaryPopoverSource.indexOf("const persistPromptTemplates"),
+  summaryPopoverSource.indexOf("const commitCombinePromptDraft"),
+);
+const promptSettingsLockIndex = promptSettingsPersistSource.indexOf("promptSettingsSaveLockedRef.current = true");
+const promptSettingsMutationIndex = promptSettingsPersistSource.indexOf("updateGlobalPromptSettings.mutateAsync");
+const promptSettingsUnlockIndex = promptSettingsPersistSource.indexOf("promptSettingsSaveLockedRef.current = false");
+assert.ok(
+  promptSettingsLockIndex >= 0 &&
+    promptSettingsLockIndex < promptSettingsMutationIndex &&
+    promptSettingsMutationIndex < promptSettingsUnlockIndex,
+  "Summary prompt writes must lock before mutation and unlock only afterward",
+);
+const summaryPromptControlsSource = summaryPopoverSource.slice(
+  summaryPopoverSource.indexOf('role="tablist"'),
+  summaryPopoverSource.indexOf('localizeUi("ui.chat.summarypopover.summaryConnection")'),
+);
+assert.equal(
+  summaryPromptControlsSource.match(/disabled=\{promptSettingsSaveLocked\}/gu)?.length,
+  9,
+  "Every prompt option, template row, and open template editor control must use the save lock",
+);
+assert.equal(
+  summaryPromptControlsSource.match(/disabled=\{!globalPromptSettingsReady \|\| promptSettingsSaveLocked\}/gu)?.length,
+  3,
+  "Every prompt-level action must use the save lock",
+);
+assert.match(
+  summaryPromptControlsSource,
+  /!hasTemplateDraft \|\|\s*promptSettingsSaveLocked \|\|\s*!globalPromptSettingsReady/u,
+  "The template Save action must use the save lock",
+);
+const summaryPromptSelectOptionSource = summaryPopoverSource.slice(
+  summaryPopoverSource.indexOf("interface SummaryPromptSelectOptionProps"),
+  summaryPopoverSource.indexOf("interface SummaryPromptTemplateRowProps"),
+);
+assert.equal(
+  summaryPromptSelectOptionSource.match(/disabled=\{disabled\}/gu)?.length,
+  1,
+  "Summary prompt select options must forward their disabled state",
+);
+const summaryPromptTemplateRowSource = summaryPopoverSource.slice(
+  summaryPopoverSource.indexOf("interface SummaryPromptTemplateRowProps"),
+);
+assert.equal(
+  summaryPromptTemplateRowSource.match(/disabled=\{disabled\}/gu)?.length,
+  4,
+  "Every template-row action must forward its disabled state",
+);
+assert.match(
+  summaryPopoverSource,
+  /className="flex items-center justify-center gap-1\.5"[\s\S]{0,900}handleBackfill/u,
+  "The Automatic Summaries backfill action must be centered",
+);
+assert.match(
   chatRoutesSource,
   /requestedSummaryEntryIds[\s\S]{0,6500}nextEntries\.splice\(Math\.max\(0, firstIndex\), 0, combinedEntry\)/u,
   "Combined summaries must replace their selected entries at the first selected chronological position",
 );
 assert.match(
   chatRoutesSource,
-  /combinedTokenEstimate[\s\S]{0,500}Selected summaries are too large to combine at once[\s\S]{0,3000}provider\.chatComplete/u,
+  /estimateChatSummaryTokens\(summaryPrompt\)[\s\S]{0,200}estimateChatSummaryTokens\(combinePrompt\)/u,
+  "The combine input budget must reserve the actual system and combine prompt sizes",
+);
+assert.match(
+  chatRoutesSource,
+  /combinedSummaryInputBudget[\s\S]{0,500}SUMMARY_COMBINE_MESSAGE_OVERHEAD_TOKENS/u,
+  "The combine input budget must reserve message overhead",
+);
+assert.match(
+  chatRoutesSource,
+  /estimateChatSummaryTokens\(sourceText\) > combinedSummaryInputBudget[\s\S]{0,500}Selected summaries are too large to combine at once[\s\S]{0,3000}provider\.chatComplete/u,
   "Combined summaries must be rejected before provider generation when they exceed the input budget",
 );
 const chatSidebarSource = readFileSync(

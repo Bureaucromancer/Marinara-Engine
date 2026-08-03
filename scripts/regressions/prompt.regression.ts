@@ -24,6 +24,9 @@ import {
   normalizeChatSummaryPromptSettings,
   normalizeStoryboardAgentSettings,
   LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID,
+  DEFAULT_AGENT_TOOLS,
+  CHAT_SUMMARY_PROMPT_MAX_LENGTH,
+  DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT,
   DEFAULT_CHAT_SUMMARY_PROMPT,
   DEFAULT_LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT,
   normalizeCharacterTrackerCustomFieldDefaults,
@@ -61,7 +64,10 @@ import {
   formatNoodleTimelineForPrompt,
   NOODLE_PERSONA_IDENTITY_INSTRUCTION,
 } from "../../packages/server/src/services/noodle/noodle-prompt.js";
-import { buildPartyRecruitCardPrompt } from "../../packages/server/src/services/game/gm-prompts.js";
+import {
+  buildGmFormatReminder,
+  buildPartyRecruitCardPrompt,
+} from "../../packages/server/src/services/game/gm-prompts.js";
 import {
   normalizeCyoaChoiceOutput,
   normalizeCyoaDialogueQuotes,
@@ -147,6 +153,16 @@ assert.match(regeneratedSheetPrompt, /<campaign_history>/u);
 assert.match(regeneratedSheetPrompt, /Write every natural-language string value in Polish/u);
 assert.match(regeneratedSheetPrompt, /Scenario: The flooded vault/u);
 assert.doesNotMatch(regeneratedSheetPrompt, /A new companion is joining the party/u);
+
+const canonicalPartyNameReminder = buildGmFormatReminder({
+  gameActiveState: "exploration",
+  sessionNumber: 1,
+  map: null,
+  partyNames: ["Mari"],
+  playerName: "Player",
+});
+assert.match(canonicalPartyNameReminder, /Party speaker labels must use the exact canonical names listed under PARTY/u);
+assert.match(canonicalPartyNameReminder, /You also play Mari\./u);
 
 const REGRESSION_AGENT_IDS = [
   "about-me-keeper",
@@ -609,6 +625,7 @@ import {
   appendNonLeadingSystemMessagesToLastUser,
   appendReadableAttachmentsToContent,
   applyTrackerCharacterCardIdentity,
+  canonicalizeGamePartySpeakerLabels,
   buildGenerationGuideInstruction,
   appendSeparateAgentInjectionMessage,
   collectLatestTrackerCharacterHistory,
@@ -631,8 +648,10 @@ import {
   appendContinuationMessageContent,
   CONTINUE_ASSISTANT_MESSAGE_DIRECT_PROMPT,
   formatRoleplaySummaryChatLog,
+  resolveChatSummaryCombinePrompt,
   resolveChatSummaryPrompt,
 } from "../../packages/server/src/services/generation/roleplay-summary-runtime.js";
+import { isChatToolEnabledByDefault } from "../../packages/server/src/services/generation/tool-resolution-runtime.js";
 import { scopeIndividualGroupMessagesForTarget } from "../../packages/server/src/services/generation/prompt-message-scope.js";
 import { resolveGenerationPromptPresetChoices } from "../../packages/server/src/routes/generate/prompt-preset-selection.js";
 import {
@@ -6775,7 +6794,11 @@ Use HTML sparingly and diegetically. Do not replace normal prose/dialogue unless
   {
     name: "chat summary prompt settings reject malformed values and preserve only valid active templates",
     run() {
-      const emptySettings = { templates: [], activeTemplateId: null };
+      const emptySettings = {
+        templates: [],
+        activeTemplateId: null,
+        combinePrompt: DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT,
+      };
       assert.deepEqual(normalizeChatSummaryPromptSettings("{not json"), emptySettings);
       assert.deepEqual(
         normalizeChatSummaryPromptSettings({
@@ -6798,15 +6821,31 @@ Use HTML sparingly and diegetically. Do not replace normal prose/dialogue unless
           ],
           activeTemplateId: " summary ",
         }),
-        { templates, activeTemplateId: "summary" },
+        { templates, activeTemplateId: "summary", combinePrompt: DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT },
       );
       assert.deepEqual(normalizeChatSummaryPromptSettings({ templates, activeTemplateId: "missing" }), {
         templates,
         activeTemplateId: null,
+        combinePrompt: DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT,
       });
       assert.deepEqual(
         normalizeChatSummaryPromptSettings({ templates, activeTemplateId: LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID }),
-        { templates, activeTemplateId: LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID },
+        {
+          templates,
+          activeTemplateId: LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID,
+          combinePrompt: DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT,
+        },
+      );
+      assert.equal(
+        resolveChatSummaryCombinePrompt(
+          JSON.stringify({ templates, activeTemplateId: null, combinePrompt: " Merge these notes. " }),
+        ),
+        "Merge these notes.",
+      );
+      assert.equal(
+        normalizeChatSummaryPromptSettings({ combinePrompt: "x".repeat(CHAT_SUMMARY_PROMPT_MAX_LENGTH + 1) })
+          .combinePrompt.length,
+        CHAT_SUMMARY_PROMPT_MAX_LENGTH,
       );
       assert.equal(
         resolveChatSummaryPrompt({
@@ -6835,6 +6874,15 @@ Use HTML sparingly and diegetically. Do not replace normal prose/dialogue unless
         }),
         DEFAULT_CHAT_SUMMARY_PROMPT,
       );
+    },
+  },
+  {
+    name: "Spotify tools stay agent-owned when chat function calls are enabled",
+    run() {
+      for (const toolName of DEFAULT_AGENT_TOOLS.spotify ?? []) {
+        assert.equal(isChatToolEnabledByDefault(toolName), false, `${toolName} must require Music DJ selection`);
+      }
+      assert.equal(isChatToolEnabledByDefault("roll_dice"), true);
     },
   },
   {
@@ -8445,6 +8493,53 @@ Use HTML sparingly and diegetically. Do not replace normal prose/dialogue unless
       assert.equal(returningCharacters[0]?.characterId, "mira-card");
       assert.equal(returningCharacters[0]?.avatarPath, "/api/avatars/file/mira.png");
       assert.equal(matchedCards.has("mira-card"), true);
+
+      const canonicalPartyCharacters: Array<Record<string, unknown>> = [
+        {
+          name: 'Marisol "Mari"',
+          mood: "Concerned",
+          appearance: "Expanded-name appearance",
+        },
+        {
+          name: "Mari",
+          mood: "Focused",
+          appearance: "Canonical-name appearance",
+        },
+      ];
+      const canonicalPartyMatches = applyTrackerCharacterCardIdentity(canonicalPartyCharacters, [
+        {
+          id: "party-card",
+          name: "Mari",
+          avatarPath: "/api/avatars/file/party-card.png",
+        },
+      ]);
+      assert.equal(canonicalPartyMatches.has("party-card"), true);
+      assert.deepEqual(canonicalPartyCharacters, [
+        {
+          characterId: "party-card",
+          name: "Mari",
+          mood: "Focused",
+          appearance: "Canonical-name appearance",
+          avatarPath: "/api/avatars/file/party-card.png",
+          avatarCrop: null,
+        },
+      ]);
+
+      const unrelatedLongName: Array<Record<string, unknown>> = [{ name: "Mari Calder" }];
+      applyTrackerCharacterCardIdentity(unrelatedLongName, [{ id: "party-card", name: "Mari" }]);
+      assert.deepEqual(unrelatedLongName, [{ name: "Mari Calder" }]);
+
+      assert.equal(
+        canonicalizeGamePartySpeakerLabels(
+          '[Marisol "Mari"] [main] [happy]: "Ready."\n\nMarisol "Mari" crosses the room.',
+          ["Mari"],
+        ),
+        '[Mari] [main] [happy]: "Ready."\n\nMarisol "Mari" crosses the room.',
+      );
+      assert.equal(
+        canonicalizeGamePartySpeakerLabels('[Mari Calder] [main] [happy]: "Ready."', ["Mari"]),
+        '[Mari Calder] [main] [happy]: "Ready."',
+      );
 
       assert.equal(resolveCharacterCustomFieldName("  ", "Goal"), "Goal");
       assert.equal(makeUniqueCharacterCustomFieldName({ "New Field": "", "new   field 2": "" }), "New Field 3");
