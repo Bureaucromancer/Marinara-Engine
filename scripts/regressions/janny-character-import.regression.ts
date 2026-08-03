@@ -119,7 +119,7 @@ const clientSource = readFileSync(
 );
 assert.match(
   clientSource,
-  /sourceId === "janny" \? prefetchedJannyCard! : await fetch\(downloadUrl\)/u,
+  /const parsedCard = await parsePngCharacterCard\(cardFile\);[\s\S]{0,220}hasJannyCharacterDefinition\(readCharacterCardDetailFields\(parsedCard\.json\)\)[\s\S]{0,220}prefetchedJannyCard = parsedCard;/u,
   "Janny imports must use the complete PNG card instead of rebuilding from search metadata",
 );
 assert.match(
@@ -153,8 +153,18 @@ assert.match(
 );
 assert.match(
   clientSource,
-  /prefetchedJannyCard = await fetchCompleteJannyCard\(card\.id\);[\s\S]{0,100}if \(!prefetchedJannyCard\.ok\) downloadUrl = "";/u,
-  "Janny imports must fall back to recovered page fields when the PNG endpoint is blocked",
+  /const cardResponse = await fetchCompleteJannyCard\(card\.id\);[\s\S]{0,650}catch \{\s*downloadUrl = "";/u,
+  "Janny imports must fall back to recovered page fields when the PNG request or validation fails",
+);
+assert.match(
+  clientSource,
+  /if \(!options\?\.skipCompleteCard\) \{[\s\S]{0,750}fetchCompleteJannyCard\(charId\)/u,
+  "Janny detail loading must allow imports to skip a second full-card request",
+);
+assert.match(
+  clientSource,
+  /provider\.fetchDetail\(card, \{ skipCompleteCard: true \}\)/u,
+  "Janny imports must use only page recovery after the complete-card prefetch fails",
 );
 assert.match(
   clientSource,

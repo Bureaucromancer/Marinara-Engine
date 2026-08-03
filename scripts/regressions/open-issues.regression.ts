@@ -3997,8 +3997,13 @@ assert.doesNotMatch(
 );
 assert.match(
   summaryPopoverSource,
-  /onClick=\{handleEditVisiblePrompt\}[\s\S]{0,240}aria-expanded=/u,
+  /<button(?:(?!>)[\s\S])*onClick=\{handleEditVisiblePrompt\}(?:(?!>)[\s\S])*aria-expanded=/u,
   "The Summary Prompt Edit action must expose disclosure semantics for its editor",
+);
+assert.match(
+  summaryPopoverSource,
+  /promptSettingsSaveQueueRef\.current\.then\(async \(\) =>[\s\S]{0,700}updateGlobalPromptSettings\.mutateAsync[\s\S]{0,500}promptSettingsSaveQueueRef\.current = queuedSave\.then/u,
+  "Summary prompt and template writes must share one serialized save queue",
 );
 assert.match(
   summaryPopoverSource,

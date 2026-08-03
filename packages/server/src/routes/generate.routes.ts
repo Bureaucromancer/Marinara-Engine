@@ -6818,7 +6818,8 @@ export async function generateRoutes(app: FastifyInstance) {
         }
 
         const combinedResponse = allResponses.join("\n\n");
-        const postActivationMessages = [...chatMessages, { content: combinedResponse }];
+        const completedResponse = continuedMessageRewriteSource ?? combinedResponse;
+        const postActivationMessages = [...chatMessages, { role: "assistant", content: completedResponse }];
         const inactivePostProcessingAgentIds = new Set<string>();
         for (const agent of resolvedAgents) {
           if (agent.phase !== "post_processing" || builtInAgentTypes.has(agent.type)) continue;
@@ -6847,7 +6848,7 @@ export async function generateRoutes(app: FastifyInstance) {
         let lorebookKeeperProcessedMessageId = "";
         // Illustration runs asynchronously so it doesn't block other agents.
         // (pendingIllustration is hoisted above the follow-up loop.)
-        const hasPostWork = hasPostProcessingAgents || parallelResults.length > 0;
+        const hasPostWork = hasPostProcessingAgents || parallelResults.length > 0 || holdForTextRewrite;
         const latestAssistantMessageId =
           (lastSavedMsg as any)?.role === "assistant" ? ((lastSavedMsg as any)?.id ?? "") : "";
 
@@ -8782,7 +8783,7 @@ export async function generateRoutes(app: FastifyInstance) {
           }
 
           // ── Text rewrite/editing agents: run after ALL other agents ──
-          const originalResponseBeforeRewrite = continuedMessageRewriteSource ?? combinedResponse;
+          const originalResponseBeforeRewrite = completedResponse;
           let textRewriteApplied = false;
           if (activatedTextRewriteRunAgents.length > 0 && messageId && !abortController.signal.aborted) {
             let currentResponseForRewrite = originalResponseBeforeRewrite;

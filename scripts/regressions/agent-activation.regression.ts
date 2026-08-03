@@ -32,7 +32,7 @@ assert.match(
 );
 assert.match(
   generateRouteSource,
-  /const postActivationMessages = \[\.\.\.chatMessages, \{ content: combinedResponse \}\][\s\S]{0,600}matchCustomAgentActivation\(agent\.settings, postActivationMessages\)/u,
+  /const completedResponse = continuedMessageRewriteSource \?\? combinedResponse;[\s\S]{0,180}const postActivationMessages = \[\.\.\.chatMessages, \{ role: "assistant", content: completedResponse \}\][\s\S]{0,600}matchCustomAgentActivation\(agent\.settings, postActivationMessages\)/u,
   "Post-processing activation must include the completed assistant response",
 );
 assert.match(
@@ -42,8 +42,13 @@ assert.match(
 );
 assert.match(
   generateRouteSource,
+  /const hasPostWork = hasPostProcessingAgents \|\| parallelResults\.length > 0 \|\| holdForTextRewrite;/u,
+  "Held responses must keep the outer post-work path reachable when every custom rewrite agent is inactive",
+);
+assert.match(
+  generateRouteSource,
   /if \(activatedTextRewriteRunAgents\.length > 0[\s\S]{0,7500}\n\s*\}\n\s*if \(holdForTextRewrite && !textRewriteApplied/u,
-  "A held response must be released even when every custom rewrite agent is inactive",
+  "The held-response release must remain outside the active rewrite-agent branch",
 );
 
 console.info("Agent activation regression passed.");

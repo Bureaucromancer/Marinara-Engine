@@ -360,6 +360,7 @@ export function SummaryPopover({
   const summaryMaxTokensFocused = useRef(false);
   const combinePromptFocused = useRef(false);
   const combinePromptSaveRef = useRef<{ prompt: string; promise: Promise<boolean> } | null>(null);
+  const promptSettingsSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const summaryMaxTokensSaveRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
   const generateSummary = useGenerateSummary();
   const updateMeta = useUpdateChatMetadata();
@@ -889,20 +890,24 @@ export function SummaryPopover({
       combinePrompt = combinePromptDraft,
     ): Promise<boolean> => {
       if (!globalPromptSettingsReady) return false;
-      try {
-        const normalizedCombinePrompt =
-          combinePrompt.trim().slice(0, CHAT_SUMMARY_PROMPT_MAX_LENGTH) ||
-          DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT;
-        await updateGlobalPromptSettings.mutateAsync({
-          templates,
-          activeTemplateId: activeId,
-          combinePrompt: normalizedCombinePrompt,
-        });
-        return true;
-      } catch {
-        toast.error(localizeUi("ui.chat.summarypopover.couldNotSaveGlobalSummaryPromptSettings"));
-        return false;
-      }
+      const normalizedCombinePrompt =
+        combinePrompt.trim().slice(0, CHAT_SUMMARY_PROMPT_MAX_LENGTH) ||
+        DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT;
+      const queuedSave = promptSettingsSaveQueueRef.current.then(async () => {
+        try {
+          await updateGlobalPromptSettings.mutateAsync({
+            templates,
+            activeTemplateId: activeId,
+            combinePrompt: normalizedCombinePrompt,
+          });
+          return true;
+        } catch {
+          toast.error(localizeUi("ui.chat.summarypopover.couldNotSaveGlobalSummaryPromptSettings"));
+          return false;
+        }
+      });
+      promptSettingsSaveQueueRef.current = queuedSave.then(() => undefined);
+      return queuedSave;
     },
     [combinePromptDraft, globalPromptSettingsReady, updateGlobalPromptSettings, localizeUi],
   );
@@ -918,14 +923,11 @@ export function SummaryPopover({
     if (pendingSave?.prompt === nextPrompt) return pendingSave.promise;
     if (!pendingSave && nextPrompt === globalCombinePrompt) return true;
 
-    const promise = (async () => {
-      if (pendingSave) await pendingSave.promise;
-      return persistPromptTemplates(
-        cleanedPromptTemplates,
-        normalizedActivePromptTemplateId,
-        nextPrompt,
-      );
-    })();
+    const promise = persistPromptTemplates(
+      cleanedPromptTemplates,
+      normalizedActivePromptTemplateId,
+      nextPrompt,
+    );
     combinePromptSaveRef.current = { prompt: nextPrompt, promise };
     try {
       return await promise;
