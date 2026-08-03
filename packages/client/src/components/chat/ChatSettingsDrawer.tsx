@@ -99,8 +99,10 @@ import {
   AgentSettingsToggle,
   GamePromptTemplateSelect,
   GenerationSettingsLink,
-  SpriteRangeSlider,
 } from "./AgentSettingsControls";
+import { ExpressionSpriteSettings } from "./ExpressionSpriteSettings";
+import { AgentPromptTemplateSelect } from "./AgentPromptTemplateSelect";
+import { HapticConnectionPanel } from "./HapticConnectionPanel";
 import { SettingsSwitch } from "../panels/settings/SettingControls";
 import { ChoiceSelectionModal } from "../presets/ChoiceSelectionModal";
 import { SecretPlotPanel } from "../agents/SecretPlotPanel";
@@ -205,7 +207,6 @@ import {
   BUILT_IN_AGENTS,
   BUILT_IN_TOOLS,
   DEFAULT_AGENT_CONTEXT_SIZE,
-  DEFAULT_AGENT_PROMPT_TEMPLATE_ID,
   DEFAULT_AGENT_TOOLS,
   DEFAULT_AGENT_MAX_TOKENS,
   GAME_GM_BUILT_IN_PROMPT_TEMPLATES,
@@ -250,13 +251,6 @@ import {
   useCustomTools,
   type CustomToolRow,
 } from "../../hooks/use-custom-tools";
-import {
-  HAPTIC_INTIFACE_URL_STORAGE_KEY,
-  useHapticStatus,
-  useHapticConnect,
-  useHapticDisconnect,
-  useHapticStartScan,
-} from "../../hooks/use-haptic";
 import { normalizeSpritePlacements } from "./sprite-placement";
 import {
   normalizeSpriteCharacterVisualSettingsMap,
@@ -272,7 +266,6 @@ import {
   SPRITE_DISPLAY_SCALE_MIN,
   SPRITE_DISPLAY_SCALE_PERCENT_MAX,
   SPRITE_DISPLAY_SCALE_PERCENT_MIN,
-  hasSpriteDisplayMode,
   normalizeSpriteDisplayModes,
   type SpriteDisplayMode,
 } from "./sprite-display-modes";
@@ -7213,11 +7206,12 @@ export function ChatSettingsDrawer({
                             ) : null
                           }
                         >
-                          <SpriteDisplayModeToggle modes={spriteDisplayModes} onToggle={toggleSpriteDisplayMode} />
-
-                          <button
-                            type="button"
-                            onClick={() => {
+                          <ExpressionSpriteSettings
+                            chatId={chat.id}
+                            displayModes={spriteDisplayModes}
+                            onToggleDisplayMode={toggleSpriteDisplayMode}
+                            expressionAvatarsEnabled={expressionAvatarsEnabled}
+                            onToggleExpressionAvatars={() => {
                               const nextEnabled = !expressionAvatarsEnabled;
                               if (onSpriteVisualSettingsChange) {
                                 onSpriteVisualSettingsChange({ expressionAvatarsEnabled: nextEnabled });
@@ -7225,286 +7219,51 @@ export function ChatSettingsDrawer({
                               }
                               updateMeta.mutate({ id: chat.id, expressionAvatarsEnabled: nextEnabled });
                             }}
-                            className={cn(
-                              "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition-all",
-                              expressionAvatarsEnabled
-                                ? "bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30"
-                                : "bg-[var(--background)]/75 ring-1 ring-[var(--border)] hover:bg-[var(--accent)]",
-                            )}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <span className="text-[0.6875rem] font-medium">
-                                {localizeUi("ui.chat.expressionsetupfields.expressionAvatars")}
-                              </span>
-                              <p className="mt-0.5 text-[0.625rem] text-[var(--muted-foreground)]">
-                                {localizeUi(
-                                  "ui.chat.expressionsetupfields.replaceMessageAvatarsWithTheSelectedExpressionSprite",
-                                )}
-                              </p>
-                            </div>
-                            <div
-                              className={cn(
-                                "h-5 w-9 shrink-0 rounded-full p-0.5 transition-colors",
-                                expressionAvatarsEnabled ? "bg-[var(--primary)]" : "bg-[var(--muted-foreground)]/50",
-                              )}
-                            >
-                              <div
-                                className={cn(
-                                  "h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
-                                  expressionAvatarsEnabled && "translate-x-3.5",
-                                )}
-                              />
-                            </div>
-                          </button>
-
-                          {chatSpriteSubjects.length === 0 ? (
-                            <p className="text-[0.625rem] text-[var(--muted-foreground)]">
-                              {localizeUi("ui.chat.chatsettingsdrawer.addCharactersToThisChatOrChooseAPersona")}
-                            </p>
-                          ) : chatSpriteSubjectsLoading ? (
-                            <p className="text-[0.625rem] text-[var(--muted-foreground)]">
-                              {localizeUi("ui.chat.chatsettingsdrawer.loadingSpriteOwners")}
-                            </p>
-                          ) : chatSpriteSubjectsWithSprites.length > 0 ? (
-                            <div className="space-y-1.5">
-                              {chatSpriteSubjectsWithSprites.map((subject) => {
-                                const isPersona = subject.kind === "persona";
-                                const name = isPersona ? subject.persona.name : charName(subject.character);
-                                const title = isPersona
-                                  ? subject.persona.comment || "Persona"
-                                  : charTitle(subject.character);
-                                const avatarPath = isPersona
-                                  ? subject.persona.avatarPath
-                                  : subject.character.avatarPath;
-                                const avatarCrop = isPersona ? null : charAvatarCrop(subject.character);
-                                const spriteActive = spriteCharacterIds.includes(subject.id);
-
-                                return (
-                                  <div
-                                    key={`${subject.kind}:${subject.id}`}
-                                    className="flex items-center gap-2.5 rounded-lg bg-[var(--background)]/75 px-3 py-2 ring-1 ring-[var(--border)]"
-                                  >
-                                    <button
-                                      onClick={() => {
-                                        onClose();
-                                        if (isPersona) {
-                                          useUIStore.getState().openPersonaDetail(subject.id);
-                                        } else {
-                                          useUIStore.getState().openCharacterDetail(subject.id);
-                                        }
-                                      }}
-                                      className="flex min-w-0 flex-1 items-center gap-2.5 text-left transition-colors hover:opacity-80"
-                                      title={
-                                        isPersona
-                                          ? localizeUi("ui.chat.chatsettingsdrawer.openPersona")
-                                          : localizeUi("ui.chat.chatsettingsdrawer.openCharacterCard")
-                                      }
-                                    >
-                                      {avatarPath ? (
-                                        <span className="relative block h-8 w-8 shrink-0 overflow-hidden rounded-full">
-                                          <img
-                                            src={avatarPath}
-                                            alt={name}
-                                            loading="lazy"
-                                            className="h-full w-full object-cover"
-                                            style={getAvatarCropStyle(avatarCrop)}
-                                          />
-                                        </span>
-                                      ) : (
-                                        <div
-                                          className={cn(
-                                            "flex h-8 w-8 items-center justify-center rounded-full text-[0.625rem] font-bold",
-                                            isPersona
-                                              ? "mari-avatar-placeholder mari-avatar-placeholder--persona"
-                                              : "mari-avatar-placeholder mari-avatar-placeholder--character",
-                                          )}
-                                        >
-                                          {name[0]}
-                                        </div>
-                                      )}
-                                      <div className="min-w-0 flex-1">
-                                        <span className="block truncate text-xs font-medium">{name}</span>
-                                        {title && (
-                                          <span className="block truncate text-[0.625rem] italic text-[var(--muted-foreground)]">
-                                            {title}
-                                          </span>
-                                        )}
-                                        <span className="block text-[0.625rem] text-[var(--muted-foreground)]">
-                                          {isPersona
-                                            ? localizeUi("ui.chat.chatsettingsdrawer.personaSpritesAvailable")
-                                            : localizeUi("ui.chat.chatsettingsdrawer.uploadedSpritesAvailable")}
-                                        </span>
-                                      </div>
-                                    </button>
-
-                                    <SpriteToggleButton
-                                      active={spriteActive}
-                                      onToggle={() => toggleSprite(subject.id)}
-                                    />
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : chatSpriteChoicesLoading ? (
-                            <p className="text-[0.625rem] text-[var(--muted-foreground)]">
-                              {localizeUi("ui.chat.expressionsetupfields.checkingAddedCharactersForUploadedSprites")}
-                            </p>
-                          ) : (
-                            <p className="text-[0.625rem] text-[var(--muted-foreground)]">
-                              {localizeUi("ui.chat.chatsettingsdrawer.noneOfTheAddedCharactersHaveUploadedSpritesYet")}
-                            </p>
-                          )}
-
-                          <p className="text-[0.625rem] text-[var(--muted-foreground)]">
-                            {localizeUi(
-                              "ui.chat.chatsettingsdrawer.onlyAddedCharactersAndTheActivePersonaWithUploaded",
-                            )}
-                          </p>
-
-                          {spriteCharacterIds.length > 0 && (
-                            <div className="rounded-lg bg-[var(--background)]/75 px-3 py-2 ring-1 ring-[var(--border)]">
-                              <div className="flex items-center gap-2">
-                                <Image size="0.75rem" className="text-[var(--muted-foreground)]" />
-                                <span className="flex-1 text-[0.6875rem] text-[var(--muted-foreground)]">
-                                  {localizeUi("ui.chat.expressionsetupfields.spriteLayout")}
-                                </span>
-                                <button
-                                  onClick={() => onToggleSpriteArrange?.()}
-                                  className={cn(
-                                    "rounded-md px-2.5 py-1 text-[0.625rem] font-medium transition-colors ring-1 ring-[var(--border)]",
-                                    spriteArrangeMode
-                                      ? "bg-[var(--primary)] text-white"
-                                      : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
-                                  )}
-                                >
-                                  {spriteArrangeMode
-                                    ? localizeUi("lorebook.editor.batch.done")
-                                    : localizeUi("ui.chat.chatsettingsdrawer.arrange")}
-                                </button>
-                                <button
-                                  onClick={resetSpritePlacements}
-                                  disabled={!hasCustomSpritePlacements}
-                                  className={cn(
-                                    "rounded-md px-2.5 py-1 text-[0.625rem] font-medium transition-colors ring-1 ring-[var(--border)]",
-                                    hasCustomSpritePlacements
-                                      ? "text-[var(--muted-foreground)] hover:bg-[var(--accent)]"
-                                      : "cursor-not-allowed opacity-40 text-[var(--muted-foreground)]",
-                                  )}
-                                >
-                                  {localizeUi("ui.characters.charactercliptrimmodal.reset")}
-                                </button>
-                              </div>
-
-                              <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-                                <label
-                                  htmlFor={`sprite-layout-apply-to-${chat.id}`}
-                                  className="text-[0.625rem] font-medium text-[var(--muted-foreground)]"
-                                >
-                                  {localizeUi("ui.chat.chatsettingsdrawer.spriteLayoutApplyTo")}
-                                </label>
-                                <select
-                                  id={`sprite-layout-apply-to-${chat.id}`}
-                                  value={selectedSpriteLayoutCharacterId ?? ""}
-                                  onChange={(event) => setSelectedSpriteLayoutCharacterId(event.target.value || null)}
-                                  className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--background)] px-2.5 py-1.5 text-[0.625rem] text-[var(--foreground)] outline-none transition-colors focus:border-[var(--primary)]/60"
-                                >
-                                  <option value="">{localizeUi("ui.chat.chatsettingsdrawer.spriteLayoutAll")}</option>
-                                  {spriteLayoutSubjects.map((subject) => (
-                                    <option key={subject.id} value={subject.id}>
-                                      {subject.name}
-                                    </option>
-                                  ))}
-                                </select>
-                                {selectedSpriteLayoutCharacterId && (
-                                  <button
-                                    type="button"
-                                    onClick={resetSelectedSpriteCharacterVisualSettings}
-                                    disabled={!selectedSpriteCharacterVisualSettings}
-                                    className="rounded-md px-2.5 py-1.5 text-[0.625rem] font-medium text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
-                                  >
-                                    {localizeUi("ui.chat.chatsettingsdrawer.useAllSpriteLayoutSettings")}
-                                  </button>
-                                )}
-                              </div>
-
-                              <div className="mt-2 flex items-center gap-2">
-                                <span className="text-[0.625rem] font-medium text-[var(--muted-foreground)]">
-                                  {selectedSpriteLayoutCharacterId
-                                    ? localizeUi("ui.chat.chatsettingsdrawer.characterSide")
-                                    : localizeUi("ui.chat.chatsettingsdrawer.defaultSide")}
-                                </span>
-                                <div className="flex rounded-md ring-1 ring-[var(--border)]">
-                                  <button
-                                    type="button"
-                                    onClick={() => setSpriteSide("left")}
-                                    className={cn(
-                                      "rounded-l-md px-2.5 py-1 text-[0.625rem] font-medium transition-colors",
-                                      editedSpritePosition === "left"
-                                        ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-                                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
-                                    )}
-                                  >
-                                    {localizeUi("ui.chat.chatsettingsdrawer.left")}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setSpriteSide("right")}
-                                    className={cn(
-                                      "rounded-r-md px-2.5 py-1 text-[0.625rem] font-medium transition-colors",
-                                      editedSpritePosition === "right"
-                                        ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-                                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
-                                    )}
-                                  >
-                                    {localizeUi("ui.chat.chatsettingsdrawer.right")}
-                                  </button>
-                                </div>
-                              </div>
-
-                              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                                <SpriteRangeSlider
-                                  label={localizeUi("ui.chat.expressionsetupfields.expressionSize")}
-                                  value={expressionSpriteScalePercent}
-                                  min={SPRITE_DISPLAY_SCALE_PERCENT_MIN}
-                                  max={SPRITE_DISPLAY_SCALE_PERCENT_MAX}
-                                  step={5}
-                                  suffix="%"
-                                  onChange={setExpressionSpriteScale}
-                                />
-                                <SpriteRangeSlider
-                                  label={localizeUi("ui.chat.expressionsetupfields.fullBodySize")}
-                                  value={fullBodySpriteScalePercent}
-                                  min={SPRITE_DISPLAY_SCALE_PERCENT_MIN}
-                                  max={SPRITE_DISPLAY_SCALE_PERCENT_MAX}
-                                  step={5}
-                                  suffix="%"
-                                  onChange={setFullBodySpriteScale}
-                                />
-                                <SpriteRangeSlider
-                                  label={localizeUi("ui.chat.expressionsetupfields.expressionOpacity")}
-                                  value={expressionSpriteOpacityPercent}
-                                  min={SPRITE_DISPLAY_OPACITY_PERCENT_MIN}
-                                  max={SPRITE_DISPLAY_OPACITY_PERCENT_MAX}
-                                  step={5}
-                                  suffix="%"
-                                  onChange={setExpressionSpriteOpacity}
-                                />
-                                <SpriteRangeSlider
-                                  label={localizeUi("ui.chat.expressionsetupfields.fullBodyOpacity")}
-                                  value={fullBodySpriteOpacityPercent}
-                                  min={SPRITE_DISPLAY_OPACITY_PERCENT_MIN}
-                                  max={SPRITE_DISPLAY_OPACITY_PERCENT_MAX}
-                                  step={5}
-                                  suffix="%"
-                                  onChange={setFullBodySpriteOpacity}
-                                />
-                              </div>
-
-                              <p className="mt-2 text-[0.5625rem] leading-relaxed text-[var(--muted-foreground)]">
-                                {localizeUi("ui.chat.chatsettingsdrawer.arrangeModeLetsYouDragSpritesAnywhereInThe")}
-                              </p>
-                            </div>
-                          )}
+                            ownerCount={chatSpriteSubjects.length}
+                            ownersLoading={chatSpriteSubjectsLoading}
+                            choicesLoading={chatSpriteChoicesLoading}
+                            owners={chatSpriteSubjectsWithSprites.map((subject) => {
+                              const isPersona = subject.kind === "persona";
+                              return {
+                                id: subject.id,
+                                kind: subject.kind,
+                                name: isPersona ? subject.persona.name : charName(subject.character),
+                                title: isPersona ? subject.persona.comment || "Persona" : charTitle(subject.character),
+                                avatarPath: isPersona ? subject.persona.avatarPath : subject.character.avatarPath,
+                                avatarCrop: isPersona ? null : charAvatarCrop(subject.character),
+                                active: spriteCharacterIds.includes(subject.id),
+                              };
+                            })}
+                            onOpenOwner={(kind, id) => {
+                              onClose();
+                              if (kind === "persona") {
+                                useUIStore.getState().openPersonaDetail(id);
+                              } else {
+                                useUIStore.getState().openCharacterDetail(id);
+                              }
+                            }}
+                            onToggleOwner={toggleSprite}
+                            enabledOwnerCount={spriteCharacterIds.length}
+                            layoutSubjects={spriteLayoutSubjects}
+                            selectedLayoutSubjectId={selectedSpriteLayoutCharacterId}
+                            onSelectLayoutSubject={setSelectedSpriteLayoutCharacterId}
+                            selectedLayoutSubjectHasOverride={Boolean(selectedSpriteCharacterVisualSettings)}
+                            onResetSelectedLayoutSubject={resetSelectedSpriteCharacterVisualSettings}
+                            spriteArrangeMode={spriteArrangeMode}
+                            onToggleSpriteArrange={onToggleSpriteArrange}
+                            hasCustomSpritePlacements={hasCustomSpritePlacements}
+                            onResetSpritePlacements={resetSpritePlacements}
+                            spritePosition={editedSpritePosition}
+                            onSpritePositionChange={setSpriteSide}
+                            expressionSpriteScalePercent={expressionSpriteScalePercent}
+                            fullBodySpriteScalePercent={fullBodySpriteScalePercent}
+                            expressionSpriteOpacityPercent={expressionSpriteOpacityPercent}
+                            fullBodySpriteOpacityPercent={fullBodySpriteOpacityPercent}
+                            onExpressionSpriteScaleChange={setExpressionSpriteScale}
+                            onFullBodySpriteScaleChange={setFullBodySpriteScale}
+                            onExpressionSpriteOpacityChange={setExpressionSpriteOpacity}
+                            onFullBodySpriteOpacityChange={setFullBodySpriteOpacity}
+                          />
                         </AgentSettingsCard>
                       )}
 
@@ -9929,283 +9688,6 @@ function KnowledgeAgentSettingsCard({
         </p>
       )}
     </AgentSettingsCard>
-  );
-}
-
-function SpriteDisplayModeToggle({
-  modes,
-  onToggle,
-}: {
-  modes: readonly SpriteDisplayMode[];
-  onToggle: (mode: SpriteDisplayMode) => void;
-}) {
-  const { t: localizeUi } = useUiTranslation();
-  const options: Array<{ id: SpriteDisplayMode; label: string }> = [
-    { id: "expressions", label: "Expressions" },
-    { id: "full-body", label: "Full-body" },
-  ];
-
-  return (
-    <div className="space-y-1.5 rounded-lg bg-[var(--background)]/75 px-3 py-2 ring-1 ring-[var(--border)]">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[0.6875rem] font-medium text-[var(--foreground)]">
-          {localizeUi("ui.chat.spritedisplaymodetoggle.spriteSource")}
-        </span>
-        <span className="text-[0.5625rem] text-[var(--muted-foreground)]">
-          {localizeUi("ui.chat.spritedisplaymodetoggle.chooseOneOrBoth")}
-        </span>
-      </div>
-      <div className="grid grid-cols-2 overflow-hidden rounded-md ring-1 ring-[var(--border)]">
-        {options.map((option, index) => {
-          const active = hasSpriteDisplayMode(modes, option.id);
-          const isLastActive = active && modes.length === 1;
-          return (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => onToggle(option.id)}
-              disabled={isLastActive}
-              className={cn(
-                "min-w-0 px-2.5 py-1.5 text-[0.625rem] font-medium transition-colors",
-                index > 0 && "border-l border-[var(--border)]",
-                active
-                  ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-                  : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
-                isLastActive && "cursor-not-allowed",
-              )}
-              title={
-                isLastActive
-                  ? localizeUi("ui.chat.spritedisplaymodetoggle.atLeastOneSpriteSourceMustStayEnabled")
-                  : localizeUi("ui.chat.spritedisplaymodetoggle.value1Sprites", { value1: option.label })
-              }
-            >
-              {option.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ── Sprite toggle button (per character) ──
-function SpriteToggleButton({ active, onToggle }: { active: boolean; onToggle: () => void }) {
-  const { t: localizeUi } = useUiTranslation();
-  return (
-    <button
-      onClick={onToggle}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[0.625rem] font-medium transition-colors ring-1",
-        active
-          ? "bg-[var(--primary)]/10 text-[var(--primary)] ring-[var(--primary)]/30 hover:bg-[var(--primary)]/15"
-          : "text-[var(--muted-foreground)] ring-[var(--border)] hover:bg-[var(--accent)]",
-      )}
-      title={
-        active
-          ? localizeUi("ui.chat.spritetogglebutton.disableSprite")
-          : localizeUi("ui.chat.spritetogglebutton.enableSprite")
-      }
-    >
-      <Image size="0.6875rem" />
-      <span>{active ? localizeUi("ui.noodle.noodlehome.enabled") : localizeUi("ui.presets.sectionstab.enable")}</span>
-    </button>
-  );
-}
-
-// ── Haptic Connection Panel ──
-function HapticConnectionPanel({
-  intifaceUrl: savedIntifaceUrl,
-  onIntifaceUrlChange,
-}: {
-  intifaceUrl?: string;
-  onIntifaceUrlChange: (value: string | null) => void;
-}) {
-  const { t: localizeUi } = useUiTranslation();
-  const { data: status, isLoading } = useHapticStatus();
-  const connect = useHapticConnect();
-  const disconnect = useHapticDisconnect();
-  const startScan = useHapticStartScan();
-  const [intifaceUrl, setIntifaceUrl] = useState(
-    () => savedIntifaceUrl ?? localStorage.getItem(HAPTIC_INTIFACE_URL_STORAGE_KEY) ?? "",
-  );
-  const [autoConnectAttempted, setAutoConnectAttempted] = useState(false);
-
-  useEffect(() => {
-    setIntifaceUrl(savedIntifaceUrl ?? localStorage.getItem(HAPTIC_INTIFACE_URL_STORAGE_KEY) ?? "");
-  }, [savedIntifaceUrl]);
-
-  const saveIntifaceUrl = useCallback(() => {
-    const trimmed = intifaceUrl.trim();
-    if (trimmed) {
-      localStorage.setItem(HAPTIC_INTIFACE_URL_STORAGE_KEY, trimmed);
-    } else {
-      localStorage.removeItem(HAPTIC_INTIFACE_URL_STORAGE_KEY);
-    }
-    if ((savedIntifaceUrl ?? "") !== trimmed) {
-      onIntifaceUrlChange(trimmed || null);
-    }
-    return trimmed;
-  }, [intifaceUrl, onIntifaceUrlChange, savedIntifaceUrl]);
-
-  // Auto-connect on mount if not connected
-  useEffect(() => {
-    if (autoConnectAttempted || isLoading || !status || status.connected || connect.isPending) return;
-    setAutoConnectAttempted(true);
-    const trimmed = saveIntifaceUrl();
-    connect.mutate(trimmed || undefined);
-  }, [autoConnectAttempted, connect, isLoading, saveIntifaceUrl, status]);
-
-  if (isLoading) {
-    return (
-      <div className="rounded-lg bg-[var(--secondary)] px-3 py-2 text-[0.625rem] text-[var(--muted-foreground)]">
-        {localizeUi("ui.chat.hapticconnectionpanel.checkingIntifaceCentral")}
-      </div>
-    );
-  }
-
-  const connected = status?.connected ?? false;
-  const devices = status?.devices ?? [];
-  const scanning = status?.scanning ?? false;
-  const defaultServerUrl = status?.defaultServerUrl ?? "ws://127.0.0.1:12345";
-  const activeServerUrl = status?.serverUrl ?? defaultServerUrl;
-
-  return (
-    <div className="space-y-1.5 px-1">
-      <label className="flex flex-col gap-1 rounded-lg bg-[var(--secondary)] px-3 py-2">
-        <span className="text-[0.625rem] font-medium text-[var(--muted-foreground)]">
-          {localizeUi("ui.chat.hapticsetupfields.intifaceUrl")}
-        </span>
-        <input
-          value={intifaceUrl}
-          onChange={(event) => setIntifaceUrl(event.target.value)}
-          onBlur={saveIntifaceUrl}
-          placeholder={defaultServerUrl}
-          className="rounded-md bg-[var(--background)] px-2.5 py-1.5 text-[0.6875rem] text-[var(--foreground)] outline-none ring-1 ring-[var(--border)] placeholder:text-[var(--muted-foreground)]/55 focus:ring-[var(--primary)]/60"
-        />
-        <span className="text-[0.5625rem] leading-relaxed text-[var(--muted-foreground)]">
-          {localizeUi("ui.chat.hapticconnectionpanel.blankUsesTheServerDefaultDockerOrRemoteBrowser")}
-        </span>
-      </label>
-
-      {/* Connection status */}
-      <div className="flex items-center justify-between rounded-lg bg-[var(--secondary)] px-3 py-2">
-        <div className="min-w-0 flex items-center gap-1.5">
-          <div className={cn("h-1.5 w-1.5 rounded-full", connected ? "bg-green-400" : "bg-red-400")} />
-          <span className="min-w-0 truncate text-[0.625rem] text-[var(--muted-foreground)]">
-            {connect.isPending
-              ? localizeUi("ui.chat.hapticconnectionpanel.connectingToValue1", {
-                  value1: intifaceUrl.trim() || defaultServerUrl,
-                })
-              : connected
-                ? localizeUi("ui.chat.hapticconnectionpanel.connectedValue1", { value1: activeServerUrl })
-                : localizeUi("ui.chat.hapticconnectionpanel.notConnected")}
-          </span>
-        </div>
-        <button
-          onClick={() => {
-            if (connected) {
-              disconnect.mutate();
-            } else {
-              connect.mutate(saveIntifaceUrl() || undefined);
-            }
-          }}
-          disabled={connect.isPending || disconnect.isPending}
-          className="text-[0.625rem] font-medium text-[var(--primary)] hover:underline disabled:opacity-50"
-        >
-          {connected
-            ? localizeUi("ui.agents.agenteditor.disconnect")
-            : localizeUi("ui.chat.hapticconnectionpanel.connect")}
-        </button>
-      </div>
-
-      {/* Error message */}
-      {connect.isError && !connected && (
-        <p className="text-[0.625rem] text-red-400 px-1">
-          {localizeUi("ui.chat.hapticconnectionpanel.couldNotConnectMakeSure")}{" "}
-          <a href="https://intiface.com/central/" target="_blank" rel="noopener noreferrer" className="underline">
-            {localizeUi("ui.chat.hapticconnectionpanel.intifaceCentral")}
-          </a>{" "}
-          {localizeUi("ui.chat.hapticconnectionpanel.isRunningAndTheServerIsStarted")}
-        </p>
-      )}
-
-      {/* Devices */}
-      {connected && (
-        <div className="space-y-1">
-          <div className="flex items-center justify-between px-1">
-            <span className="text-[0.625rem] text-[var(--muted-foreground)]">
-              {devices.length === 0
-                ? localizeUi("ui.chat.hapticconnectionpanel.noDevicesFound")
-                : localizeUi("ui.chat.hapticconnectionpanel.value1DeviceValue2", {
-                    value1: devices.length,
-                    value2: devices.length !== 1 ? localizeUi("ui.noodle.stageprofileview.s") : "",
-                  })}
-            </span>
-            <button
-              onClick={() => startScan.mutate()}
-              disabled={scanning || startScan.isPending}
-              className="text-[0.625rem] font-medium text-[var(--primary)] hover:underline disabled:opacity-50"
-            >
-              {scanning
-                ? localizeUi("ui.chat.hapticconnectionpanel.scanning")
-                : localizeUi("ui.chat.hapticconnectionpanel.scanForDevices")}
-            </button>
-          </div>
-          {devices.map((d) => (
-            <div key={d.index} className="flex items-center gap-1.5 rounded-md bg-[var(--accent)]/50 px-2.5 py-1.5">
-              <Vibrate size="0.625rem" className="text-[var(--primary)]" />
-              <span className="text-[0.625rem] font-medium">{d.name}</span>
-              <span className="text-[0.5rem] text-[var(--muted-foreground)]">{d.capabilities.join(", ")}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AgentPromptTemplateSelect({
-  options,
-  selectedId,
-  overridden = false,
-  onChange,
-}: {
-  options: AgentPromptTemplateOption[];
-  selectedId: string;
-  overridden?: boolean;
-  onChange: (promptTemplateId: string) => void;
-}) {
-  const { t: localizeUi } = useUiTranslation();
-  if (options.length <= 1) {
-    return overridden ? <AgentDefaultStatus overridden onReset={() => onChange("")} /> : null;
-  }
-  const activeOption = options.find((option) => option.id === selectedId) ?? options[0];
-
-  return (
-    <div className="mt-2 rounded-lg bg-[var(--background)]/25 px-2 py-2 ring-1 ring-[var(--border)]/70">
-      <label className="flex flex-col gap-1.5">
-        <span className="text-[0.5625rem] font-semibold uppercase text-[var(--muted-foreground)]">
-          {localizeUi("ui.agents.customagentrepositoriesmodal.prompt")}
-        </span>
-        <select
-          value={activeOption?.id ?? DEFAULT_AGENT_PROMPT_TEMPLATE_ID}
-          onChange={(event) => onChange(event.target.value)}
-          className="w-full rounded-md bg-[var(--secondary)] px-2 py-1.5 text-[0.6875rem] text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-        >
-          {options.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      {activeOption?.description ? (
-        <p className="mt-1.5 text-[0.5625rem] leading-snug text-[var(--muted-foreground)]">
-          {activeOption.description}
-        </p>
-      ) : null}
-      <AgentDefaultStatus overridden={overridden} onReset={() => onChange("")} />
-    </div>
   );
 }
 
