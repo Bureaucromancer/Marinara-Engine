@@ -821,6 +821,7 @@ export function ChatSettingsDrawer({
   const isConversation = chatMode === "conversation";
   const isGame = chatMode === "game";
   const isRoleplayMode = chatMode === "roleplay";
+  const worldMapsSettingsDescription = localizeUi("ui.chat.chatsettingsdrawer.worldMapsFeatureSummary");
   const supportsNarrativeDirectorSecretPlot = chatMode === "roleplay";
   const modeSettingsSurfaces = CHAT_SETTINGS_SURFACES[chatMode];
   const metadata = useMemo(
@@ -8029,7 +8030,7 @@ export function ChatSettingsDrawer({
                                       <AgentSettingsCard
                                         icon={<MapIcon size="0.75rem" className="mt-0.5 text-[var(--primary)]" />}
                                         title={agent.name}
-                                        description={agent.description}
+                                        description={worldMapsSettingsDescription}
                                       >
                                         <CapabilityElement
                                           packageId={mapsPackage.id}
@@ -8339,7 +8340,9 @@ export function ChatSettingsDrawer({
                                                 ) : null}
                                               </div>
                                               <span className="mt-0.5 block text-[0.625rem] leading-tight text-[var(--muted-foreground)] line-clamp-2">
-                                                {agent.description}
+                                                {agent.id === "hierarchical-maps"
+                                                  ? worldMapsSettingsDescription
+                                                  : agent.description}
                                               </span>
                                             </div>
                                             <button
