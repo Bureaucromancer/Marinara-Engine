@@ -34,6 +34,26 @@ export function normalizeCardAssetImageSyntax(text: string): string {
   });
 }
 
+/**
+ * Rewrite portable `card://self/gallery/<file>` references to the speaking
+ * character's absolute card URL. Applied to message text BEFORE markdown
+ * rendering so the shared renderers keep their current signatures.
+ *
+ * With no speaker (user/system messages, unknown speaker) the text is returned
+ * untouched: `resolveCardAssetUrl` then falls through on the unknown `self`
+ * scope and the browser shows a broken image — the same visible failure any
+ * other unresolvable card:// link produces.
+ */
+const SELF_GALLERY_PREFIX_RE = /card:\/\/self\/gallery\//gi;
+
+export function resolveSelfCardAssets(text: string, characterId?: string | null): string {
+  if (!text || !characterId) return text;
+  const prefix = `card://characters/${encodeURIComponent(characterId)}/gallery/`;
+  // Function replacer so `$`-sequences in the id can never be interpreted as
+  // replacement patterns. Filenames after the prefix are never touched.
+  return text.replace(SELF_GALLERY_PREFIX_RE, () => prefix);
+}
+
 export function resolveCardAssetUrl(rawUrl: string): string {
   const trimmed = rawUrl.trim();
   if (!trimmed.toLowerCase().startsWith("card://")) return rawUrl;
@@ -64,6 +84,13 @@ export function resolveCardAssetUrl(rawUrl: string): string {
   if (scope === "personas" && parts.length >= 3 && parts[1] === "gallery") {
     return `/api/characters/personas/${encodeSegment(parts[0]!)}/gallery/file/${encodePath(parts.slice(2))}`;
   }
+
+  // `self` is resolved before render by resolveSelfCardAssets(). Reaching here
+  // means there was no speaker context (user/system message, unknown speaker) —
+  // fall through to rawUrl like any other unresolvable scope. Do NOT wire the
+  // active chat's character in here: that would silently resolve `self` inside
+  // user messages to an arbitrary participant.
+  if (scope === "self") return rawUrl;
 
   if (scope === "sprites") {
     const first = parts[0]?.toLowerCase();

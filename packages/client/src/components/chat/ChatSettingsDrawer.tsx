@@ -9218,6 +9218,7 @@ export function ChatSettingsDrawer({
                         }
                         dialogueColor={firstMesConfirm.dialogueColor}
                         className="mt-1 text-[0.6875rem] leading-relaxed"
+                        selfCharacterId={firstMesConfirm.charId}
                       />
                     </button>
                   );

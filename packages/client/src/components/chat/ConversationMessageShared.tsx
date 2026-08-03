@@ -13,6 +13,7 @@ import {
 import { cn } from "../../lib/utils";
 import type { ReactionSegmentTarget } from "../../lib/reactions";
 import { applyInlineMarkdown, renderMarkdownBlocks } from "../../lib/markdown";
+import { resolveSelfCardAssets } from "../../lib/card-asset-links";
 import { renderInlineWithCustomEmojis } from "../../lib/custom-emoji-render";
 import { renderWithStickerBlocks } from "../../lib/sticker-render";
 import { applyTextareaQuoteFormat } from "../../lib/textarea-quotes";
@@ -79,6 +80,12 @@ export interface MessageRenderContext {
   nameColor?: string;
   mentionNames: string[];
   charByName: Map<string, CharInfo> | null;
+  /** Same keys as charByName, mapping normalized speaker name -> character id
+   *  (CharInfo carries no id; grouped segments need it for card://self refs). */
+  charIdByName: Map<string, string> | null;
+  /** Speaking character of the whole message (null for user/system) — resolves
+   *  portable card://self/gallery refs; grouped segments prefer their own speaker. */
+  selfCharacterId: string | null;
   // content
   quoteFormat: QuoteFormat;
   renderedContent: string;
@@ -365,16 +372,23 @@ export function MessageContent({
   emojiMap,
   stickerMap,
   onImageOpen,
+  selfCharacterId,
 }: {
   content: string;
   mentionNames?: string[];
   emojiMap?: Map<string, string>;
   stickerMap?: Map<string, string>;
   onImageOpen: (url: string) => void;
+  /** Speaking character of this content — resolves portable card://self/gallery refs. */
+  selfCharacterId?: string | null;
 }) {
   const { t: localizeUi } = useUiTranslation();
-  if (IMAGE_URL_RE.test(content.trim())) {
-    const url = content.trim();
+  // Portable gallery refs resolve to the speaker BEFORE markdown rendering, so
+  // the shared renderer stays untouched and grouped segments can resolve to
+  // their own per-segment speaker.
+  const resolved = resolveSelfCardAssets(content, selfCharacterId);
+  if (IMAGE_URL_RE.test(resolved.trim())) {
+    const url = resolved.trim();
     return (
       <button
         type="button"
@@ -389,7 +403,7 @@ export function MessageContent({
       </button>
     );
   }
-  const compacted = content.replace(/\n{3,}/g, "\n\n");
+  const compacted = resolved.replace(/\n{3,}/g, "\n\n");
   const baseInline = mentionNames?.length
     ? (text: string, kp: string) => highlightMentions(applyInlineMarkdown(text, kp), mentionNames, kp)
     : applyInlineMarkdown;

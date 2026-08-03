@@ -76,6 +76,8 @@ The **Dialogue & Greetings** section sets how a chat opens and how the character
 - **Alternate Greetings**. Extra opening messages. When you start a chat you can pick which one to use. Use the up and down controls to reorder them, and the X to remove one.
 - **Example Dialogue**. Sample exchanges that teach the character's voice. Use `<START>` to separate exchanges. Use `{{user}}` and `{{char}}` as placeholders.
 
+Greetings and example messages can also display images from the character's Gallery — see [Character galleries → Reuse a gallery image in messages and greetings](galleries.md#reuse-a-gallery-image-in-messages-and-greetings).
+
 A short Example Dialogue entry looks like this:
 
 ```

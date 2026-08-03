@@ -23,7 +23,7 @@ import { createLorebooksStorage } from "../storage/lorebooks.storage.js";
 import { createPromptsStorage } from "../storage/prompts.storage.js";
 import { normalizeTimestampOverrides, type TimestampOverrides } from "./import-timestamps.js";
 import { resolveLorebookEntryRole } from "./lorebook-role.js";
-import { mkdir, writeFile } from "fs/promises";
+import { access, mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { DATA_DIR } from "../../utils/data-dir.js";
 import { assertInsideDir, extensionFromImageMime, isAllowedImageBuffer } from "../../utils/security.js";
@@ -166,7 +166,33 @@ async function restoreCharacterGallery(
     const entry = item as Record<string, unknown>;
     const decoded = decodeImageDataUrl(entry.data);
     if (!decoded) continue;
-    const safeFilename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${decoded.ext}`;
+    // Preserve the exported filename: portable card://self/gallery/<file>
+    // references in greetings/messages key on it, so a regenerated name breaks
+    // every reference after import. Sanitize the stem, always take the
+    // extension from the DECODED image (never the envelope), and resolve
+    // collisions (merging galleries can legitimately repeat a filename).
+    const randomFilename = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${decoded.ext}`;
+    let safeFilename = randomFilename();
+    const originalName = typeof entry.filename === "string" ? entry.filename : "";
+    const originalStem = originalName
+      .split(/[\\/]/)
+      .pop()!
+      .replace(/\.[^.]*$/, "")
+      .replace(/[^A-Za-z0-9._-]/g, "-")
+      .replace(/^\.+/, "")
+      .slice(0, 80);
+    if (originalStem) {
+      for (let attempt = 0; attempt <= 50; attempt++) {
+        const candidate = attempt === 0 ? `${originalStem}.${decoded.ext}` : `${originalStem}-${attempt + 1}.${decoded.ext}`;
+        try {
+          await access(join(dir, candidate));
+          // exists — try the next suffix
+        } catch {
+          safeFilename = candidate;
+          break;
+        }
+      }
+    }
     try {
       const filepath = assertInsideDir(dir, join(dir, safeFilename));
       await writeFile(filepath, decoded.buffer);

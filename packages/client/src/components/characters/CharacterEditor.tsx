@@ -84,6 +84,7 @@ import {
   Palette,
   FolderOpen,
   Film,
+  Link2,
   Loader2,
   Swords,
   Crop,
@@ -107,6 +108,7 @@ import {
   type LegacyAvatarCrop,
 } from "../../lib/utils";
 import { extractColorsFromImage } from "../../lib/avatar-color-extraction";
+import { buildCardAssetMarkdown } from "../../lib/card-asset-links";
 import { HelpTooltip } from "../ui/HelpTooltip";
 import { api } from "../../lib/api-client";
 import { downloadSpriteFile } from "../../lib/sprite-download";
@@ -1296,6 +1298,7 @@ function CharacterDescriptionTab({
   updateField: <K extends keyof CharacterData>(key: K, value: CharacterData[K]) => void;
 }) {
   const { t: localizeUi } = useUiTranslation();
+  const selfCharacterId = useUIStore((s) => s.characterDetailId);
   return (
     <div className="mari-editor-panel space-y-3 p-3">
       <SectionHeader
@@ -1310,6 +1313,7 @@ function CharacterDescriptionTab({
         rows={12}
         title={localizeUi("chat.settings.inlineEditor.fields.description")}
         showMarkdownPreview
+        selfCharacterId={selfCharacterId}
         className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--secondary)] p-4 text-sm leading-relaxed outline-none transition-colors placeholder:text-[var(--muted-foreground)]/40 focus:border-[var(--primary)]/40 focus:ring-1 focus:ring-[var(--primary)]/20"
       />
       <p className="mt-1.5 text-right text-[0.625rem] text-[var(--muted-foreground)]">
@@ -1337,6 +1341,7 @@ function TextareaTab({
   rows?: number;
 }) {
   const { t: localizeUi } = useUiTranslation();
+  const selfCharacterId = useUIStore((s) => s.characterDetailId);
   return (
     <div className="mari-editor-panel space-y-3 p-3">
       <SectionHeader title={title} subtitle={subtitle} helpText={helpText} />
@@ -1347,6 +1352,7 @@ function TextareaTab({
         rows={rows}
         title={title}
         showMarkdownPreview
+        selfCharacterId={selfCharacterId}
         className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--secondary)] p-4 text-sm leading-relaxed outline-none transition-colors placeholder:text-[var(--muted-foreground)]/40 focus:border-[var(--primary)]/40 focus:ring-1 focus:ring-[var(--primary)]/20"
       />
       <p className="mt-1.5 text-right text-[0.625rem] text-[var(--muted-foreground)]">
@@ -1664,6 +1670,7 @@ function MetadataTab({
           rows={4}
           title={localizeUi("ui.characters.metadatatab.creatorNotes")}
           showMarkdownPreview
+          selfCharacterId={characterId}
           className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--secondary)] p-3 text-sm outline-none placeholder:text-[var(--muted-foreground)]/40 focus:border-[var(--primary)]/40 focus:ring-1 focus:ring-[var(--primary)]/20"
           placeholder={localizeUi("ui.characters.metadatatab.notesAboutThisCharacterIntendedUseTipsForBest")}
         />
@@ -2045,6 +2052,7 @@ function DialogueTab({
   updateField: <K extends keyof CharacterData>(key: K, value: CharacterData[K]) => void;
 }) {
   const { t: localizeUi } = useUiTranslation();
+  const selfCharacterId = useUIStore((s) => s.characterDetailId);
   const greetingKeysRef = useRef<string[]>([]);
 
   while (greetingKeysRef.current.length < formData.alternate_greetings.length) {
@@ -2112,6 +2120,7 @@ function DialogueTab({
           rows={6}
           title={localizeUi("ui.characters.dialoguetab.firstMessage")}
           showMarkdownPreview
+          selfCharacterId={selfCharacterId}
           className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--secondary)] p-4 text-sm leading-relaxed outline-none placeholder:text-[var(--muted-foreground)]/40 focus:border-[var(--primary)]/40 focus:ring-1 focus:ring-[var(--primary)]/20"
           placeholder={localizeUi("ui.characters.dialoguetab.whatIsTheCharacterSFirstMessageWhenA")}
         />
@@ -2185,6 +2194,7 @@ function DialogueTab({
               rows={3}
               title={localizeUi("ui.characters.dialoguetab.alternateGreetingValue1", { value1: i + 1 })}
               showMarkdownPreview
+              selfCharacterId={selfCharacterId}
               className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--secondary)] p-3 text-sm outline-none placeholder:text-[var(--muted-foreground)]/40 focus:border-[var(--primary)]/40"
               placeholder={localizeUi("ui.characters.dialoguetab.greetingValue1", { value1: i + 1 })}
             />
@@ -2209,6 +2219,7 @@ function DialogueTab({
           rows={10}
           title={localizeUi("chat.settings.inlineEditor.fields.exampleDialogue")}
           showMarkdownPreview
+          selfCharacterId={selfCharacterId}
           className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--secondary)] p-4 font-mono text-xs leading-relaxed outline-none placeholder:text-[var(--muted-foreground)]/40 focus:border-[var(--primary)]/40 focus:ring-1 focus:ring-[var(--primary)]/20"
           placeholder={localizeUi("ui.characters.dialoguetab.startUserHelloCharWavesExcitedlyHeyThere")}
         />
@@ -2252,6 +2263,7 @@ function AdvancedTab({
           rows={6}
           title={localizeUi("ui.characters.advancedtab.systemPrompt")}
           showMarkdownPreview
+          selfCharacterId={characterId}
           className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--secondary)] p-4 text-sm outline-none placeholder:text-[var(--muted-foreground)]/40 focus:border-[var(--primary)]/40 focus:ring-1 focus:ring-[var(--primary)]/20"
           placeholder={localizeUi(
             "ui.characters.advancedtab.characterSpecificInstructionsInsertedThroughCharsysinfoOrTheCharacter",
@@ -2270,6 +2282,7 @@ function AdvancedTab({
           rows={4}
           title={localizeUi("ui.characters.advancedtab.postHistoryInstructions")}
           showMarkdownPreview
+          selfCharacterId={characterId}
           className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--secondary)] p-4 text-sm outline-none placeholder:text-[var(--muted-foreground)]/40 focus:border-[var(--primary)]/40 focus:ring-1 focus:ring-[var(--primary)]/20"
           placeholder={localizeUi("ui.characters.advancedtab.textInsertedAfterTheChatHistoryButBeforeGeneration")}
         />
@@ -2287,6 +2300,7 @@ function AdvancedTab({
           rows={4}
           title={localizeUi("ui.characters.advancedtab.depthPrompt")}
           showMarkdownPreview
+          selfCharacterId={characterId}
           className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--secondary)] p-3 text-sm outline-none focus:border-[var(--primary)]/40"
           placeholder={localizeUi("ui.characters.advancedtab.promptInjectedAtASpecificDepthInTheChat")}
         />
@@ -2485,6 +2499,23 @@ function CharacterGalleryTab({ characterId, characterName }: { characterId: stri
     [setAvatar, localizeUi],
   );
 
+  // Copies the PORTABLE image reference (card://self/gallery/<file>) — resolves
+  // to whichever character speaks the message, so it survives export/import
+  // where character ids are regenerated. Filenames round-trip in native exports.
+  const handleCopyReference = useCallback(
+    async (image: CharacterGalleryImage) => {
+      const filename = image.filePath.split("/").pop() ?? "";
+      if (!filename) return;
+      const label = image.prompt.trim() || filename.replace(/\.[^.]+$/, "");
+      const ok = await copyToClipboard(
+        buildCardAssetMarkdown(label, `card://self/gallery/${encodeURIComponent(filename)}`),
+      );
+      if (ok) toast.success(localizeUi("ui.characters.charactergallerytab.referenceCopied"));
+      else toast.error(localizeUi("ui.characters.charactergallerytab.failedToCopyReference"));
+    },
+    [localizeUi],
+  );
+
   return (
     <div className="space-y-6">
       <SectionHeader
@@ -2562,6 +2593,14 @@ function CharacterGalleryTab({ characterId, characterName }: { characterId: stri
                       {new Date(image.createdAt).toLocaleDateString()}
                     </span>
                     <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => void handleCopyReference(image)}
+                        className="rounded-lg bg-white/15 p-1.5 text-white transition-colors hover:bg-white/25"
+                        title={localizeUi("ui.characters.charactergallerytab.copyImageReference")}
+                      >
+                        <Link2 size="0.75rem" />
+                      </button>
                       <button
                         type="button"
                         onClick={() => void handleSetAvatar(image)}

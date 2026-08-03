@@ -47,6 +47,8 @@ export function ConversationMessageGrouped({
     groupedSegments,
     visibleSegments,
     charByName,
+    charIdByName,
+    selfCharacterId,
     mentionNames,
     emojiMap,
     stickerMap,
@@ -174,6 +176,9 @@ export function ConversationMessageGrouped({
       ) : (
         (groupedSegments ?? []).slice(0, visibleSegments).map((grp, i) => {
           const segChar = grp.speaker && charByName ? charByName.get(normalizeTextForMatch(grp.speaker)) : null;
+          const segSelfId =
+            (grp.speaker && charIdByName ? charIdByName.get(normalizeTextForMatch(grp.speaker)) : null) ??
+            selfCharacterId;
           const segAvatar = segChar?.avatarUrl ?? null;
           const segAvatarCropStyle = getAvatarCropStyle(segChar?.avatarCrop);
           const segName = segChar?.convoDisplayName?.trim() || segChar?.name || grp.speaker || "";
@@ -223,6 +228,7 @@ export function ConversationMessageGrouped({
                   emojiMap={emojiMap}
                   stickerMap={stickerMap}
                   onImageOpen={(url) => onImageOpen(url)}
+                  selfCharacterId={selfCharacterId}
                 />
               </div>
             );
@@ -274,6 +280,7 @@ export function ConversationMessageGrouped({
                         emojiMap={emojiMap}
                         stickerMap={stickerMap}
                         onImageOpen={(url) => onImageOpen(url)}
+                        selfCharacterId={segSelfId}
                       />
                     </div>
                   </div>
@@ -350,6 +357,7 @@ export function ConversationMessageGrouped({
                             emojiMap={emojiMap}
                             stickerMap={stickerMap}
                             onImageOpen={(url) => onImageOpen(url)}
+                            selfCharacterId={segSelfId}
                           />
                         </div>
                       </div>
@@ -366,6 +374,7 @@ export function ConversationMessageGrouped({
                           emojiMap={emojiMap}
                           stickerMap={stickerMap}
                           onImageOpen={(url) => onImageOpen(url)}
+                          selfCharacterId={segSelfId}
                         />
                       </div>
                     ))}
