@@ -5989,6 +5989,7 @@
   "ui.noodle.noodlerschedulemanagermodal.imageAttempts": "Image attempts: {{used}} / {{limit}}",
   "ui.noodle.noodlerschedulemanagermodal.imageAttemptsLabel": "Image attempts",
   "ui.noodle.noodlerschedulemanagermodal.images": "Images",
+  "ui.noodle.noodlerschedulemanagermodal.limitsTemporary": "These posting limits are temporary while NoodleR is in testing. They will be lifted once testing wraps up.",
   "ui.noodle.noodlerschedulemanagermodal.loadingCreators": "Loading creators...",
   "ui.noodle.noodlerschedulemanagermodal.loadingStatus": "Loading publishing status...",
   "ui.noodle.noodlerschedulemanagermodal.nextValue1": "Next {{value1}}",

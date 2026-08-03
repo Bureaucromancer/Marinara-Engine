@@ -49,6 +49,9 @@ export function NoodlerPublishingSettings({ active, onOpenCreator }: NoodlerPubl
             <span className="block text-xs text-[var(--muted-foreground)]">
               {t("ui.noodle.noodlerschedulemanagermodal.upToPostsPerDay", { count: settings?.postsPerDay ?? 4 })}
             </span>
+            <span className="mt-1 block text-xs leading-5 text-[var(--noodle-accent)]">
+              {t("ui.noodle.noodlerschedulemanagermodal.limitsTemporary")}
+            </span>
           </span>
           <input
             type="checkbox"
