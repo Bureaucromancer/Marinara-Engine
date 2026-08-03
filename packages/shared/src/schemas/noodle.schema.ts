@@ -18,6 +18,9 @@ export const NOODLER_POST_CONTENT_MAX_LENGTH = 4000;
 export const NOODLER_REPLY_CONTENT_MAX_LENGTH = 2000;
 export const DEFAULT_NOODLER_CREATOR_REPLIES_PER_24_HOURS = 10;
 export const NOODLER_POSTS_PER_DAY_MAX = 24;
+/** Per-request cap on bulk creator creation and targeted refresh. The wizard enforces the same
+ *  ceiling so a selection larger than this is prevented rather than rejected as a whole request. */
+export const NOODLER_BULK_ACCOUNT_MAX = 100;
 // Exact `Title:\n` + `\n\n` + `Body:\n` framing overhead from serializeNoodlerPostGuide.
 export const NOODLER_POST_GUIDE_MAX_LENGTH = NOODLER_POST_TITLE_MAX_LENGTH + NOODLER_POST_CONTENT_MAX_LENGTH + 15;
 
@@ -251,7 +254,7 @@ export const noodleBulkNoodlerAccountCreateSchema = z
     noodleAccountIds: z
       .array(z.string().min(1).max(64))
       .min(0)
-      .max(100)
+      .max(NOODLER_BULK_ACCOUNT_MAX)
       .refine((ids) => new Set(ids).size === ids.length, { message: "Duplicate account IDs are not allowed." }),
     disclosureMode: noodleIdentityDisclosureSchema,
     disclosureExceptions: z.record(z.string().min(1).max(64), noodleIdentityDisclosureSchema).default({}),
@@ -264,7 +267,7 @@ export const noodlerTargetedRefreshSchema = z
     accountIds: z
       .array(z.string().min(1).max(64))
       .min(1)
-      .max(100)
+      .max(NOODLER_BULK_ACCOUNT_MAX)
       .refine((ids) => new Set(ids).size === ids.length, { message: "Duplicate account IDs are not allowed." }),
     executionId: z.string().min(1).max(128).optional(),
   })

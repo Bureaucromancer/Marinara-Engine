@@ -73,6 +73,9 @@ export async function generateAndApplyNoodlerPost(
     const connection = await createConnectionsStorage(db).getWithKey(connectionId);
     if (!connection) return { status: "connection_not_found" } as const;
     const generated = await generateNoodlerPost(db, { account, request, connection, media, admissionMode });
+    // A foreground post invalidates the near-future reserve the same way a manual one does;
+    // without this the creator posts now and again from reserve within the hour.
+    await noodle.discardPreparedPostsAfterManualPost(account.id, generated.post.createdAt);
     return {
       status: "generated",
       post: generated.post,

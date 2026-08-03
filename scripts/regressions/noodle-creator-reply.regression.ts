@@ -169,6 +169,55 @@ try {
     );
   }
 
+  // Duplicate detection must not disclose a stored reply to a caller that does not own the
+  // parent comment: replaying known IDs from another persona is ineligible, not duplicate.
+  const otherViewer = await noodle.upsertAccountFromProfile({
+    kind: "persona",
+    entityId: "other-viewer",
+    displayName: "Other Viewer",
+  });
+  assert.deepEqual(
+    await noodle.claimNoodlerCreatorReply(stage.id, post.id, parent.id, otherViewer.id, claimedAt, 10),
+    { status: "ineligible" },
+    "duplicate lookup must revalidate parent ownership",
+  );
+
+  // An orphan claim left by a crash expires: the same comment stays answerable afterwards.
+  const orphanParent = await noodle.createNoodlerInteraction(post.id, {
+    actorAccountId: viewer.id,
+    type: "reply",
+    content: "Comment whose claim is orphaned by a crash",
+  });
+  assert.ok(orphanParent);
+  const orphan = await noodle.claimNoodlerCreatorReply(stage.id, post.id, orphanParent.id, viewer.id, claimedAt, 10);
+  assert.equal(orphan.status, "claimed");
+  const afterExpiry = new Date(Date.parse(claimedAt) + 25 * 60 * 60 * 1000).toISOString();
+  assert.equal(
+    (await noodle.claimNoodlerCreatorReply(stage.id, post.id, orphanParent.id, viewer.id, afterExpiry, 10)).status,
+    "claimed",
+    "an expired orphan claim must not block its comment forever",
+  );
+
+  // Deleting a comment takes its creator reply with it: the first comment on this post is the
+  // one already answered above, so its reply must not survive as an orphan.
+  const deleted = await noodle.deleteNoodlerInteraction(post.id, {
+    actorAccountId: viewer.id,
+    type: "reply",
+    parentInteractionId: null,
+  });
+  assert.equal(deleted?.id, parent.id);
+  const remaining = await noodle.listNoodlerInteractions([post.id]);
+  assert.equal(
+    remaining.some((interaction) => interaction.id === generated.id),
+    false,
+    "deleting a comment must delete its creator reply",
+  );
+  assert.equal(
+    (await noodle.claimNoodlerCreatorReply(stage.id, post.id, parent.id, viewer.id, afterExpiry, 10)).status,
+    "ineligible",
+    "the deleted comment's claim must be gone with it",
+  );
+
   const selfParent = await noodle.createNoodlerInteraction(post.id, {
     actorAccountId: source.id,
     type: "reply",

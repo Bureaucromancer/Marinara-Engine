@@ -25,11 +25,17 @@ export function NoodlerPublishingSettings({ active, onOpenCreator }: NoodlerPubl
   const { t } = useUiTranslation();
   const { data } = useNoodle();
   const settings = data?.settings;
-  const accounts = useNoodlerAccounts(settings?.enableNoodler === true).data ?? [];
-  const status = useNoodlerReserveStatus(active && settings?.enableNoodler === true).data;
+  const accountsQuery = useNoodlerAccounts(settings?.enableNoodler === true);
+  const accounts = accountsQuery.data ?? [];
+  const statusQuery = useNoodlerReserveStatus(active && settings?.enableNoodler === true);
+  const status = statusQuery.data;
   const updateSettings = useUpdateNoodleSettings();
   const updateAuto = useUpdateNoodlerAutoPosting();
   const refreshAll = useRefreshAllNoodlerCreatorsNow();
+  // Toggles roll back on rejection, which is silent on its own: say so, or the user reads the
+  // reverted switch as the server having accepted a different value.
+  const toastToggleFailure = (error: unknown) =>
+    toast.error(errorMessage(error, t("ui.noodle.noodlerschedulemanagermodal.couldNotUpdateAutomation")));
   const nextByAccount = new Map(status?.creators.map((entry) => [entry.accountId, entry.nextPreparedAt]) ?? []);
 
   return (
@@ -48,10 +54,32 @@ export function NoodlerPublishingSettings({ active, onOpenCreator }: NoodlerPubl
             type="checkbox"
             checked={settings?.autoPostingScheduleEnabled ?? true}
             disabled={updateSettings.isPending || !settings}
-            onChange={(event) => updateSettings.mutate({ autoPostingScheduleEnabled: event.target.checked })}
+            onChange={(event) =>
+              updateSettings.mutate(
+                { autoPostingScheduleEnabled: event.target.checked },
+                { onError: toastToggleFailure },
+              )
+            }
             className="h-5 w-5 accent-[var(--noodle-accent)]"
           />
         </label>
+        {/* Counters read as authoritative, so a cold or failed status query must not render as zero. */}
+        {statusQuery.isError ? (
+          <p className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted-foreground)]">
+            {t("ui.noodle.noodlerschedulemanagermodal.couldNotLoadStatus")}
+            <button
+              type="button"
+              onClick={() => void statusQuery.refetch()}
+              className="min-h-8 font-semibold text-[var(--noodle-accent)]"
+            >
+              {t("capabilities.actions.tryAgain")}
+            </button>
+          </p>
+        ) : !status ? (
+          <p className="text-xs text-[var(--muted-foreground)]">
+            {t("ui.noodle.noodlerschedulemanagermodal.loadingStatus")}
+          </p>
+        ) : (
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-3">
           <div>
             <dt className="text-[var(--muted-foreground)]">
@@ -89,6 +117,7 @@ export function NoodlerPublishingSettings({ active, onOpenCreator }: NoodlerPubl
             </dd>
           </div>
         </dl>
+        )}
         <button
           type="button"
           disabled={refreshAll.isPending}
@@ -139,7 +168,12 @@ export function NoodlerPublishingSettings({ active, onOpenCreator }: NoodlerPubl
                 type="checkbox"
                 checked={profile.autoPosting.enabled}
                 disabled={updateAuto.isPending}
-                onChange={(event) => updateAuto.mutate({ accountId: profile.id, enabled: event.target.checked })}
+                onChange={(event) =>
+                  updateAuto.mutate(
+                    { accountId: profile.id, enabled: event.target.checked },
+                    { onError: toastToggleFailure },
+                  )
+                }
                 className="h-4 w-4 accent-[var(--noodle-accent)]"
               />
             </label>
@@ -149,17 +183,40 @@ export function NoodlerPublishingSettings({ active, onOpenCreator }: NoodlerPubl
                 type="checkbox"
                 checked={profile.autoPosting.imagesEnabled}
                 disabled={updateAuto.isPending}
-                onChange={(event) => updateAuto.mutate({ accountId: profile.id, imagesEnabled: event.target.checked })}
+                onChange={(event) =>
+                  updateAuto.mutate(
+                    { accountId: profile.id, imagesEnabled: event.target.checked },
+                    { onError: toastToggleFailure },
+                  )
+                }
                 className="h-4 w-4 accent-[var(--noodle-accent)]"
               />
             </label>
           </div>
         ))}
-        {accounts.length === 0 && (
-          <p className="text-sm text-[var(--muted-foreground)]">
-            {t("ui.noodle.noodlerschedulemanagermodal.noCreatorsYetAddSomeFromTheNoodlerHub")}
-          </p>
-        )}
+        {/* "No creators yet" is only true after a successful load; a cold or failed query must not
+            claim the user's existing creators are gone. */}
+        {accounts.length === 0 &&
+          (accountsQuery.isError ? (
+            <p className="flex flex-wrap items-center gap-2 text-sm text-[var(--muted-foreground)]">
+              {t("ui.noodle.noodlerschedulemanagermodal.couldNotLoadCreators")}
+              <button
+                type="button"
+                onClick={() => void accountsQuery.refetch()}
+                className="min-h-8 font-semibold text-[var(--noodle-accent)]"
+              >
+                {t("capabilities.actions.tryAgain")}
+              </button>
+            </p>
+          ) : accountsQuery.isSuccess ? (
+            <p className="text-sm text-[var(--muted-foreground)]">
+              {t("ui.noodle.noodlerschedulemanagermodal.noCreatorsYetAddSomeFromTheNoodlerHub")}
+            </p>
+          ) : (
+            <p className="text-sm text-[var(--muted-foreground)]">
+              {t("ui.noodle.noodlerschedulemanagermodal.loadingCreators")}
+            </p>
+          ))}
       </div>
     </div>
   );

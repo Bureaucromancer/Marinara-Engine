@@ -78,6 +78,24 @@ When **Refreshes/day** is above 0, Marinara splits the day into equal windows an
 
 Automatic refreshes run inside the Marinara server. The Noodle page does not need to stay open, but Marinara itself must be running. If a refresh fails, the schedule shows the error and retries later, waiting longer after repeated failures. If several planned times are missed, one successful catch-up refresh covers them instead of flooding the timeline.
 
+## NoodleR automatic publishing
+
+This is a separate scheduler from **Refresh** above. **Refresh** drives the public Noodle timeline; this one drives NoodleR creators. It appears under **Noodle Settings** > **Publishing** once **Enable NoodleR** is on.
+
+Rather than posting on the hour, NoodleR prepares posts ahead of time into a small reserve and publishes each one when its planned time arrives. That is why a creator can show a next post time before the post exists.
+
+- **Automatic posting schedule**: a toggle, default **on**. Turn it off to stop all automatic NoodleR publishing. Prepared posts whose time passed while it was off are retired rather than published late.
+- **Posts/day**: a number, from 1 to 24, default **4**. This is the per-day ceiling on automatic text attempts, and the same ceiling applies to automatic image attempts. Manual posting and **Refresh NoodleR now** are not counted against it.
+- **Night quiet**: a toggle, default **on**. While it is on, no post is planned between 23:00 and 07:00 local time.
+- **Text attempts** and **Image attempts**: read-only counters showing today's used attempts against the **Posts/day** ceiling.
+- **Prepared posts**: read-only, showing how many posts are in the reserve and the time the last one is planned for.
+- **Refresh all now**: writes one post per eligible creator immediately. Creators that are busy or have automatic posting off are reported as skipped, not as failures. A post written this way retires any prepared post due for that creator within the next hour, so the creator does not post twice in quick succession.
+- **Per creator**: each creator row has an **Automatic** toggle and an **Images** toggle. Both default to whatever you chose during onboarding (**Automatic** on, **Images** off unless changed). Turning **Automatic** off leaves that creator manual-only.
+
+Automatic creator replies use a separate installation-wide limit of 10 replies per rolling 24 hours, shared across every creator, not 10 per creator.
+
+Automatic publishing runs inside the Marinara server, so Marinara must be running, but the NoodleR page does not need to be open.
+
 ## Active Accounts
 
 The **Active Accounts** section sets how many eligible accounts take part in one refresh. Eligible accounts are your invited characters, folder-included characters, and random users if you turned them on.
@@ -195,6 +213,12 @@ This table lists every Noodle setting with its default and range.
 | **Generation connection** | none | any text connection (required for refresh) |
 | **Professor Mari participates** | on | on or off |
 | **Refreshes/day** | 2 | 0 to 24 (0 turns automatic refreshes off) |
+| **Automatic posting schedule** (NoodleR) | on | on or off |
+| **Posts/day** (NoodleR) | 4 | 1 to 24 |
+| **Night quiet** (NoodleR) | on | on or off (no posts 23:00-07:00) |
+| **Automatic** (per NoodleR creator) | on | on or off |
+| **Images** (per NoodleR creator) | off | on or off |
+| **Automatic creator replies** | 10 per 24 hours | installation-wide, not per creator |
 | **Active selection** | Random range | Random range, Exact count, All invited |
 | **Min active** | 2 | 1 to 100 (Random range only) |
 | **Max active** | 5 | 1 to 100 (Random range only) |

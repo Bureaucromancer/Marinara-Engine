@@ -2,7 +2,8 @@ import type { NoodlerRefreshNowOutcome } from "@marinara-engine/shared";
 
 /**
  * Summarize the per-creator outcomes of "Refresh NoodleR now" into a localization key + params.
- * Anything not generated/skipped is a failure, so an all-failure run never reports success.
+ * Anything not generated/skipped is a failure, so an all-failure run never reports success, and a
+ * run where every creator was busy or disabled reports the skip rather than "generated 0 posts".
  * Callers must localize the returned key via useUiTranslation before toasting.
  */
 export function summarizeRefreshOutcomes(
@@ -13,6 +14,10 @@ export function summarizeRefreshOutcomes(
   const failed = outcomes.length - generated - skipped;
   if (outcomes.length === 0) {
     return { ok: true, key: "ui.noodle.noodlerhome.noCreatorsHaveAutomaticPostingEnabled" };
+  }
+  // Every creator busy or disabled generates nothing, which is not a success to report as one.
+  if (failed === 0 && generated === 0 && skipped > 0) {
+    return { ok: false, key: "ui.noodle.refresh.allCreatorsSkipped", params: { count: skipped } };
   }
   if (failed === 0) return { ok: true, key: "ui.noodle.refresh.generatedPosts", params: { count: generated } };
   if (generated === 0) return { ok: false, key: "ui.noodle.refresh.allCreatorsFailed", params: { count: failed } };

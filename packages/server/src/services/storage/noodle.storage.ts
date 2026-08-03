@@ -86,6 +86,12 @@ export const NOODLER_SUBSCRIPTION_COST = 5;
 const NOODLER_RESERVE_STATE_ID = "noodler-reserve";
 const ROLLING_DAY_MS = 24 * 60 * 60 * 1000;
 const MANUAL_POST_INVALIDATION_MS = 60 * 60 * 1000;
+/**
+ * The reserve poll runs every minute, so a slot this far past its publish time means the server
+ * was down or paused. Publishing it now would backdate it, and a long outage would release the
+ * whole missed run at once, so an elapsed slot is retired instead.
+ */
+const ELAPSED_PREPARED_SLOT_MS = 60 * 60 * 1000;
 
 export type NoodlerPreparedPostPayload = {
   title: string | null;
@@ -927,6 +933,26 @@ export function createNoodleStorage(db: DB) {
     });
   };
 
+  /**
+   * Deleting a comment must take its creator reply with it: the reply is unreadable once its
+   * parent is gone, and the permanent claim row would keep consuming the rolling allowance
+   * and block the comment slot forever.
+   */
+  const deleteInteractionChildren = async (
+    tx: Parameters<Parameters<DB["transaction"]>[0]>[0],
+    parentId: string,
+  ): Promise<void> => {
+    const children = await tx
+      .select()
+      .from(noodleInteractions)
+      .where(eq(noodleInteractions.parentInteractionId, parentId));
+    await tx.delete(noodlerCreatorReplyClaims).where(eq(noodlerCreatorReplyClaims.parentInteractionId, parentId));
+    if (children.length === 0) return;
+    const childIds = children.map((child) => child.id);
+    await tx.delete(noodleActivityDigests).where(inArray(noodleActivityDigests.sourceInteractionId, childIds));
+    await tx.delete(noodleInteractions).where(inArray(noodleInteractions.id, childIds));
+  };
+
   const deleteStoredInteraction = async (
     postId: string,
     input: DeleteStoredInteractionCommand,
@@ -950,7 +976,10 @@ export function createNoodleStorage(db: DB) {
     if (!existing) return null;
 
     if (digestDeletionPolicy === "delete-directly") {
-      await db.delete(noodleInteractions).where(eq(noodleInteractions.id, existing.id));
+      await db.transaction(async (tx) => {
+        await deleteInteractionChildren(tx, existing.id);
+        await tx.delete(noodleInteractions).where(eq(noodleInteractions.id, existing.id));
+      });
       return mapInteraction(existing);
     }
 
@@ -969,6 +998,7 @@ export function createNoodleStorage(db: DB) {
       return null;
     }
     await db.transaction(async (tx) => {
+      await deleteInteractionChildren(tx, existing.id);
       await tx.delete(noodleActivityDigests).where(eq(noodleActivityDigests.sourceInteractionId, existing.id));
       await tx.delete(noodleInteractions).where(eq(noodleInteractions.id, existing.id));
     });
@@ -1657,6 +1687,11 @@ export function createNoodleStorage(db: DB) {
           const current = (await tx.select().from(noodlerPreparedPosts).where(eq(noodlerPreparedPosts.id, item.id)))[0];
           if (!current || current.state !== "prepared" || Date.parse(current.publishAt) > at.getTime()) return false;
           const existingPost = publishedPreparedIds.get(current.id);
+          if (!existingPost && Date.parse(current.publishAt) < at.getTime() - ELAPSED_PREPARED_SLOT_MS) {
+            unlinkNoodlerMedia(String(parseRecord(parseRecord(current.payload).metadata).noodlerMediaPath ?? "") || null);
+            await tx.update(noodlerPreparedPosts).set({ state: "discarded", updatedAt: at.toISOString() }).where(eq(noodlerPreparedPosts.id, current.id));
+            return false;
+          }
           if (existingPost) {
             await tx
               .update(noodlerPreparedPosts)
@@ -2498,23 +2533,6 @@ export function createNoodleStorage(db: DB) {
       ceiling = DEFAULT_NOODLER_CREATOR_REPLIES_PER_24_HOURS,
     ): Promise<NoodlerCreatorReplyClaimResult> {
       return db.transaction(async (tx) => {
-        const existingClaims = await tx
-          .select()
-          .from(noodlerCreatorReplyClaims)
-          .where(
-            and(
-              eq(noodlerCreatorReplyClaims.parentInteractionId, parentInteractionId),
-              eq(noodlerCreatorReplyClaims.creatorAccountId, creatorAccountId),
-            ),
-          );
-        const existing = existingClaims[0];
-        if (existing) {
-          const replyRows = existing.replyInteractionId
-            ? await tx.select().from(noodleInteractions).where(eq(noodleInteractions.id, existing.replyInteractionId))
-            : [];
-          return { status: "duplicate", interaction: replyRows[0] ? mapInteraction(replyRows[0]) : null };
-        }
-
         const [creatorRows, parentRows, viewerRows] = await Promise.all([
           tx
             .select()
@@ -2595,6 +2613,26 @@ export function createNoodleStorage(db: DB) {
             ),
           );
         }
+        // Duplicate detection runs after the eligibility and access checks above so a caller
+        // replaying known IDs cannot read back a stored reply it is no longer entitled to,
+        // and after the prune so an expired orphan claim does not block the same comment forever.
+        const existingClaims = await tx
+          .select()
+          .from(noodlerCreatorReplyClaims)
+          .where(
+            and(
+              eq(noodlerCreatorReplyClaims.parentInteractionId, parentInteractionId),
+              eq(noodlerCreatorReplyClaims.creatorAccountId, creatorAccountId),
+            ),
+          );
+        const existing = existingClaims[0];
+        if (existing) {
+          const replyRows = existing.replyInteractionId
+            ? await tx.select().from(noodleInteractions).where(eq(noodleInteractions.id, existing.replyInteractionId))
+            : [];
+          return { status: "duplicate", interaction: replyRows[0] ? mapInteraction(replyRows[0]) : null };
+        }
+
         const recentClaims = await tx
           .select()
           .from(noodlerCreatorReplyClaims)

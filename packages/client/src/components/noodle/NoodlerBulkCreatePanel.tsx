@@ -21,7 +21,11 @@ import type {
   NoodlerPostView,
   NoodlerStageProfile,
 } from "@marinara-engine/shared";
-import { NOODLER_POSTS_PER_DAY_MAX, resolveNoodlerOnboardingCompletion } from "@marinara-engine/shared";
+import {
+  NOODLER_BULK_ACCOUNT_MAX,
+  NOODLER_POSTS_PER_DAY_MAX,
+  resolveNoodlerOnboardingCompletion,
+} from "@marinara-engine/shared";
 import { useTranslation as useUiTranslation } from "react-i18next";
 import {
   useBulkCreateNoodlerStageProfiles,
@@ -114,6 +118,7 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
   const [generateNow, setGenerateNow] = useState(true);
   const [createdIds, setCreatedIds] = useState<string[]>([]);
   const [creationFailures, setCreationFailures] = useState(0);
+  const [settingsFailed, setSettingsFailed] = useState(false);
   const [outcomes, setOutcomes] = useState<NoodlerRefreshNowOutcome[]>([]);
   const [completion, setCompletion] = useState<CompletionKind | null>(null);
   const [executionId, setExecutionId] = useState("");
@@ -157,6 +162,7 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
     setGenerateNow(true);
     setCreatedIds([]);
     setCreationFailures(0);
+    setSettingsFailed(false);
     setOutcomes([]);
     setCompletion(null);
     setExecutionId(generateClientId());
@@ -181,11 +187,14 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
     setSelectionInitialized(true);
   }, [accounts, eligible.hasNextPage, eligible.isLoading, open, selectionInitialized]);
 
+  // One bulk request carries at most NOODLER_BULK_ACCOUNT_MAX accounts, so the selection is
+  // capped here: rejecting the whole request after the fact loses every choice the user made.
+  const selectionFull = selected.size >= NOODLER_BULK_ACCOUNT_MAX;
   const toggleSelected = (id: string) => {
     setSelected((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
-      else next.add(id);
+      else if (next.size < NOODLER_BULK_ACCOUNT_MAX) next.add(id);
       return next;
     });
   };
@@ -205,15 +214,18 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
     next: NoodlerRefreshNowOutcome[],
     createFailures = creationFailures,
     createdCount = createdIds.length,
+    settingsSaved = !settingsFailed,
   ) => {
     setOutcomes(next);
     setCompletion(
-      resolveNoodlerOnboardingCompletion({
-        selectedCount: selected.size,
-        createdCount,
-        createFailures,
-        outcomes: next,
-      }),
+      settingsSaved
+        ? resolveNoodlerOnboardingCompletion({
+            selectedCount: selected.size,
+            createdCount,
+            createFailures,
+            outcomes: next,
+          })
+        : "failed",
     );
     setStep(5);
   };
@@ -270,33 +282,35 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
       setStep(5);
       return;
     }
-    if (!(await saveSettings(selected.size === 0 ? "zero" : "completed"))) {
-      setCompletion("failed");
-      setStep(5);
-      return;
-    }
-    onComplete?.();
+    // A failed settings write keeps onboarding incomplete, but the profiles already exist:
+    // still write their first posts so the run is not stranded halfway.
+    const settingsSaved = await saveSettings(selected.size === 0 ? "zero" : "completed");
+    setSettingsFailed(!settingsSaved);
+    if (settingsSaved) onComplete?.();
     if (newIds.length === 0 || !generateNow) {
       setCompletion(
-        resolveNoodlerOnboardingCompletion({
-          selectedCount: selected.size,
-          createdCount: newIds.length,
-          createFailures: createFailureCount,
-          outcomes: null,
-        }),
+        settingsSaved
+          ? resolveNoodlerOnboardingCompletion({
+              selectedCount: selected.size,
+              createdCount: newIds.length,
+              createFailures: createFailureCount,
+              outcomes: null,
+            })
+          : "failed",
       );
       setStep(5);
       return;
     }
     try {
       const result = await refreshTargeted.mutateAsync({ accountIds: newIds, executionId });
-      finalizeOutcomes(result.outcomes, createFailureCount, newIds.length);
+      finalizeOutcomes(result.outcomes, createFailureCount, newIds.length, settingsSaved);
     } catch {
       // The profiles exist; only generation fell over, so every one of them is retryable.
       finalizeOutcomes(
         newIds.map((accountId) => ({ accountId, status: "error" as const })),
         createFailureCount,
         newIds.length,
+        settingsSaved,
       );
     }
   };
@@ -661,12 +675,16 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
                     disabled={hasNextPage}
                     onClick={() =>
                       setSelected(
-                        new Set(selected.size === accounts.length ? [] : accounts.map((account) => account.id)),
+                        new Set(
+                          selected.size > 0
+                            ? []
+                            : accounts.slice(0, NOODLER_BULK_ACCOUNT_MAX).map((account) => account.id),
+                        ),
                       )
                     }
                     className="min-h-10 shrink-0 px-1 text-xs font-bold text-[var(--noodle-accent)] disabled:opacity-40"
                   >
-                    {selected.size === accounts.length
+                    {selected.size > 0
                       ? t("ui.noodle.noodlerwizard.selectNone")
                       : t("ui.noodle.noodlerwizard.selectAll")}
                   </button>
@@ -700,12 +718,14 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
                       type="button"
                       role="checkbox"
                       aria-checked={selected.has(account.id)}
+                      disabled={selectionFull && !selected.has(account.id)}
                       onClick={() => toggleSelected(account.id)}
                       className={cn(
                         "flex min-h-14 items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors",
                         selected.has(account.id)
                           ? "border-[var(--noodle-accent)] bg-[var(--noodle-accent)]/10 ring-1 ring-[var(--noodle-accent)]/35"
                           : "border-[var(--border)] hover:bg-[var(--accent)]",
+                        selectionFull && !selected.has(account.id) && "opacity-40",
                       )}
                     >
                       <Avatar
@@ -743,6 +763,11 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
                       </span>
                     ))}
                 </div>
+              )}
+              {selectionFull && (
+                <p aria-live="polite" className="text-xs font-semibold text-[var(--muted-foreground)]">
+                  {t("ui.noodle.noodlerwizard.selectionLimit", { count: NOODLER_BULK_ACCOUNT_MAX })}
+                </p>
               )}
               {selectionOnly && selected.size > 0 && (
                 <label className="flex min-h-14 items-center gap-3 rounded-md bg-[var(--accent)]/30 px-4 py-3 ring-1 ring-inset ring-[var(--border)]">

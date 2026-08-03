@@ -219,11 +219,14 @@ export function LockedNoodlerPostCard({
 
         {/* Footer */}
         <div className="mt-4 flex items-center gap-4 text-sm tabular-nums text-[var(--muted-foreground)]">
+          {/* The icons are decorative, so the counts carry their own labels for screen readers. */}
           <span className="flex items-center gap-1.5">
-            <Heart size={18} /> {likeCount}
+            <Heart size={18} aria-hidden="true" /> {likeCount}
+            <span className="sr-only">{localizeUi("ui.noodle.noodlehome.likes")}</span>
           </span>
           <span className="flex items-center gap-1.5">
-            <MessageCircle size={18} /> {replyCount}
+            <MessageCircle size={18} aria-hidden="true" /> {replyCount}
+            <span className="sr-only">{localizeUi("ui.noodle.noodlehome.replies")}</span>
           </span>
           <div className="ml-auto flex items-center gap-3">
             {onManage && (

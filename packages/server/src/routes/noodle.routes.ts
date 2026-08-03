@@ -497,7 +497,9 @@ export async function noodleRoutes(app: FastifyInstance) {
         return reply.code(404).send({ error: "Noodle generation connection not found" });
       }
       if (result.status === "exhausted") {
-        return reply.code(429).send({ error: "This creator has no automatic replies left today." });
+        // The ceiling is installation-wide, not per creator: saying otherwise sends the user to
+        // another creator that is just as blocked.
+        return reply.code(429).send({ error: "No automatic creator replies are left in the last 24 hours." });
       }
       if (result.status === "ineligible") {
         return reply.code(404).send({ error: "That NoodleR reply can no longer receive a creator reply." });

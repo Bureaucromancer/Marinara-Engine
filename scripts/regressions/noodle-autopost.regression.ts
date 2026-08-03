@@ -117,6 +117,21 @@ try {
   assert.equal(published?.createdAt, publishAt);
   assert.equal(JSON.parse(published?.metadata ?? "{}").noodlerPreparedPostId, preparedId);
 
+  // A slot the server slept through is retired, not published hours late with a backdated time.
+  const elapsedId = await noodle.createNoodlerPreparedPost({
+    creatorAccountId: creator!.id,
+    generatedAt: releasedAt.toISOString(),
+    publishAt: "2026-07-30T12:30:00.000Z",
+    payload: { title: null, content: "Missed while down", access: "locked", imagePrompt: null, metadata: {} },
+    policyFingerprint: noodlerReservePolicyFingerprint(enabledCreator!, await noodle.getSettings(), publicAccount.updatedAt),
+  });
+  assert.equal(await noodle.publishDueNoodlerPreparedPosts(new Date("2026-07-30T18:00:00.000Z")), 0);
+  assert.equal((await noodle.listNoodlerPreparedPosts()).find((item) => item.id === elapsedId)?.state, "discarded");
+  assert.equal(
+    (await db.select().from(noodlePosts)).some((post) => post.content === "Missed while down"),
+    false,
+  );
+
   const pausedAt = "2026-07-30T13:00:00.000Z";
   await noodle.createNoodlerPreparedPost({
     creatorAccountId: creator!.id,

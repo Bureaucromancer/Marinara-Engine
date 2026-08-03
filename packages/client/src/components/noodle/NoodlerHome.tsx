@@ -1197,7 +1197,13 @@ export function NoodlerHome({ navigation, onNavigate }: NoodlerHomeProps) {
               deleteProfile.mutate(selectedProfile.id, {
                 onSuccess: () => {
                   clearNoodlerPostDraft(selectedProfile.id);
-                  onNavigate({ mode: "noodler", view: "profiles" });
+                  // Deleting from a creator opened via Settings must not strand the user on the
+                  // profiles list with the "Back to Settings" path gone.
+                  const returnToSettings =
+                    navigation.mode === "noodler" && navigation.view === "profile"
+                      ? navigation.returnToSettings
+                      : undefined;
+                  onNavigate(returnToSettings ?? { mode: "noodler", view: "profiles" });
                   toast.success(localizeUi("ui.noodle.noodlerhome.stageProfileDeleted"));
                 },
                 onError: (error) =>
@@ -1389,13 +1395,29 @@ export function NoodlerHome({ navigation, onNavigate }: NoodlerHomeProps) {
                 ))}
               </div>
             ) : (
+              // With no profiles and no eligible sources loaded, the create button is disabled, so a
+              // failed sources query would leave the page with nothing to act on but a page reload.
               <EmptyState
-                title={localizeUi("ui.noodle.noodlerhome.noStageProfilesYet")}
+                title={
+                  eligibleAccountsQuery.isError
+                    ? localizeUi("ui.noodle.noodlerhome.sourcesUnavailable")
+                    : localizeUi("ui.noodle.noodlerhome.noStageProfilesYet")
+                }
                 detail={localizeUi("ui.noodle.noodlerhome.createStageIdentityDetail")}
                 action={
-                  eligibleNoodleAccounts.length > 0 ? localizeUi("ui.noodle.noodlehome.createStageProfile") : undefined
+                  eligibleAccountsQuery.isError
+                    ? localizeUi("capabilities.actions.tryAgain")
+                    : eligibleNoodleAccounts.length > 0
+                      ? localizeUi("ui.noodle.noodlehome.createStageProfile")
+                      : undefined
                 }
-                onAction={eligibleNoodleAccounts.length > 0 ? beginCreate : undefined}
+                onAction={
+                  eligibleAccountsQuery.isError
+                    ? () => void eligibleAccountsQuery.refetch()
+                    : eligibleNoodleAccounts.length > 0
+                      ? beginCreate
+                      : undefined
+                }
               />
             )}
           </main>
@@ -1408,6 +1430,9 @@ export function NoodlerHome({ navigation, onNavigate }: NoodlerHomeProps) {
     <NoodleShell {...shellProps} rightRail={feedRightRail}>
       <ViewerHub
         personas={personas}
+        personasLoading={personasQuery.isLoading}
+        personasError={personasQuery.isError}
+        onRetryPersonas={() => void personasQuery.refetch()}
         scope={viewerQuery.data}
         isLoading={viewerQuery.isLoading}
         isError={viewerQuery.isError}
@@ -2747,6 +2772,9 @@ function StageProfileView({
 
 function ViewerHub({
   personas,
+  personasLoading,
+  personasError,
+  onRetryPersonas,
   scope,
   isLoading,
   isError,
@@ -2783,6 +2811,9 @@ function ViewerHub({
   onAddCreators,
 }: {
   personas: Persona[];
+  personasLoading: boolean;
+  personasError: boolean;
+  onRetryPersonas: () => void;
   scope: ReturnType<typeof useNoodlerViewer>["data"];
   isLoading: boolean;
   isError: boolean;
@@ -2819,7 +2850,22 @@ function ViewerHub({
   onAddCreators: () => void;
 }) {
   const { t: localizeUi } = useUiTranslation();
+  // "Create a persona" is a claim about the user's data, so it waits for the personas query to
+  // actually succeed instead of speaking for a cold or failed load.
   if (personas.length === 0) {
+    if (personasError) {
+      return (
+        <EmptyState
+          title={localizeUi("ui.noodle.viewerhub.couldNotLoadPersonas")}
+          detail={localizeUi("ui.noodle.viewerhub.personaAccessDetail")}
+          action={localizeUi("capabilities.actions.tryAgain")}
+          onAction={onRetryPersonas}
+        />
+      );
+    }
+    if (personasLoading) {
+      return <EmptyState title={localizeUi("ui.noodle.viewerhub.loadingPersonas")} detail="" />;
+    }
     return (
       <EmptyState
         title={localizeUi("ui.noodle.viewerhub.createAPersonaToBrowseNoodler")}
