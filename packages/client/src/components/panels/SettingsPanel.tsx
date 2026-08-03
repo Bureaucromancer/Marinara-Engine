@@ -2722,7 +2722,7 @@ function QuickRepliesSetting() {
       {showQuickRepliesMenu && drawerOpen && (
         <div
           id="quick-replies-actions-drawer"
-          className="grid gap-1 border-t border-[var(--border)]/60 bg-[var(--background)]/25 p-1"
+          className="grid min-w-0 max-w-full gap-1 overflow-hidden border-t border-[var(--border)]/60 bg-[var(--background)]/25 p-1"
           role="group"
           aria-label={localize("Quick replies actions to include")}
         >
@@ -2757,7 +2757,7 @@ function QuickRepliesSetting() {
                 aria-pressed={option.checked}
                 onClick={() => option.onChange(!option.checked)}
                 className={cn(
-                  "group flex min-h-10 w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] active:scale-[0.99]",
+                  "group flex min-h-10 min-w-0 max-w-full items-center gap-2.5 overflow-hidden rounded-md px-2 py-1.5 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] active:scale-[0.99]",
                   option.checked
                     ? "bg-[var(--primary)]/8 text-[var(--foreground)] ring-1 ring-[var(--primary)]/30"
                     : "text-[var(--muted-foreground)] ring-1 ring-transparent hover:bg-[var(--secondary)]/45 hover:text-[var(--foreground)]",
@@ -2845,15 +2845,15 @@ function CustomQuickRepliesManager() {
   const removeCustomQuickReply = useUIStore((s) => s.removeCustomQuickReply);
 
   return (
-    <div className="mt-1 border-t border-[var(--border)]/60 pt-2">
-      <div className="mb-1 flex items-center justify-between gap-2 px-1">
-        <span className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+    <div className="mt-1 min-w-0 max-w-full overflow-hidden border-t border-[var(--border)]/60 pt-2">
+      <div className="mb-1 flex min-w-0 items-center justify-between gap-2 px-1">
+        <span className="min-w-0 truncate text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
           {localize("Custom quick replies")}
         </span>
         <button
           type="button"
           onClick={() => addCustomQuickReply("", "")}
-          className="flex items-center gap-1 rounded-md bg-[var(--secondary)]/50 px-2 py-1 text-[0.65rem] font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--secondary)] hover:text-[var(--foreground)] active:scale-[0.98]"
+          className="flex shrink-0 items-center gap-1 rounded-md bg-[var(--secondary)]/50 px-2 py-1 text-[0.65rem] font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--secondary)] hover:text-[var(--foreground)] active:scale-[0.98]"
           title={localize("Add a custom quick reply")}
         >
           <Plus size="0.75rem" aria-hidden="true" />
@@ -2867,13 +2867,13 @@ function CustomQuickRepliesManager() {
           )}
         </p>
       ) : (
-        <div className="grid gap-1.5">
+        <div className="grid min-w-0 max-w-full gap-1.5">
           {customQuickReplies.map((entry) => (
             <div
               key={entry.id}
-              className="grid gap-1 rounded-md border border-[var(--border)]/60 bg-[var(--background)]/30 p-1.5"
+              className="grid min-w-0 max-w-full gap-1 overflow-hidden rounded-md border border-[var(--border)]/60 bg-[var(--background)]/30 p-1.5"
             >
-              <div className="flex items-center gap-1.5">
+              <div className="flex min-w-0 max-w-full items-center gap-1.5">
                 <CustomQuickReplyIconButton
                   icon={entry.icon}
                   onSelect={(icon) => updateCustomQuickReply(entry.id, { icon })}
@@ -2899,7 +2899,7 @@ function CustomQuickRepliesManager() {
                 onChange={(event) => updateCustomQuickReply(entry.id, { content: event.target.value })}
                 placeholder={localize("Message, macro, or /slash command to send")}
                 rows={2}
-                className="w-full resize-y rounded bg-[var(--secondary)]/60 px-2 py-1 text-xs outline-none ring-1 ring-transparent focus:ring-[var(--primary)]/40"
+                className="min-w-0 max-w-full resize-y rounded bg-[var(--secondary)]/60 px-2 py-1 text-xs outline-none ring-1 ring-transparent focus:ring-[var(--primary)]/40"
               />
             </div>
           ))}

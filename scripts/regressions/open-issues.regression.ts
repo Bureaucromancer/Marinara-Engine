@@ -2227,6 +2227,16 @@ assert.match(professorMariHomeSource, /toggleProfessorChatSelection/u);
 assert.match(professorMariHomeSource, /handleBulkDeleteProfessorChats/u);
 assert.match(
   professorMariHomeSource,
+  /loadedMessagesChatId !== chatId[\s\S]{0,350}requestAnimationFrame[\s\S]{0,200}node\.scrollTop = node\.scrollHeight/u,
+  "Professor Mari history must scroll to the latest rendered message after the selected chat finishes loading",
+);
+assert.match(
+  professorMariHomeSource,
+  /message\.role === "user"[\s\S]{0,180}<TranscriptRow[\s\S]{0,100}border-y border-\[var\(--border\)\]\/60/u,
+  "Professor Mari user messages must retain their theme-aware horizontal separators",
+);
+assert.match(
+  professorMariHomeSource,
   /Promise\.allSettled\([\s\S]*?api\.delete\(`\/chats\/internal\/professor-mari\/chats\/\$\{id\}`\)/u,
   "Professor Mari chat history should delete all selected chats through the existing endpoint",
 );
@@ -5008,6 +5018,16 @@ try {
     settingsPanelSource.match(/w-\[3\.75rem\] grid-cols-\[minmax\(0,1fr\)_auto\]/gu)?.length,
     2,
     "Conversation Call generated and custom clip duration controls must share the compact width",
+  );
+  assert.match(
+    settingsPanelSource,
+    /id="quick-replies-actions-drawer"[\s\S]{0,180}grid min-w-0 max-w-full[\s\S]{0,80}overflow-hidden/u,
+    "Quick reply actions must shrink within narrow settings panels",
+  );
+  assert.match(
+    settingsPanelSource,
+    /CustomQuickRepliesManager[\s\S]{0,900}mt-1 min-w-0 max-w-full overflow-hidden/u,
+    "Custom quick replies must contain their fields and destructive controls at narrow widths",
   );
 }
 

@@ -1456,6 +1456,7 @@ function CompactMariMessage({ message, thinking }: { message: Message; thinking?
   if (message.role === "user") {
     return (
       <TranscriptRow
+        className="border-y border-[var(--border)]/60 py-2.5"
         marker={<span className="pt-0.5 text-[0.6875rem] font-semibold text-[var(--muted-foreground)]">{localizeUi("ui.chat.compactmarimessage.you")}</span>}
       >
         <CompactMarkdown content={content} />
@@ -2089,6 +2090,7 @@ export function HomeProfessorMariChat({
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const [skillDraft, setSkillDraft] = useState<SkillDraftState>({ name: "", description: "", content: "" });
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [loadedMessagesChatId, setLoadedMessagesChatId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [connectionMenuOpen, setConnectionMenuOpen] = useState(false);
   const [faqOpenItemId, setFaqOpenItemId] = useState<string | null>(null);
@@ -2226,6 +2228,7 @@ export function HomeProfessorMariChat({
     async (id: string, options: { clearSuggestions?: boolean } = {}) => {
       const items = await api.get<Message[]>(`/chats/${id}/messages?limit=80`);
       setMessages(items.map((message) => ({ ...message, extra: toMessageExtra(message) })));
+      setLoadedMessagesChatId(id);
       if (options.clearSuggestions) clearMariChips();
     },
     [clearMariChips],
@@ -2444,6 +2447,24 @@ export function HomeProfessorMariChat({
     if (!node) return;
     node.scrollTop = node.scrollHeight;
   }, [messages, workspaceTimeline, workspaceActivity, visiblePendingChangeReviewKey, workspaceStatus?.error]);
+
+  useLayoutEffect(() => {
+    if (
+      !chatWindowOpen ||
+      chatHistoryOpen ||
+      skillsMenuOpen ||
+      loadingHistory ||
+      !chatId ||
+      loadedMessagesChatId !== chatId
+    ) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const node = scrollRef.current;
+      if (node) node.scrollTop = node.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [chatHistoryOpen, chatId, chatWindowOpen, loadedMessagesChatId, loadingHistory, skillsMenuOpen]);
 
   const displayMessages = useMemo(() => [createWelcomeMessage(chatId), ...messages], [chatId, messages]);
 
