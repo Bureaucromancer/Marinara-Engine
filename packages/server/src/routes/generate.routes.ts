@@ -794,6 +794,54 @@ export async function generateRoutes(app: FastifyInstance) {
       earlyMeta.internalAssistant !== PROFESSOR_MARI_INTERNAL_CHAT_MARKER &&
       !input.impersonate &&
       !input.regenerateMessageId;
+
+    // A browser retry can replay the same queued /impersonate movement while
+    // the first request is still finishing after its atomic commit. Resolve an
+    // applied command before the active-generation rejection so that retry is
+    // idempotent; unapplied commands still follow the normal concurrency guard.
+    if (input.impersonate && input.pendingSpatialTransition) {
+      try {
+        const applied = await findAppliedSpatialOwnerTurn({
+          chatId: input.chatId,
+          transition: input.pendingSpatialTransition,
+        });
+        if (applied) {
+          const recoveredMessage = await chats.getMessage(applied.messageId);
+          if (!recoveredMessage || recoveredMessage.chatId !== input.chatId || recoveredMessage.role !== "user") {
+            return reply.status(409).send({
+              error: "This movement was already applied, but its saved message could not be recovered.",
+              code: "spatial_transition_already_applied",
+            });
+          }
+
+          startSseReply(reply, { "X-Accel-Buffering": "no" });
+          sendSseEvent(reply, { type: "content_replace", data: recoveredMessage.content });
+          sendSseEvent(reply, {
+            type: "spatial_transition_committed",
+            data: {
+              chatId: input.chatId,
+              commandId: input.pendingSpatialTransition.commandId,
+              currentLocationId: applied.snapshot.currentLocationId,
+              definitionRevision: applied.snapshot.definitionRevision,
+            },
+          });
+          sendSseEvent(reply, { type: "message_saved", data: recoveredMessage });
+          sendSseEvent(reply, { type: "done", data: "" });
+          reply.raw.end();
+          return;
+        }
+      } catch (error) {
+        if (error instanceof SpatialOwnerTurnError) {
+          return reply.status(error.statusCode).send({
+            error: error.message,
+            code: error.code,
+            ...(error.details ?? {}),
+          });
+        }
+        throw error;
+      }
+    }
+
     const activeGenerations = (app as any).activeGenerations as Map<
       string,
       { abortController: AbortController; backendUrl: string | null }
@@ -817,55 +865,6 @@ export async function generateRoutes(app: FastifyInstance) {
       releaseActiveGeneration();
       throw err;
     };
-
-    // A browser retry can replay the same queued /impersonate movement after the
-    // first request committed successfully. Resolve that command before any
-    // connection, prompt, provider, or agent work so the retry has no side effects.
-    if (input.impersonate && input.pendingSpatialTransition) {
-      try {
-        const applied = await findAppliedSpatialOwnerTurn({
-          chatId: input.chatId,
-          transition: input.pendingSpatialTransition,
-        });
-        if (applied) {
-          const recoveredMessage = await chats.getMessage(applied.messageId);
-          if (!recoveredMessage || recoveredMessage.chatId !== input.chatId || recoveredMessage.role !== "user") {
-            releaseActiveGeneration();
-            return reply.status(409).send({
-              error: "This movement was already applied, but its saved message could not be recovered.",
-              code: "spatial_transition_already_applied",
-            });
-          }
-
-          startSseReply(reply, { "X-Accel-Buffering": "no" });
-          sendSseEvent(reply, { type: "content_replace", data: recoveredMessage.content });
-          sendSseEvent(reply, {
-            type: "spatial_transition_committed",
-            data: {
-              chatId: input.chatId,
-              commandId: input.pendingSpatialTransition.commandId,
-              currentLocationId: applied.snapshot.currentLocationId,
-              definitionRevision: applied.snapshot.definitionRevision,
-            },
-          });
-          sendSseEvent(reply, { type: "message_saved", data: recoveredMessage });
-          sendSseEvent(reply, { type: "done", data: "" });
-          releaseActiveGeneration();
-          reply.raw.end();
-          return;
-        }
-      } catch (error) {
-        releaseActiveGeneration();
-        if (error instanceof SpatialOwnerTurnError) {
-          return reply.status(error.statusCode).send({
-            error: error.message,
-            code: error.code,
-            ...(error.details ?? {}),
-          });
-        }
-        throw error;
-      }
-    }
 
     if (input.regenerateMessageId) {
       const regenCandidate = await chats.getMessage(input.regenerateMessageId).catch(releaseActiveGenerationAndRethrow);
