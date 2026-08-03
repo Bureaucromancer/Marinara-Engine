@@ -49,6 +49,7 @@ export function ConversationMessageGrouped({
     charByName,
     charIdByName,
     selfCharacterId,
+    galleryIndex,
     mentionNames,
     emojiMap,
     stickerMap,
@@ -229,6 +230,7 @@ export function ConversationMessageGrouped({
                   stickerMap={stickerMap}
                   onImageOpen={(url) => onImageOpen(url)}
                   selfCharacterId={selfCharacterId}
+                galleryIndex={galleryIndex}
                 />
               </div>
             );
@@ -281,6 +283,7 @@ export function ConversationMessageGrouped({
                         stickerMap={stickerMap}
                         onImageOpen={(url) => onImageOpen(url)}
                         selfCharacterId={segSelfId}
+                      galleryIndex={galleryIndex}
                       />
                     </div>
                   </div>
@@ -358,6 +361,7 @@ export function ConversationMessageGrouped({
                             stickerMap={stickerMap}
                             onImageOpen={(url) => onImageOpen(url)}
                             selfCharacterId={segSelfId}
+                          galleryIndex={galleryIndex}
                           />
                         </div>
                       </div>
@@ -375,6 +379,7 @@ export function ConversationMessageGrouped({
                           stickerMap={stickerMap}
                           onImageOpen={(url) => onImageOpen(url)}
                           selfCharacterId={segSelfId}
+                        galleryIndex={galleryIndex}
                         />
                       </div>
                     ))}

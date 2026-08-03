@@ -41,6 +41,7 @@ export function ConversationMessageBubble({ ctx }: { ctx: MessageRenderContext }
     charByName,
     charIdByName,
     selfCharacterId,
+    galleryIndex,
     groupedSegments,
     visibleSegments,
     renderedContent,
@@ -236,6 +237,8 @@ export function ConversationMessageBubble({ ctx }: { ctx: MessageRenderContext }
                         emojiMap={emojiMap}
                         stickerMap={stickerMap}
                         onImageOpen={(url) => onImageOpen(url)}
+                        selfCharacterId={selfCharacterId}
+                        galleryIndex={galleryIndex}
                       />
                     </div>
                   );
@@ -260,6 +263,7 @@ export function ConversationMessageBubble({ ctx }: { ctx: MessageRenderContext }
                       stickerMap={stickerMap}
                       onImageOpen={(url) => onImageOpen(url)}
                       selfCharacterId={segSelfId}
+                    galleryIndex={galleryIndex}
                     />
                   </div>
                 ));
@@ -287,6 +291,7 @@ export function ConversationMessageBubble({ ctx }: { ctx: MessageRenderContext }
                       stickerMap={stickerMap}
                       onImageOpen={(url) => onImageOpen(url)}
                       selfCharacterId={selfCharacterId}
+                    galleryIndex={galleryIndex}
                     />
                   )}
                   <PendingTypingDots label={localizeUi("ui.chat.conversationmessagebubble.stillTyping")} dotClassName="bg-[var(--muted-foreground)]/60" />
@@ -301,6 +306,7 @@ export function ConversationMessageBubble({ ctx }: { ctx: MessageRenderContext }
                   stickerMap={stickerMap}
                   onImageOpen={(url) => onImageOpen(url)}
                   selfCharacterId={selfCharacterId}
+                galleryIndex={galleryIndex}
                 />
               )}
             </div>

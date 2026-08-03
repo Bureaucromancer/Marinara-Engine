@@ -13,7 +13,7 @@ import {
 import { cn } from "../../lib/utils";
 import type { ReactionSegmentTarget } from "../../lib/reactions";
 import { applyInlineMarkdown, renderMarkdownBlocks } from "../../lib/markdown";
-import { resolveSelfCardAssets } from "../../lib/card-asset-links";
+import { resolveSelfCardAssets, type ChatGalleryIndex } from "../../lib/card-asset-links";
 import { renderInlineWithCustomEmojis } from "../../lib/custom-emoji-render";
 import { renderWithStickerBlocks } from "../../lib/sticker-render";
 import { applyTextareaQuoteFormat } from "../../lib/textarea-quotes";
@@ -86,6 +86,9 @@ export interface MessageRenderContext {
   /** Speaking character of the whole message (null for user/system) — resolves
    *  portable card://self/gallery refs; grouped segments prefer their own speaker. */
   selfCharacterId: string | null;
+  /** Chat-wide gallery filename index — card://self falls back to whichever
+   *  chat character owns the file when the speaker doesn't (group chats). */
+  galleryIndex: ChatGalleryIndex | null;
   // content
   quoteFormat: QuoteFormat;
   renderedContent: string;
@@ -373,6 +376,7 @@ export function MessageContent({
   stickerMap,
   onImageOpen,
   selfCharacterId,
+  galleryIndex,
 }: {
   content: string;
   mentionNames?: string[];
@@ -381,12 +385,14 @@ export function MessageContent({
   onImageOpen: (url: string) => void;
   /** Speaking character of this content — resolves portable card://self/gallery refs. */
   selfCharacterId?: string | null;
+  /** Optional chat-wide filename index for any-owner fallback resolution. */
+  galleryIndex?: ChatGalleryIndex | null;
 }) {
   const { t: localizeUi } = useUiTranslation();
   // Portable gallery refs resolve to the speaker BEFORE markdown rendering, so
   // the shared renderer stays untouched and grouped segments can resolve to
   // their own per-segment speaker.
-  const resolved = resolveSelfCardAssets(content, selfCharacterId);
+  const resolved = resolveSelfCardAssets(content, selfCharacterId, galleryIndex);
   if (IMAGE_URL_RE.test(resolved.trim())) {
     const url = resolved.trim();
     return (

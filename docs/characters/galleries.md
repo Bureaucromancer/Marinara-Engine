@@ -82,14 +82,14 @@ Where it works:
 
 - **First Message**, **Alternate Greetings**, and **Example Dialogue** on the character card. The field's Markdown preview shows the image while you edit.
 - Any message a character sends, in **Roleplay** and **Conversation** mode alike.
-- **Group chats**: in a multi-speaker reply, `self` resolves per speaker — each character's line shows that character's own gallery image.
+- **Group chats**: in a multi-speaker reply, `self` resolves per speaker — each character's line shows that character's own gallery image. If the speaker's gallery does not have the file, Marinara looks it up in the other chat characters' galleries, so the right image still appears even when a reply is merged under one speaker.
 
 Where it does not work, by design:
 
 - **Your own messages** and system messages. They have no speaking character, so a `self` reference shows as a broken image. If you want to post a character's gallery image yourself, use the chat asset browser's insert (which writes the full `card://characters/<id>/...` form).
 - **Persona galleries**. Persona images appear in your messages, which have no speaker — use the persona form `card://personas/<id>/gallery/<file>` instead.
 
-One nuance: the per-speaker resolution described above applies to **Conversation Mode** group replies. In a **Roleplay** merged group reply, every `self` in the message resolves to the message's lead character — if another character in that reply needs their own gallery image, use their full `card://characters/<id>/...` form there.
+One nuance for group chats: if two characters in the chat have gallery images with the **same filename**, the speaking character's image always wins. When the speaker does not have the file, the **first match wins** — the other characters are checked in the chat's character order. Give shared-name images distinct filenames if you need a specific character's version to show from another character's line.
 
 ### Why `self` instead of the full link
 

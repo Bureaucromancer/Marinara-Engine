@@ -22,6 +22,7 @@ import { useTranslate } from "../../hooks/use-translate";
 import { useApplyRegex } from "../../hooks/use-apply-regex";
 import { api } from "../../lib/api-client";
 import { chatKeys } from "../../hooks/use-chats";
+import { useChatGalleryFilenameIndex } from "../../hooks/use-characters";
 import type { CharacterMap, MessageSelectionToggle, PersonaInfo } from "./chat-area.types";
 import { MESSAGE_SELECTION_SURFACE_CLASS } from "./message-selection-styles";
 import { GenerationReplayDetailsModal, hasGenerationReplayDetails } from "./GenerationReplayDetailsModal";
@@ -265,6 +266,9 @@ export const ConversationMessage = memo(function ConversationMessage({
           ? message.characterId
           : (fallbackChatCharacterEntry?.id ?? message.characterId)
         : null;
+  // Chat-wide filename index (group chats only): lets card://self refs fall
+  // back to whichever chat character owns the file when the speaker doesn't.
+  const galleryIndex = useChatGalleryFilenameIndex(chatCharacterIds);
 
   const msgPersona = isUser && !plainUserMessages && extra.personaSnapshot ? extra.personaSnapshot : null;
   const avatarUrl = isUser
@@ -814,6 +818,7 @@ export const ConversationMessage = memo(function ConversationMessage({
     charByName,
     charIdByName,
     selfCharacterId,
+    galleryIndex,
     quoteFormat,
     renderedContent: displayedContent,
     renderedContentParts: displayedContentParts,
