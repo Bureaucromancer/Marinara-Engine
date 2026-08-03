@@ -336,7 +336,7 @@ After disabling a full page extension, reload Marinara if a toolbar item, overla
 
 Server Extensions and Professor Mari's raw shell commands run only with macOS Seatbelt or Linux Bubblewrap. Install `bwrap` on a native Linux host, then restart Marinara. The official Docker image already includes Bubblewrap, but the default container remains least-privileged and cannot create Bubblewrap's nested namespaces and mounts. Marinara detects that state and keeps OS-sandbox features disabled instead of attempting broken commands.
 
-If you accept the broader container privileges and need these features in Docker, add an override next to `docker-compose.yml`:
+If you accept the broader container privileges and need these features in Docker, save this as `docker-compose.override.yml` next to `docker-compose.yml`:
 
 ```yaml
 services:
