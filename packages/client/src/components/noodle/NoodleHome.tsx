@@ -132,6 +132,7 @@ import type {
 import { NoodlerAgeGate } from "./NoodlerAgeGate";
 import { NoodleProfileSurface } from "./NoodleProfileSurface";
 import { NoodlerPublishingSettings } from "./NoodlerPublishingSettings";
+import { NoodlerOnboardingWizard } from "./NoodlerBulkCreatePanel";
 import { BrowserChrome, formatTime } from "./NoodleBrowserChrome";
 import { NoodleImageComposer } from "./NoodleImageComposer";
 import { NoodlePollComposer } from "./NoodlePollComposer";
@@ -743,6 +744,7 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
     ? requestedSettingsSection
     : "general";
   const noodlerSettingsActive = navigation.mode === "settings" && settingsTab === "noodler";
+  const [addCreatorsOpen, setAddCreatorsOpen] = useState(false);
   const viewedProfileAccountId =
     navigation.mode === "public" && navigation.view === "profile" ? navigation.accountId : null;
   const profileConnectionTab =
@@ -3619,10 +3621,7 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
                   <p className="text-xs text-[var(--muted-foreground)]">{noodlerScheduleSummary}</p>
                   <button
                     type="button"
-                    onClick={() =>
-                      navigation.mode === "settings" &&
-                      onNavigate({ mode: "noodler", view: "profiles", returnToSettings: navigation })
-                    }
+                    onClick={() => setAddCreatorsOpen(true)}
                     className="min-h-9 rounded-md border border-[var(--noodle-accent)]/40 px-3 text-xs font-semibold text-[var(--noodle-accent)] transition-colors hover:bg-[var(--noodle-accent)]/10"
                   >
                     {localizeUi("ui.noodle.socialsettings.addCreatorProfiles")}
@@ -4183,15 +4182,28 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
       onOpenHome={openHomeTimeline}
       onOpenMobileHome={openMobileHomeTimeline}
       onOpenNoodler={openNoodler}
-      onOpenSearch={openSearch}
-      onOpenNotifications={openNotifications}
-      onOpenProfile={openOwnProfile}
+      // NoodleR settings borrows this shell; its rail must not offer Noodle-only destinations.
+      onOpenSearch={noodlerSettingsActive ? undefined : openSearch}
+      onOpenNotifications={noodlerSettingsActive ? undefined : openNotifications}
+      onOpenProfile={noodlerSettingsActive ? undefined : openOwnProfile}
       onOpenSettings={openSettings}
-      onCompose={openComposeModal}
+      onCompose={noodlerSettingsActive ? undefined : openComposeModal}
       rightRail={rightRail}
       overlays={
         <>
-          <BrowserChrome />
+          {/* Settings is rendered here for both products, so the chrome has to follow the active
+              product tab instead of always claiming the blue Noodle identity. */}
+          {noodlerSettingsActive ? (
+            <BrowserChrome badgeLabel="NoodleR" url="https://noodler.local" mobileUrl="noodle.marinara.local/noodler" />
+          ) : (
+            <BrowserChrome />
+          )}
+          <NoodlerOnboardingWizard
+            open={addCreatorsOpen}
+            selectionOnly
+            onClose={() => setAddCreatorsOpen(false)}
+            onComplete={() => setAddCreatorsOpen(false)}
+          />
           <input ref={imageFileRef} type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
           <input
             ref={replyImageFileRef}

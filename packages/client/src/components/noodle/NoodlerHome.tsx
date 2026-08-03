@@ -397,7 +397,7 @@ export function NoodlerHome({ navigation, onNavigate }: NoodlerHomeProps) {
   const [discoveryOpen, setDiscoveryOpen] = useState(false);
   const discoveryInputRef = useRef<HTMLInputElement | null>(null);
   const [feedTab, setFeedTab] = useState<"following" | "all">("following");
-  const [onboardingMode, setOnboardingMode] = useState<"first-run" | "add-creators" | null>(null);
+  const [onboardingMode, setOnboardingMode] = useState<"first-run" | null>(null);
   const viewerQuery = useNoodlerViewer(viewerPersonaId, enabled);
   const toggleFollow = useToggleNoodlerFollow();
   const toggleSubscription = useToggleNoodlerSubscription();
@@ -1501,11 +1501,9 @@ export function NoodlerHome({ navigation, onNavigate }: NoodlerHomeProps) {
         guidePending={generatePost.isPending}
         onToggleSubscription={toggleCreatorSubscription}
         togglePending={toggleSubscription.isPending || toggleFollow.isPending}
-        onAddCreators={() => setOnboardingMode("add-creators")}
       />
       <NoodlerOnboardingWizard
         open={onboardingMode !== null}
-        selectionOnly={onboardingMode === "add-creators"}
         onClose={() => setOnboardingMode(null)}
         onComplete={() => setFeedTab("all")}
       />
@@ -2808,7 +2806,6 @@ function ViewerHub({
   guidePending,
   onToggleSubscription,
   togglePending,
-  onAddCreators,
 }: {
   personas: Persona[];
   personasLoading: boolean;
@@ -2847,7 +2844,6 @@ function ViewerHub({
   guidePending: boolean;
   onToggleSubscription: (creatorAccountId: string, subscribed: boolean) => void;
   togglePending: boolean;
-  onAddCreators: () => void;
 }) {
   const { t: localizeUi } = useUiTranslation();
   // "Create a persona" is a claim about the user's data, so it waits for the personas query to
@@ -3077,14 +3073,6 @@ function ViewerHub({
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={onAddCreators}
-            className="ml-2 flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border border-[var(--noodle-accent)]/40 px-2.5 text-xs font-bold text-[var(--noodle-accent)]"
-          >
-            <Plus size={14} />{" "}
-            <span className="hidden sm:inline">{localizeUi("ui.noodle.noodlerwizard.addCreators")}</span>
-          </button>
         </div>
       </div>
       <div className="border-b border-[var(--noodle-divider)] py-3 @min-[1024px]:px-4 @min-[1280px]:hidden">
