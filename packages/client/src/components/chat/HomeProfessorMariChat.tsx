@@ -1500,7 +1500,7 @@ function CompactMariMessage({
               value={editContent}
               onChange={setEditContent}
               rows={8}
-              title="Edit Message"
+              title={localizeUi("ui.chat.homeprofessormarichat.editMessage")}
               showMacroReference={false}
               showMarkdownPreview={false}
               className="w-full"
@@ -1509,11 +1509,11 @@ function CompactMariMessage({
               <button
                 onClick={() => { onEdit?.(message.id, editContent); setIsEditing(false); }}
                 className="rounded bg-[var(--primary)] px-2 py-1 text-xs text-[var(--primary-foreground)]"
-              >Save</button>
+              >{localizeUi("ui.noodle.noodlehome.save")}</button>
               <button
                 onClick={() => setIsEditing(false)}
                 className="rounded px-2 py-1 text-xs text-[var(--muted-foreground)] hover:bg-[var(--accent)]"
-              >Cancel</button>
+              >{localizeUi("ui.chat.homeprofessormarichat.cancelSelection")}</button>
             </div>
           </div>
         ) : (
@@ -1529,7 +1529,7 @@ function CompactMariMessage({
               <button
                 onClick={() => { setEditContent(content); setIsEditing(true); }}
                 className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
-                title="Edit"
+                title={localizeUi("ui.chat.homeprofessormarichat.editMessage")}
               >
                 <Pencil size="0.8rem" />
               </button>
@@ -1538,7 +1538,7 @@ function CompactMariMessage({
               <button
                 onClick={() => onDelete(message.id)}
                 className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--destructive)]"
-                title="Delete"
+                title={localizeUi("ui.chat.homeprofessormarichat.deleteMessage")}
               >
                 <Trash2 size="0.8rem" />
               </button>
@@ -1557,12 +1557,12 @@ function CompactMariMessage({
         {(onDelete || onRegenerate) && (
           <div className="mt-1 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
             {onRegenerate && (
-              <button onClick={() => onRegenerate(message.id)} className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]" title="Regenerate">
+              <button onClick={() => onRegenerate(message.id)} className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]" title={localizeUi("ui.chat.chatmessage.regenerate")}>
                 <RefreshCw size="0.8rem" />
               </button>
             )}
             {onDelete && (
-              <button onClick={() => onDelete(message.id)} className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--destructive)]" title="Delete">
+              <button onClick={() => onDelete(message.id)} className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--destructive)]" title={localizeUi("lorebook.editor.batch.delete")}>
                 <Trash2 size="0.8rem" />
               </button>
             )}
@@ -1585,7 +1585,7 @@ function CompactMariMessage({
               <button
                 onClick={() => onRegenerate(message.id)}
                 className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
-                title="Regenerate"
+                title={localizeUi("ui.chat.chatmessage.regenerate")}
               >
                 <RefreshCw size="0.8rem" />
               </button>
@@ -1594,7 +1594,7 @@ function CompactMariMessage({
               <button
                 onClick={() => onDelete(message.id)}
                 className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--destructive)]"
-                title="Delete"
+                title={localizeUi("lorebook.editor.batch.delete")}
               >
                 <Trash2 size="0.8rem" />
               </button>
@@ -3407,9 +3407,9 @@ export function HomeProfessorMariChat({
   );
   const handleDeleteMessage = useCallback(async (messageId: string) => {
     const confirmed = await showConfirmDialog({
-      title: "Delete Message",
-      message: "Are you sure you want to delete this message? This cannot be undone.",
-      confirmLabel: "Delete",
+      title: localizeUi("ui.chat.homeprofessormarichat.deleteMessage"),
+      message: localizeUi("ui.chat.homeprofessormarichat.deleteMessageConfirmation"),
+      confirmLabel: localizeUi("lorebook.editor.batch.delete"),
       tone: "destructive",
     });
     if (!confirmed) return;
@@ -3435,9 +3435,9 @@ export function HomeProfessorMariChat({
 
   const handleRegenerateMessage = useCallback(async (messageId: string) => {
     const confirmed = await showConfirmDialog({
-      title: "Regenerate Response",
-      message: "Are you sure you want to regenerate this response? This cannot be undone.",
-      confirmLabel: "Regenerate",
+      title: localizeUi("ui.chat.homeprofessormarichat.regenerateResponse"),
+      message: localizeUi("ui.chat.homeprofessormarichat.regenerateResponseConfirmation"),
+      confirmLabel: localizeUi("ui.chat.chatmessage.regenerate"),
       tone: "destructive",
     });
     if (!confirmed) return;
@@ -3455,9 +3455,9 @@ export function HomeProfessorMariChat({
 
   const handleRemoveAttachment = useCallback(async (messageId: string, attachmentIndex: number) => {
     const confirmed = await showConfirmDialog({
-      title: "Remove Attachment",
-      message: "Are you sure you want to remove this attachment? This cannot be undone.",
-      confirmLabel: "Remove",
+      title: localizeUi("ui.chat.homeprofessormarichat.removeAttachment"),
+      message: localizeUi("ui.chat.homeprofessormarichat.removeAttachmentConfirmation"),
+      confirmLabel: localizeUi("ui.panels.agentspanel.remove"),
       tone: "destructive",
     });
     if (!confirmed) return;
