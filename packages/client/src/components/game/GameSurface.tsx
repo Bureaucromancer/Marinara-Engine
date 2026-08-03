@@ -6475,6 +6475,17 @@ function GameSurfaceComponent({
     setExperienceBackgroundUrl(null);
   }, [experienceSeamScopeKey]);
 
+  /** The send handed to the experience. Wrapped so a turn it drives leaves the same state behind as one
+   *  the player types: pending choices, QTEs and queued encounters belong to the turn that offered them,
+   *  and the built-in send clears them through this same helper. */
+  const sendExperienceMessage = useCallback(
+    (...args: Parameters<typeof sendMessage>) => {
+      clearPendingInteractiveCommands();
+      return sendMessage(...args);
+    },
+    [clearPendingInteractiveCommands, sendMessage],
+  );
+
   // Engine state handed to the slot, recomputed per turn so the surface tracks streaming and new
   // messages. Builds nothing unless the surface is mounted, so a Classic game never pays for it.
   const experienceSurfaceProps = useMemo(
@@ -6485,7 +6496,7 @@ function GameSurfaceComponent({
       latestAssistant: latestAssistantMsg,
       isStreaming,
       scopedAssetMap,
-      sendMessage,
+      sendMessage: sendExperienceMessage,
       setExperienceBackgroundTag: pushExperienceBackground,
       setExperienceSpeakerAvatars,
       setExperienceChrome,
@@ -6504,7 +6515,7 @@ function GameSurfaceComponent({
       // The host's sprite-size setting, so the player's slider keeps working in this mode.
       spriteScale: gameFullBodySpriteScale,
     }),
-    [experienceSurfaceActive, activeChatId, chatMeta, messages, latestAssistantMsg, isStreaming, scopedAssetMap, sendMessage, pushExperienceBackground, setExperienceSpeakerAvatars, setExperienceChrome, activeSpeaker, experienceChoiceSlotEl, narrationDone, latestNarrationText, scenePreparing, directionsPlaying, assetGenerationBlocksScene, replayActive, gameFullBodySpriteScale],
+    [experienceSurfaceActive, activeChatId, chatMeta, messages, latestAssistantMsg, isStreaming, scopedAssetMap, sendExperienceMessage, pushExperienceBackground, setExperienceSpeakerAvatars, setExperienceChrome, activeSpeaker, experienceChoiceSlotEl, narrationDone, latestNarrationText, scenePreparing, directionsPlaying, assetGenerationBlocksScene, replayActive, gameFullBodySpriteScale],
   );
 
   // Game mutations
