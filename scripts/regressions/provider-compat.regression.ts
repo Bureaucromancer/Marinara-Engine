@@ -36,6 +36,7 @@ import {
 } from "../../packages/server/src/utils/openrouter-attribution.js";
 import {
   ConnectionFallbackProvider,
+  withConnectionFallbackProvider,
   type FallbackConnection,
 } from "../../packages/server/src/services/llm/connection-fallback-provider.js";
 import {
@@ -54,6 +55,15 @@ import {
 } from "../../packages/server/src/services/generation/fallback-notification.js";
 import { resolveStoredChatOptions } from "../../packages/server/src/services/generation/generation-parameters.js";
 import { resolveMainGenerationToolChoice } from "../../packages/server/src/services/generation/tool-resolution-runtime.js";
+import { imageAdmissionKey } from "../../packages/server/src/services/image/image-generation.js";
+import {
+  BACKGROUND_CONNECTION_IDLE_MS,
+  ConnectionAttemptRejectedError,
+  resetConnectionAdmissionForTests,
+  tryBackgroundConnection,
+  withConnectionAdmissionProvider,
+  type ConnectionAdmissionMode,
+} from "../../packages/server/src/services/generation/connection-admission.js";
 
 class RegressionProvider extends BaseLLMProvider {
   calls = 0;
@@ -759,6 +769,191 @@ const fallbackConnection: FallbackConnection = {
     },
   }),
 };
+
+resetConnectionAdmissionForTests();
+let releasePrimaryCall!: () => void;
+const primaryCallHeld = new Promise<void>((resolve) => {
+  releasePrimaryCall = resolve;
+});
+class HeldProvider extends BaseLLMProvider {
+  started!: () => void;
+  readonly startedPromise = new Promise<void>((resolve) => {
+    this.started = resolve;
+  });
+
+  constructor(private readonly held: Promise<void>, private readonly failure?: Error) {
+    super("", "");
+  }
+
+  async *chat(): AsyncGenerator<string, LLMUsage | void, unknown> {
+    this.started();
+    await this.held;
+    if (this.failure) throw this.failure;
+    yield "held response";
+  }
+}
+const heldPrimary = new HeldProvider(primaryCallHeld, new Error("primary unavailable"));
+const admittedPrimary = withConnectionAdmissionProvider(heldPrimary, "primary-connection");
+const primaryRun = collectProviderOutput(admittedPrimary, { model: "primary-model" });
+await heldPrimary.startedPromise;
+assert.equal(tryBackgroundConnection("primary-connection", new Date()).acquired, false);
+const unrelatedFallbackAdmission = tryBackgroundConnection("fallback-connection", new Date());
+assert.equal(unrelatedFallbackAdmission.acquired, true, "primary work must not occupy the fallback connection");
+if (unrelatedFallbackAdmission.acquired) unrelatedFallbackAdmission.release();
+releasePrimaryCall();
+await assert.rejects(primaryRun, /primary unavailable/);
+const releasedPrimaryAdmission = tryBackgroundConnection(
+  "primary-connection",
+  new Date(Date.now() + BACKGROUND_CONNECTION_IDLE_MS),
+);
+assert.equal(releasedPrimaryAdmission.acquired, true, "a failed primary call must release its foreground slot");
+if (releasedPrimaryAdmission.acquired) releasedPrimaryAdmission.release();
+
+let releaseFallbackCall!: () => void;
+const fallbackCallHeld = new Promise<void>((resolve) => {
+  releaseFallbackCall = resolve;
+});
+const heldFallback = new HeldProvider(fallbackCallHeld);
+const admittedFallback = withConnectionAdmissionProvider(heldFallback, "fallback-connection");
+const fallbackRun = collectProviderOutput(admittedFallback, { model: "fallback-model" });
+await heldFallback.startedPromise;
+assert.equal(tryBackgroundConnection("fallback-connection", new Date()).acquired, false);
+const unrelatedPrimaryAdmission = tryBackgroundConnection("other-primary-connection", new Date());
+assert.equal(unrelatedPrimaryAdmission.acquired, true, "fallback work must not occupy a primary connection");
+if (unrelatedPrimaryAdmission.acquired) unrelatedPrimaryAdmission.release();
+releaseFallbackCall();
+assert.equal(await fallbackRun, "held response");
+const releasedFallbackAdmission = tryBackgroundConnection(
+  "fallback-connection",
+  new Date(Date.now() + BACKGROUND_CONNECTION_IDLE_MS),
+);
+assert.equal(releasedFallbackAdmission.acquired, true, "a completed call must release its foreground slot");
+if (releasedFallbackAdmission.acquired) releasedFallbackAdmission.release();
+
+// A consumer that stops reading mid-stream must not strand the primary connection's
+// foreground slot: the fallback provider drains the primary manually, so an early return
+// has to be forwarded explicitly or background work is locked out until a restart.
+resetConnectionAdmissionForTests();
+class EndlessProvider extends BaseLLMProvider {
+  constructor() {
+    super("", "");
+  }
+
+  async *chat(): AsyncGenerator<string, LLMUsage | void, unknown> {
+    while (true) yield "chunk";
+  }
+}
+const abandonedProvider = new ConnectionFallbackProvider(
+  withConnectionAdmissionProvider(new EndlessProvider(), "abandoned-connection"),
+  new RegressionProvider(["unused fallback"]),
+  fallbackConnection,
+  "main",
+);
+const abandonedStream = abandonedProvider.chat([{ role: "user", content: "hi" }], { model: "abandoned-model" });
+assert.equal((await abandonedStream.next()).value, "chunk");
+await abandonedStream.return(undefined);
+assert.equal(
+  tryBackgroundConnection("abandoned-connection", new Date(Date.now() + BACKGROUND_CONNECTION_IDLE_MS)).acquired,
+  true,
+  "abandoning the stream must release the primary connection's foreground slot",
+);
+
+// A background claim hook books one scheduled attempt against a quota. Falling back is a retry
+// of that same attempt on another connection, so the hook must not run a second time.
+resetConnectionAdmissionForTests();
+let claimCount = 0;
+const claimingMode: ConnectionAdmissionMode = {
+  kind: "background",
+  beforeAttempt: () => {
+    claimCount += 1;
+    return () => undefined;
+  },
+};
+const doubleClaimProvider = withConnectionFallbackProvider({
+  primary: new RegressionProvider([], new Error("primary unavailable")),
+  primaryConnectionId: "claim-primary",
+  fallbackConnection,
+  fallbackBaseUrl: "https://fallback.example",
+  category: "main",
+  onFallback: async () => undefined,
+  admissionMode: claimingMode,
+});
+await collectProviderOutput(doubleClaimProvider, { model: "claim-model" }).catch(() => undefined);
+assert.equal(claimCount, 1, "falling back must not book a second background claim");
+
+// A late accounting failure arrives after the stream's tokens already reached the consumer,
+// so it must be logged rather than thrown over a generation that actually succeeded.
+resetConnectionAdmissionForTests();
+const lateFailureStream = withConnectionAdmissionProvider(
+  new RegressionProvider(["usable output"]),
+  "late-finalize-connection",
+  {
+    kind: "background",
+    beforeAttempt: () => () => {
+      throw new Error("accounting backend unavailable");
+    },
+  },
+).chat([{ role: "user", content: "hi" }], { model: "late-model" });
+let streamedOutput = "";
+for await (const chunk of lateFailureStream) streamedOutput += chunk;
+assert.equal(streamedOutput, "usable output", "a completed stream must survive a finalizer failure");
+
+// RunPod connections share one API base URL and pick the physical endpoint with a separate
+// id, so the key has to carry that id or two independent endpoints contend for one slot.
+assert.notEqual(
+  imageAdmissionKey("https://api.runpod.ai/v2", "runpod_comfyui", "abc123"),
+  imageAdmissionKey("https://api.runpod.ai/v2", "runpod_comfyui", "def456"),
+  "RunPod endpoints sharing a base URL must not share an admission key",
+);
+assert.equal(
+  imageAdmissionKey("https://api.runpod.ai/v2", "runpod_comfyui", "abc123"),
+  imageAdmissionKey("https://api.runpod.ai/v2", "runpod_comfyui", "  abc123  "),
+  "endpoint ids must be compared after trimming",
+);
+assert.equal(
+  imageAdmissionKey("http://127.0.0.1:8188", "comfyui"),
+  "http://127.0.0.1:8188",
+  "backends whose base URL is the physical target keep the bare URL as their key",
+);
+// A stale endpoint id on an imported/copied non-RunPod connection must not split one
+// physical endpoint into two admission slots.
+assert.equal(
+  imageAdmissionKey("http://127.0.0.1:8188", "comfyui", "abc123"),
+  imageAdmissionKey("http://127.0.0.1:8188", "comfyui"),
+  "non-RunPod backends must ignore a leftover endpoint id",
+);
+assert.equal(
+  imageAdmissionKey("http://127.0.0.1:7860", "automatic1111", "def456"),
+  "http://127.0.0.1:7860",
+  "A1111 admission keys stay bare regardless of endpoint id",
+);
+
+let backgroundAttempts = 0;
+const backgroundOutcomes: string[] = [];
+const admittedRepeated = withConnectionAdmissionProvider(new RegressionProvider(["ok"]), "background-connection", {
+  kind: "background",
+  beforeAttempt: () => {
+    backgroundAttempts += 1;
+    return (outcome) => {
+      backgroundOutcomes.push(outcome);
+    };
+  },
+});
+await admittedRepeated.chatComplete([{ role: "user", content: "first" }], { model: "model" });
+await admittedRepeated.chatComplete([{ role: "user", content: "correction" }], { model: "model" });
+assert.equal(backgroundAttempts, 2, "each physical correction/retry call must claim separately");
+assert.deepEqual(backgroundOutcomes, ["completed", "completed"]);
+
+const rejectedAttempt = withConnectionAdmissionProvider(new RegressionProvider(["unused"]), "rejected-connection", {
+  kind: "background",
+  beforeAttempt: () => {
+    throw new Error("attempt budget exhausted");
+  },
+});
+await assert.rejects(
+  rejectedAttempt.chatComplete([{ role: "user", content: "test" }], { model: "model" }),
+  (error) => error instanceof ConnectionAttemptRejectedError && error.cause instanceof Error && /budget exhausted/.test(error.cause.message),
+);
 const primaryFailure = new RegressionProvider([], new Error("primary unavailable"));
 const successfulFallback = new RegressionProvider(["fallback response"]);
 const fallbackProvider = new ConnectionFallbackProvider(primaryFailure, successfulFallback, fallbackConnection, "main");
