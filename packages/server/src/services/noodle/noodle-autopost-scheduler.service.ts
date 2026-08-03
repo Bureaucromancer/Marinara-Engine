@@ -8,6 +8,8 @@ import type { FastifyInstance } from "fastify";
 import { logger } from "../../lib/logger.js";
 import { createNoodleStorage } from "../storage/noodle.storage.js";
 import { generateAndApplyNoodlerPost } from "./noodle-noodler-post.operation.js";
+import { isConnectionAdmissionFailure } from "../generation/connection-admission.js";
+import { getErrorMessage } from "./noodle-public-support.js";
 
 const AUTOPOST_INITIAL_DELAY_MS = 20_000;
 const AUTOPOST_POLL_MS = 60_000;
@@ -38,15 +40,24 @@ export function startNoodleAutoPostScheduler(app: FastifyInstance) {
     // interval before the next attempt. That advance is the anti-hot-loop guarantee;
     // no extra backoff map is needed.
     try {
-      const result = await generateAndApplyNoodlerPost(app.db, {
-        mode: "noodler",
-        targetAccountId: accountId,
-        access: "subscriber",
-      });
+      const result = await generateAndApplyNoodlerPost(
+        app.db,
+        { mode: "noodler", targetAccountId: accountId, access: "subscriber" },
+        undefined,
+        // Automatic posting is the background half of the priority rule: it must never take a
+        // connection a user is generating on, and it waits out the post-generation idle window.
+        { kind: "background" },
+      );
       if (result.status !== "generated") {
         logger.warn("[noodle-autopost] Skipped creator %s automatic post: %s", accountId, result.status);
       }
     } catch (err) {
+      // A busy connection is the designed outcome, not a fault; the claim already moved
+      // nextRunAt forward, so the creator simply tries again next cadence.
+      if (isConnectionAdmissionFailure(err)) {
+        logger.info("[noodle-autopost] Deferred creator %s automatic post: %s", accountId, getErrorMessage(err));
+        return;
+      }
       logger.error(err, "[noodle-autopost] Automatic post failed for creator %s", accountId);
     }
   };

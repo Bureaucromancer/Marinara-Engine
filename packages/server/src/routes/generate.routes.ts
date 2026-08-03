@@ -5839,6 +5839,14 @@ export async function generateRoutes(app: FastifyInstance) {
                 return null;
               }
               throw err;
+            } finally {
+              // Abort/disconnect/token-write failures leave this manual loop without forwarding a
+              // return to the generator, so the admission wrapper's own finally never runs and the
+              // connection stays marked foreground-active forever. Closing here is a no-op once the
+              // stream finished normally. Teardown errors are logged, never thrown over the real one.
+              await gen.return(undefined).catch((closeError: unknown) => {
+                logger.warn(closeError, "[generate] Failed to close the generation stream");
+              });
             }
             if (abortController.signal.aborted) {
               return null;

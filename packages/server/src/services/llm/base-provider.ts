@@ -702,23 +702,32 @@ export abstract class BaseLLMProvider {
 
     let result: IteratorResult<string, LLMUsage | void>;
     try {
-      result = await gen.next();
-    } catch (error) {
-      return returnPartialOnStreamFailure(error);
-    }
-    while (!result.done) {
-      content += result.value;
-      if (options.onToken) {
-        await options.onToken(result.value);
-      }
       try {
         result = await gen.next();
       } catch (error) {
         return returnPartialOnStreamFailure(error);
       }
+      while (!result.done) {
+        content += result.value;
+        if (options.onToken) {
+          await options.onToken(result.value);
+        }
+        try {
+          result = await gen.next();
+        } catch (error) {
+          return returnPartialOnStreamFailure(error);
+        }
+      }
+      const usage = result.value || undefined;
+      return { content, toolCalls: [], finishReason: usage?.finishReason ?? "stop", usage };
+    } finally {
+      // Close the generator on every exit. A manual `next()` loop does not forward an early
+      // return the way `yield*` would, so an `onToken` throw would leave the stream suspended
+      // and an admission wrapper around it would never run its finally, leaking the slot.
+      await gen.return(undefined).catch((closeError: unknown) => {
+        logger.warn(closeError, "Failed to close the completion stream");
+      });
     }
-    const usage = result.value || undefined;
-    return { content, toolCalls: [], finishReason: usage?.finishReason ?? "stop", usage };
   }
 
   /**
