@@ -8,7 +8,6 @@ import {
   ChevronLeft,
   ChevronRight,
   CalendarClock,
-  Globe2,
   Crop,
   Dices,
   FileText,
@@ -872,6 +871,11 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
     (viewedProfileAccount.kind === "persona" || viewedProfileAccount.kind === "character") &&
     noodlerAccountsQuery.isSuccess &&
     !linkedNoodleAccountIds.has(viewedProfileAccount.id),
+  );
+  // Noodle profiles that already back a NoodleR Creator get the same "R" mark as the create
+  // button, so the badge and the action read as one signal rather than two unrelated widgets.
+  const viewedProfileHasStageProfile = Boolean(
+    settings?.enableNoodler && viewedProfileAccount && linkedNoodleAccountIds.has(viewedProfileAccount.id),
   );
   const canEditViewedProfile = Boolean(
     viewingOwnProfile || (viewedProfileAccount?.kind === "character" && viewedProfileAccount.invited),
@@ -4506,7 +4510,13 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
                         )}
                         style={tab === "noodler" ? ({ "--noodle-accent": NOODLE_PINK } as CSSProperties) : undefined}
                       >
-                        {tab === "noodle" ? <Globe2 size={16} /> : <AtSign size={16} />}
+                        {tab === "noodle" ? (
+                          <NoodleLogo className="h-4 w-6" />
+                        ) : (
+                          <span aria-hidden="true" className="text-sm font-black text-[var(--noodle-accent)]">
+                            +R
+                          </span>
+                        )}
                         {tab === "noodle"
                           ? localizeUi("navigation.topbar.noodle")
                           : localizeUi("ui.noodle.noodlemodetoggle.noodler")}
@@ -4681,10 +4691,22 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
                         noodleAccountId: viewedProfileAccount.id,
                       })
                     }
-                    className="h-9 rounded-full border border-[var(--noodle-divider)] px-4 text-xs font-semibold text-[var(--foreground)] transition-colors hover:bg-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--noodle-accent)]"
+                    title={localizeUi("ui.noodle.noodlehome.createStageProfile")}
+                    aria-label={localizeUi("ui.noodle.noodlehome.createStageProfile")}
+                    // NoodleR pink on a blue Noodle page, so the accent is scoped to the control.
+                    style={getNoodleAccentStyle(NOODLE_PINK)}
+                    className="h-9 rounded-full border border-[var(--noodle-accent)]/45 px-4 text-sm font-black tracking-tight text-[var(--noodle-accent)] transition-colors hover:bg-[var(--noodle-accent)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--noodle-accent)]"
                   >
-                    {localizeUi("ui.noodle.noodlehome.createStageProfile")}
+                    +R
                   </button>
+                ) : viewedProfileHasStageProfile ? (
+                  <span
+                    title={localizeUi("ui.noodle.noodlehome.hasStageProfile")}
+                    style={getNoodleAccentStyle(NOODLE_PINK)}
+                    className="flex h-9 items-center rounded-full border border-[var(--noodle-accent)]/45 bg-[var(--noodle-accent)]/10 px-4 text-sm font-black tracking-tight text-[var(--noodle-accent)]"
+                  >
+                    R<span className="sr-only"> {localizeUi("ui.noodle.noodlehome.hasStageProfile")}</span>
+                  </span>
                 ) : undefined
               }
               bioContent={
