@@ -79,6 +79,7 @@ COPY scripts/docker-entrypoint.mjs /usr/local/bin/marinara-docker-entrypoint.mjs
 COPY scripts/install-backgroundremover.mjs scripts/install-backgroundremover.mjs
 
 # User guides served by the in-app documentation viewer (/api/docs)
+COPY README.md README.md
 COPY docs/ docs/
 
 # Ensure /app/data exists for runtime use (file storage, uploads, generated assets)
