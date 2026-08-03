@@ -1987,6 +1987,7 @@ export const ChatMessage = memo(function ChatMessage({
     () => mergedGroupCharacterIds ?? chatCharacterIds ?? [],
     [chatCharacterIds, mergedGroupCharacterIds],
   );
+  const mergedCycleKey = JSON.stringify(mergedCharacterIds);
   const cycleMergedNarratorAvatars = !isRoleplay || roleplayNarratorAvatarCycling;
   const mergedAvatars = useMemo(() => {
     if (!isMergedGroup || !characterMap) return [];
@@ -2049,7 +2050,7 @@ export const ChatMessage = memo(function ChatMessage({
     return () => {
       if (cycleTimerRef.current) clearInterval(cycleTimerRef.current);
     };
-  }, [cycleMergedNarratorAvatars, isMergedGroup, mergedAvatars.length, mergedNameColors.length]);
+  }, [cycleMergedNarratorAvatars, isMergedGroup, mergedCycleKey, mergedAvatars.length, mergedNameColors.length]);
 
   /** Render a stack of absolutely-positioned "Narrator" labels that crossfade via opacity. */
   const mergedNameElement =

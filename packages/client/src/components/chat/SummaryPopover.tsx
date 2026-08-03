@@ -360,6 +360,7 @@ export function SummaryPopover({
   const automaticIntervalFocused = useRef(false);
   const summaryMaxTokensFocused = useRef(false);
   const combinePromptFocused = useRef(false);
+  const combinePromptDraftRef = useRef(DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT);
   const combinePromptSaveRef = useRef<{ prompt: string; promise: Promise<boolean> } | null>(null);
   const promptSettingsSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const promptSettingsSaveLockedRef = useRef(false);
@@ -486,9 +487,18 @@ export function SummaryPopover({
   const activeSummaryPrompt = isLongTermMemoryPromptSelected
     ? DEFAULT_LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT
     : activePromptTemplate?.prompt ?? DEFAULT_CHAT_SUMMARY_PROMPT;
+  const promptTemplatesRef = useRef(cleanedPromptTemplates);
+  const activePromptTemplateIdRef = useRef(normalizedActivePromptTemplateId);
+  useEffect(() => {
+    promptTemplatesRef.current = cleanedPromptTemplates;
+    activePromptTemplateIdRef.current = normalizedActivePromptTemplateId;
+  }, [cleanedPromptTemplates, normalizedActivePromptTemplateId]);
 
   useEffect(() => {
-    if (!combinePromptFocused.current) setCombinePromptDraft(globalCombinePrompt);
+    if (!combinePromptFocused.current) {
+      combinePromptDraftRef.current = globalCombinePrompt;
+      setCombinePromptDraft(globalCombinePrompt);
+    }
   }, [globalCombinePrompt]);
   const isEditingExistingTemplate = !!editingTemplateId;
   const hasTemplateDraft = templateNameDraft.trim().length > 0 && templatePromptDraft.trim().length > 0;
@@ -904,6 +914,8 @@ export function SummaryPopover({
             activeTemplateId: activeId,
             combinePrompt: normalizedCombinePrompt,
           });
+          promptTemplatesRef.current = templates;
+          activePromptTemplateIdRef.current = activeId;
           return true;
         } catch {
           toast.error(localizeUi("ui.chat.summarypopover.couldNotSaveGlobalSummaryPromptSettings"));
@@ -921,9 +933,18 @@ export function SummaryPopover({
 
   const commitCombinePromptDraft = useCallback(async (): Promise<boolean> => {
     combinePromptFocused.current = false;
-    const nextPrompt =
-      combinePromptDraft.trim().slice(0, CHAT_SUMMARY_PROMPT_MAX_LENGTH) ||
+    let nextPrompt =
+      combinePromptDraftRef.current.trim().slice(0, CHAT_SUMMARY_PROMPT_MAX_LENGTH) ||
       DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT;
+    const activeSave = combinePromptSaveRef.current;
+    if (activeSave?.prompt === nextPrompt) return activeSave.promise;
+    if (promptSettingsSaveLockedRef.current) {
+      await promptSettingsSaveQueueRef.current;
+      nextPrompt =
+        combinePromptDraftRef.current.trim().slice(0, CHAT_SUMMARY_PROMPT_MAX_LENGTH) ||
+        DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT;
+    }
+    combinePromptDraftRef.current = nextPrompt;
     setCombinePromptDraft(nextPrompt);
 
     const pendingSave = combinePromptSaveRef.current;
@@ -931,8 +952,8 @@ export function SummaryPopover({
     if (!pendingSave && nextPrompt === globalCombinePrompt) return true;
 
     const promise = persistPromptTemplates(
-      cleanedPromptTemplates,
-      normalizedActivePromptTemplateId,
+      promptTemplatesRef.current,
+      activePromptTemplateIdRef.current,
       nextPrompt,
     );
     combinePromptSaveRef.current = { prompt: nextPrompt, promise };
@@ -944,10 +965,7 @@ export function SummaryPopover({
       }
     }
   }, [
-    cleanedPromptTemplates,
-    combinePromptDraft,
     globalCombinePrompt,
-    normalizedActivePromptTemplateId,
     persistPromptTemplates,
   ]);
 
@@ -956,8 +974,7 @@ export function SummaryPopover({
   }, [commitCombinePromptDraft]);
 
   const handleClose = useCallback(async () => {
-    await commitCombinePromptDraft();
-    onClose();
+    if (await commitCombinePromptDraft()) onClose();
   }, [commitCombinePromptDraft, onClose]);
 
   // Close on outside interaction — defer by one frame so the synthesised
@@ -1063,6 +1080,7 @@ export function SummaryPopover({
   const visiblePromptEditorOpen = summaryPromptView === "combine" ? combinePromptEditorOpen : templateEditorOpen;
   const handleToggleVisiblePromptEditor = useCallback(async () => {
     if (!visiblePromptEditorOpen) {
+      setTemplateSelectOpen(false);
       handleEditVisiblePrompt();
       return;
     }
@@ -1604,7 +1622,10 @@ export function SummaryPopover({
                       onFocus={() => {
                         combinePromptFocused.current = true;
                       }}
-                      onChange={(event) => setCombinePromptDraft(event.target.value)}
+                      onChange={(event) => {
+                        combinePromptDraftRef.current = event.target.value;
+                        setCombinePromptDraft(event.target.value);
+                      }}
                       onBlur={() => void handleCombinePromptBlur()}
                       maxLength={CHAT_SUMMARY_PROMPT_MAX_LENGTH}
                       rows={5}

@@ -2998,7 +2998,7 @@ export const useUIStore = create<UIState>()(
           persisted.echoChamberSizeByChatId = {};
         }
         persisted.echoChamberSizeByChatId = normalizeEchoChamberSizes(persisted.echoChamberSizeByChatId);
-        // v87 -> v88: let users keep active Narrator avatars visible together.
+        // v87 -> v88: enable Narrator avatar cycling by default for older stores.
         if (version <= 87 && persisted.roleplayNarratorAvatarCycling === undefined) {
           persisted.roleplayNarratorAvatarCycling = true;
         }

@@ -4791,12 +4791,18 @@ test("chat toolbar panels close when their trigger is clicked again across modes
     await expect(promptEditButton).toBeEnabled();
     await promptEditButton.click();
     await expect(summaryPromptCard.getByRole("button", { name: "Done", exact: true })).toBeVisible();
-    await expect(summaryPromptCard.getByRole("textbox", { name: "Combine prompt", exact: true })).toHaveAttribute(
-      "rows",
-      "5",
-    );
+    const combinePromptInput = summaryPromptCard.getByRole("textbox", { name: "Combine prompt", exact: true });
+    const originalCombinePrompt = await combinePromptInput.inputValue();
+    const updatedCombinePrompt = `${originalCombinePrompt}\nE2E save probe`;
+    await expect(combinePromptInput).toHaveAttribute("rows", "5");
+    await combinePromptInput.fill(updatedCombinePrompt);
     await summaryPromptCard.getByRole("button", { name: "Done", exact: true }).click();
-    await expect(summaryPromptCard.getByRole("textbox", { name: "Combine prompt", exact: true })).toHaveCount(0);
+    await expect(combinePromptInput).toHaveCount(0);
+    await summaryPromptCard.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(combinePromptInput).toHaveValue(updatedCombinePrompt);
+    await combinePromptInput.fill(originalCombinePrompt);
+    await summaryPromptCard.getByRole("button", { name: "Done", exact: true }).click();
+    await expect(combinePromptInput).toHaveCount(0);
 
     await chatSummaryPromptTab.click();
     await summaryPromptCard.getByRole("button", { name: "Edit", exact: true }).click();

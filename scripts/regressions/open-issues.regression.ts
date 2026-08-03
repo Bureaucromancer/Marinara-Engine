@@ -2282,6 +2282,11 @@ assert.match(
 );
 assert.match(
   chatMessageSource,
+  /\[cycleMergedNarratorAvatars, isMergedGroup, mergedCycleKey, mergedAvatars\.length, mergedNameColors\.length\]/u,
+  "Narrator cycling must reset when active character IDs change without changing count",
+);
+assert.match(
+  chatMessageSource,
   /cycleMergedNarratorAvatars \? "absolute inset-0 w-full" : "relative w-0 min-w-0 flex-1"/u,
   "Disabling Narrator cycling must place active avatars together",
 );
@@ -2857,6 +2862,11 @@ assert.match(
   conversationSelfieRuntimeSource,
   /resolveIllustratorCharacterReferences\(\{[\s\S]{0,800}persona: null,[\s\S]{0,800}maxReferences: 6/u,
   "Conversation group selfies must keep all depicted character references without attaching the photographer persona",
+);
+assert.match(
+  conversationSelfieRuntimeSource,
+  /selfieResolvedCharacterIds = Array\.from\([\s\S]{0,300}referenceResolution\.characterIds[\s\S]{0,4500}characterIds: selfieResolvedCharacterIds/u,
+  "Conversation group selfies must be saved to every depicted character gallery",
 );
 assert.match(
   globalStyles,
@@ -4189,8 +4199,23 @@ assert.match(
 );
 assert.match(
   summaryPopoverSource,
+  /if \(!visiblePromptEditorOpen\) \{\s*setTemplateSelectOpen\(false\);\s*handleEditVisiblePrompt\(\);/u,
+  "Opening the Summary Prompt editor must close its template selector",
+);
+assert.match(
+  summaryPopoverSource,
   /const saved = await commitCombinePromptDraft\(\);\s*if \(saved\) setCombinePromptEditorOpen\(false\);/u,
   "Done must save and close the Combine prompt editor",
+);
+assert.match(
+  summaryPopoverSource,
+  /if \(promptSettingsSaveLockedRef\.current\) \{\s*await promptSettingsSaveQueueRef\.current;[\s\S]{0,350}combinePromptDraftRef\.current/u,
+  "Combine prompt saves must wait for active settings writes and then retry the latest draft",
+);
+assert.match(
+  summaryPopoverSource,
+  /if \(await commitCombinePromptDraft\(\)\) onClose\(\);/u,
+  "The Summary popover must close only after its Combine draft is safely persisted",
 );
 assert.equal(
   summaryPopoverSource.match(/className="h-48 space-y-[12] overflow-y-auto pr-0\.5"/gu)?.length,
