@@ -1862,6 +1862,7 @@ export const ChatInput = memo(function ChatInput({
           view="runtime"
           capabilityProps={{
             chatId: activeChatId,
+            chatMode: mode,
             disabled: isInputBusy,
             pendingTransition: pendingSpatialTransition,
             onPendingTransitionChange: (pending: unknown) => {

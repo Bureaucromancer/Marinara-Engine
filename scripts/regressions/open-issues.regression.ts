@@ -5186,6 +5186,108 @@ try {
   );
 }
 
+// Issues #4532 and #4533 — every runtime World Maps host must preserve the
+// target chat mode, while Chat Settings uses feature copy instead of repeating
+// package-installation guidance in an already-reached activation surface.
+{
+  const findCapabilityHosts = (source: string, packageId: string, view: string) =>
+    (source.match(/<CapabilityElement\b[\s\S]*?\/>/gu) ?? []).filter(
+      (host) => host.includes(`packageId="${packageId}"`) && host.includes(`view="${view}"`),
+    );
+  const sourceBetween = (source: string, startMarker: string, endMarker: string, label: string) => {
+    const start = source.indexOf(startMarker);
+    assert.ok(start >= 0, `${label} start marker must exist`);
+    const end = source.indexOf(endMarker, start);
+    assert.ok(end > start, `${label} end marker must exist after its start marker`);
+    return source.slice(start, end);
+  };
+
+  const chatInputSource = readFileSync(
+    join(REPOSITORY_ROOT, "packages/client/src/components/chat/ChatInput.tsx"),
+    "utf8",
+  );
+  const roleplayRuntimeHosts = findCapabilityHosts(chatInputSource, "hierarchical-maps", "runtime");
+  assert.equal(roleplayRuntimeHosts.length, 1, "Roleplay must expose exactly one World Maps runtime host");
+  assert.match(
+    roleplayRuntimeHosts[0],
+    /capabilityProps=\{\{[\s\S]*?chatId: activeChatId,[\s\S]*?chatMode: mode,/u,
+    "Roleplay World Maps runtime controls must preserve the active chat mode",
+  );
+
+  const gameInputSource = readFileSync(
+    join(REPOSITORY_ROOT, "packages/client/src/components/game/GameInput.tsx"),
+    "utf8",
+  );
+  const gameRuntimeHosts = findCapabilityHosts(gameInputSource, "hierarchical-maps", "runtime");
+  assert.equal(gameRuntimeHosts.length, 1, "Game input must expose exactly one World Maps runtime host");
+  assert.match(
+    gameRuntimeHosts[0],
+    /capabilityProps=\{\{[\s\S]*?chatId: draftKey,[\s\S]*?chatMode: "game",/u,
+    "Game World Maps runtime controls must identify their supported chat mode",
+  );
+
+  const gameMapSource = readFileSync(join(REPOSITORY_ROOT, "packages/client/src/components/game/GameMap.tsx"), "utf8");
+  const gameWorldMapHosts = findCapabilityHosts(gameMapSource, "hierarchical-maps", "world-map");
+  assert.equal(gameWorldMapHosts.length, 2, "Game Map must expose exactly its desktop and mobile World Maps hosts");
+  const desktopWorldMapHosts = gameWorldMapHosts.filter((host) => !host.includes("compact: true,"));
+  const mobileWorldMapHosts = gameWorldMapHosts.filter((host) => host.includes("compact: true,"));
+  assert.equal(desktopWorldMapHosts.length, 1, "Desktop Game Map must expose one non-compact World Maps host");
+  assert.equal(mobileWorldMapHosts.length, 1, "Mobile Game Map must expose one compact World Maps host");
+  for (const [surface, host] of [
+    ["Desktop", desktopWorldMapHosts[0]],
+    ["Mobile", mobileWorldMapHosts[0]],
+  ] as const) {
+    assert.match(
+      host,
+      /capabilityProps=\{\{[\s\S]*?chatId,[\s\S]*?chatMode: "game",/u,
+      `${surface} Game World Maps host must identify its supported chat mode`,
+    );
+  }
+
+  const chatSettingsSource = readFileSync(
+    join(REPOSITORY_ROOT, "packages/client/src/components/chat/ChatSettingsDrawer.tsx"),
+    "utf8",
+  );
+  assert.match(
+    chatSettingsSource,
+    /const worldMapsSettingsDescription = localizeUi\("ui\.chat\.chatsettingsdrawer\.worldMapsFeatureSummary"\);/u,
+    "Chat Settings must source the World Maps feature summary from localization",
+  );
+  const worldMapsFeatureSummary = String(lorebookEnglishLocale["ui.chat.chatsettingsdrawer.worldMapsFeatureSummary"]);
+  assert.equal(
+    worldMapsFeatureSummary,
+    "Adds persistent hierarchical locations, durable shared worlds, reusable artwork, customizable Direct Link lines, and movement to Roleplay and Game.",
+    "The canonical English World Maps settings summary must describe the feature",
+  );
+  assert.doesNotMatch(
+    worldMapsFeatureSummary,
+    /Add the Agent|Chat Settings|Tracker Agents/iu,
+    "The World Maps settings summary must not repeat installation guidance",
+  );
+  const gameWorldMapsSettingsBranch = sourceBetween(
+    chatSettingsSource,
+    'if (agent.id === "hierarchical-maps" && mapsPackage) {',
+    'if (agent.id === "long-term-memory" && ltmPackage) {',
+    "Game World Maps settings branch",
+  );
+  assert.match(
+    gameWorldMapsSettingsBranch,
+    /<AgentSettingsCard[\s\S]*?description=\{worldMapsSettingsDescription\}[\s\S]*?<CapabilityElement/u,
+    "Game Chat Settings must omit package-installation guidance from the expanded World Maps card",
+  );
+  const roleplayActiveAgentCards = sourceBetween(
+    chatSettingsSource,
+    "{/* Active agents in this category */}",
+    "{inactiveInCat.length > 0 ? (",
+    "Roleplay active-agent settings cards",
+  );
+  assert.match(
+    roleplayActiveAgentCards,
+    /agent\.id === "hierarchical-maps"[\s\S]{0,120}\? worldMapsSettingsDescription[\s\S]{0,80}: agent\.description/u,
+    "Roleplay Chat Settings must omit package-installation guidance from the active World Maps card",
+  );
+}
+
 // Issue #4002 — Character Tavern stores card JSON in zTXt (zlib-compressed)
 // PNG chunks; every card-parsing path must read them, and export must strip
 // stale ones so re-exported cards cannot carry outdated compressed data.
