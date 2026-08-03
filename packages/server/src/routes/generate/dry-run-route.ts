@@ -27,6 +27,7 @@ import { processLorebooks } from "../../services/lorebook/index.js";
 import { resolveLorebookScopeExclusions } from "../../services/lorebook/game-lorebook-scope.js";
 import { injectAtDepth } from "../../services/lorebook/prompt-injector.js";
 import { createLLMProvider } from "../../services/llm/provider-registry.js";
+import { withConnectionAdmissionProvider } from "../../services/generation/connection-admission.js";
 import { getLocalSidecarProvider } from "../../services/llm/local-sidecar.js";
 import {
   assemblePrompt,
@@ -1604,7 +1605,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
 
     const provider: BaseLLMProvider =
       connId === LOCAL_SIDECAR_CONNECTION_ID
-        ? (getLocalSidecarProvider() as any)
+        ? withConnectionAdmissionProvider(getLocalSidecarProvider() as any, LOCAL_SIDECAR_CONNECTION_ID)
         : createLLMProvider(
             conn.provider,
             baseUrl,

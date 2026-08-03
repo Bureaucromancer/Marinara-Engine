@@ -213,9 +213,16 @@ export function imageAdmissionKey(
   resolvedSource: string,
   imageEndpointId?: string,
 ): string {
-  if (resolvedSource !== "runpod_comfyui") return normalizedBaseUrl;
-  const endpointId = imageEndpointId?.trim();
-  return endpointId ? `${normalizedBaseUrl}#${endpointId}` : normalizedBaseUrl;
+  if (resolvedSource === "runpod_comfyui") {
+    const endpointId = imageEndpointId?.trim();
+    return endpointId ? `${normalizedBaseUrl}#${endpointId}` : normalizedBaseUrl;
+  }
+  // OpenAI-compatible backends accept the origin, the `/v1` form, and the full endpoint path as
+  // spellings of one endpoint, so the base URL alone would let work under one spelling ignore
+  // foreground work recorded under another. Key on the URL the request actually goes to.
+  if (resolvedSource === "openai") return openAIImagesUrl(normalizedBaseUrl, "generations");
+  if (resolvedSource === "nanogpt") return nanoGPTImagesUrl(normalizedBaseUrl);
+  return normalizedBaseUrl;
 }
 
 /**

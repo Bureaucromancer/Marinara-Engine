@@ -17,6 +17,7 @@ import { createGalleryStorage } from "../storage/gallery.storage.js";
 import { createNoodleStorage } from "../storage/noodle.storage.js";
 import { createPromptOverridesStorage } from "../storage/prompt-overrides.storage.js";
 import { canCreateGeneratedNoodleInteraction } from "./noodle-interaction-policy.js";
+import type { ConnectionAdmissionMode } from "../generation/connection-admission.js";
 import { normalizeNoodleHandle } from "./noodle-handle.js";
 import { normalizeNoodleImagePrompt } from "./noodle-image-prompt.js";
 import { canGenerateNoodleActivityForAccountKind } from "./noodle-prompt.js";
@@ -122,6 +123,7 @@ export async function prepareGeneratedNoodleMedia(input: {
   imageConnection: ImageConnection | null;
   debugMode: boolean;
   reviewImagePromptsBeforeSend: boolean;
+  admissionMode?: ConnectionAdmissionMode;
 }): Promise<PreparedGeneratedNoodleMedia> {
   const activeAccounts = [...(input.personaAccount ? [input.personaAccount] : []), ...input.selectedParticipants];
   const handleToAccount = new Map(activeAccounts.map((account) => [normalizeNoodleHandle(account.handle), account]));
@@ -157,6 +159,7 @@ export async function prepareGeneratedNoodleMedia(input: {
           db: input.db,
           debugMode: input.debugMode,
           previewOnly: input.reviewImagePromptsBeforeSend === true,
+          admissionMode: input.admissionMode,
         });
         prepared.imageUrl = generatedImage.imageUrl;
         Object.assign(prepared.metadata, generatedImage.metadata);

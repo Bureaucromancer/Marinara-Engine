@@ -19,6 +19,7 @@ import { resolveStoredChatOptions, resolveStoredMaxTokens } from "../generation/
 import { clampGenerationMaxOutputTokens } from "../generation/output-token-limits.js";
 import { parseGameJsonish } from "../game/jsonish.js";
 import { withConnectionFallbackProvider } from "../llm/connection-fallback-provider.js";
+import type { ConnectionAdmissionMode } from "../generation/connection-admission.js";
 import type { ChatMessage } from "../llm/base-provider.js";
 import { createLLMProvider } from "../llm/provider-registry.js";
 import { createCharactersStorage } from "../storage/characters.storage.js";
@@ -48,6 +49,8 @@ export type NoodlerPostGenerationInput = {
   request: NoodlerGenerationRequest;
   connection: GenerationConnection;
   media?: NoodlerPostMediaUpload;
+  /** Scheduler-owned automatic runs pass background so they yield to user generation. */
+  admissionMode?: ConnectionAdmissionMode;
 };
 
 const NOODLER_POST_MAX_TOKENS = 2048;
@@ -207,6 +210,7 @@ export async function generateNoodlerPost(
     fallbackConnection,
     fallbackBaseUrl: fallbackConnection ? resolveBaseUrl(fallbackConnection) : "",
     category: "main",
+    admissionMode: input.admissionMode,
   });
   const recentPosts = await noodle.listNoodlerPostsByAccount(account.id, 8);
   const disclosureMode = account.settings.privacy.identityDisclosure ?? "secret";
@@ -359,6 +363,7 @@ export async function generateNoodlerPost(
     imageConnection,
     db,
     debugMode,
+    admissionMode: input.admissionMode,
   };
 
   // Manual Guide review path: persist a pending prompt and hand back a preview for the
