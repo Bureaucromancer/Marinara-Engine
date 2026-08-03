@@ -167,33 +167,35 @@ export async function withConnectionAdmission<T>(
  * once (by `settle`, after the whole chain finishes). Without this the primary's own finalizer
  * fires `failed` before the fallback even starts and a successful fallback stays recorded as a
  * failure. Each connection still takes its own physical slot, which is what the modes carry.
+ *
+ * No leg's own outcome is trusted, because no leg knows the chain's result: an empty-but-
+ * successful primary is a `completed` leg inside an attempt that produced nothing, and a
+ * rejection raised between legs never reaches a leg finalizer at all. Only the caller driving
+ * the chain knows whether the logical attempt delivered, so it passes the outcome to `settle`.
  */
 export function splitConnectionAttemptAcrossFallback(mode: ConnectionAdmissionMode): {
   primaryMode: ConnectionAdmissionMode;
   fallbackMode: ConnectionAdmissionMode;
-  settle: () => Promise<void>;
+  settle: (outcome: ConnectionAttemptOutcome) => Promise<void>;
 } {
   if (mode.kind !== "background" || !mode.beforeAttempt) {
     return { primaryMode: mode, fallbackMode: mode, settle: async () => {} };
   }
   const book = mode.beforeAttempt;
   let finalize: ConnectionAttemptFinalizer | undefined;
-  let outcome: ConnectionAttemptOutcome = "failed";
-  // Each leg reports into `outcome`; the last leg to run wins, so a successful fallback
-  // overwrites the primary's failure. Nothing reaches the quota until `settle`.
-  const record: ConnectionAttemptFinalizer = (legOutcome) => {
-    outcome = legOutcome;
-  };
+  const noopLegFinalizer: ConnectionAttemptFinalizer = () => undefined;
   return {
     primaryMode: {
       kind: "background",
       beforeAttempt: async () => {
         finalize = (await book()) || undefined;
-        return record;
+        return noopLegFinalizer;
       },
     },
-    fallbackMode: { kind: "background", beforeAttempt: () => record },
-    settle: async () => {
+    // The fallback takes its own physical slot but books nothing: it is a retry of the attempt
+    // the primary already booked.
+    fallbackMode: { kind: "background" },
+    settle: async (outcome) => {
       const pending = finalize;
       // A rejected primary never booked anything, and settle must stay idempotent because a
       // stream can be closed more than once.

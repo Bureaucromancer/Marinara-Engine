@@ -119,7 +119,7 @@ export class ConnectionFallbackProvider extends BaseLLMProvider {
     private readonly category: "main" | "agents",
     private readonly onFallback?: GenerationFallbackNotifier,
     /** Reports the one logical attempt's outcome once the primary-plus-fallback chain settles. */
-    private readonly settleAttempt?: () => Promise<void>,
+    private readonly settleAttempt?: (outcome: "completed" | "failed") => Promise<void>,
   ) {
     super("", "", primary.maxContextValue ?? undefined, null, primary.maxTokensOverrideValue);
   }
@@ -145,12 +145,16 @@ export class ConnectionFallbackProvider extends BaseLLMProvider {
   }
 
   async *chat(messages: ChatMessage[], options: ChatOptions): AsyncGenerator<string, LLMUsage | void, unknown> {
+    // Only the whole chain's result is the logical attempt's outcome. Reporting a leg's own
+    // result would record a successful fallback as the primary's failure, and would call an
+    // empty-primary-then-rejected-fallback chain completed.
+    let outcome: "completed" | "failed" = "failed";
     try {
-      return yield* this.chatChain(messages, options);
+      const usage = yield* this.chatChain(messages, options);
+      outcome = "completed";
+      return usage;
     } finally {
-      // Only now is the logical attempt over: reporting earlier would record a successful
-      // fallback as the primary's failure.
-      await this.settleAttempt?.();
+      await this.settleAttempt?.(outcome);
     }
   }
 
@@ -199,10 +203,13 @@ export class ConnectionFallbackProvider extends BaseLLMProvider {
   }
 
   async chatComplete(messages: ChatMessage[], options: ChatOptions): Promise<ChatCompletionResult> {
+    let outcome: "completed" | "failed" = "failed";
     try {
-      return await this.chatCompleteChain(messages, options);
+      const result = await this.chatCompleteChain(messages, options);
+      outcome = "completed";
+      return result;
     } finally {
-      await this.settleAttempt?.();
+      await this.settleAttempt?.(outcome);
     }
   }
 

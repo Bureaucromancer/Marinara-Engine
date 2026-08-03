@@ -32,6 +32,8 @@ import { assertInsideDir, normalizeLoopbackUrl, safeFetch, validateOutboundUrl }
 import { notifyGenerationFallback, type GenerationFallbackNotifier } from "../generation/fallback-notification.js";
 import {
   isConnectionAdmissionFailure,
+  splitConnectionAttemptAcrossFallback,
+  type ConnectionAttemptOutcome,
   withConnectionAdmission,
   type ConnectionAdmissionMode,
 } from "../generation/connection-admission.js";
@@ -242,6 +244,13 @@ export async function generateImage(
     resolvedSource === "comfyui" || resolvedSource === "runpod_comfyui"
       ? Math.max(IMAGE_GEN_TIMEOUT, COMFYUI_GEN_TIMEOUT_SECONDS * 1000)
       : IMAGE_GEN_TIMEOUT;
+  // Primary plus fallback is one logical attempt, booked once here and reported once below with
+  // the outcome of the whole chain. Only the outermost call owns this: the recursive fallback
+  // call receives a mode that takes a slot without booking anything.
+  const { primaryMode, fallbackMode, settle } = splitConnectionAttemptAcrossFallback(
+    request.admissionMode ?? { kind: "foreground" },
+  );
+  let outcome: ConnectionAttemptOutcome = "failed";
 
   try {
     const physicalRequest = () => withImageGenerationDeadline(request, generationTimeoutMs, async (signal) => {
@@ -306,11 +315,13 @@ export async function generateImage(
     // ponytail: image work keys on the endpoint URL while text work keys on the connection
     // id, so the two do not hold each other off on a connection used for both. Unify the
     // key if that overlap ever shows up in practice.
-    return await withConnectionAdmission(
+    const primaryResult = await withConnectionAdmission(
       imageAdmissionKey(normalizedBaseUrl, resolvedSource, request.imageEndpointId),
-      request.admissionMode ?? { kind: "foreground" },
+      primaryMode,
       physicalRequest,
     );
+    outcome = "completed";
+    return primaryResult;
   } catch (error) {
     const fallback = request.fallback;
     if (!fallback || request.signal?.aborted || isConnectionAdmissionFailure(error)) throw error;
@@ -333,16 +344,14 @@ export async function generateImage(
     const result = await generateImage(fallback.source, fallback.baseUrl, fallback.apiKey, fallback.serviceHint, {
       ...request,
       fallback: undefined,
-      // Same logical attempt on another connection: re-running the one-shot claim hook would
-      // book a second scheduled attempt against the quota.
-      admissionMode:
-        request.admissionMode?.kind === "background" ? { kind: "background" } : request.admissionMode,
+      admissionMode: fallbackMode,
       model: fallback.model,
       imageEndpointId: fallback.imageEndpointId,
       comfyWorkflow: fallback.comfyWorkflow,
       imageDefaults: fallback.imageDefaults,
       allowLocalUrls: undefined,
     });
+    outcome = "completed";
     return {
       ...result,
       effectiveConnection: {
@@ -352,6 +361,8 @@ export async function generateImage(
         model: fallback.model,
       },
     };
+  } finally {
+    await settle(outcome);
   }
 }
 
