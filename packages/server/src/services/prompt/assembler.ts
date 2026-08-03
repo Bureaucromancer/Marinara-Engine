@@ -490,6 +490,7 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
   let lorebookDepthEntriesCount = 0;
   let hasChatSummaryMarker = false;
   let outletScanAttempted = false;
+  let idMacroCardMarkerSection: ResolvedSection | null = null;
   const runtimeAgentTypesUsed = new Set<string>();
 
   for (const sectionId of sectionOrder) {
@@ -546,6 +547,9 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
     }
 
     if (!resolved) continue;
+    if (resolved.isIdMacroCards && !idMacroCardMarkerSection) {
+      idMacroCardMarkerSection = resolved;
+    }
 
     if (!resolved.isChatHistory && section.injectionPosition === "depth" && section.injectionDepth >= 0) {
       depthSections.push(resolved);
@@ -554,12 +558,11 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
     }
   }
 
-  const idMacroCardMarkerSections = [...orderedSections, ...depthSections].filter((section) => section.isIdMacroCards);
   const referencedCharacterContent = referencedCharacterContextBlocks.join("\n");
-  if (referencedCharacterContent) {
-    for (const section of idMacroCardMarkerSections) {
-      section.messages = [{ role: section.role, content: referencedCharacterContent, contextKind: "prompt" }];
-    }
+  if (referencedCharacterContent && idMacroCardMarkerSection) {
+    idMacroCardMarkerSection.messages = [
+      { role: idMacroCardMarkerSection.role, content: referencedCharacterContent, contextKind: "prompt" },
+    ];
   }
 
   // ── Phase 2: Group wrapping ──
@@ -604,7 +607,7 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
       }
     }
   }
-  if (referencedCharacterContent && idMacroCardMarkerSections.length === 0) {
+  if (referencedCharacterContent && !idMacroCardMarkerSection) {
     messages.unshift({
       role: "system",
       content: referencedCharacterContent,

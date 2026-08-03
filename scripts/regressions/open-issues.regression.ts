@@ -880,6 +880,7 @@ try {
           "lorebook",
           ...(includePlacementMarker ? ["id-macro-cards"] : []),
           "history",
+          ...(includePlacementMarker ? ["duplicate-id-macro-cards"] : []),
         ]),
         groupOrder: JSON.stringify([]),
         wrapFormat: "xml",
@@ -940,6 +941,26 @@ try {
           injectionOrder: 1,
           forbidOverrides: "false",
         },
+        ...(includePlacementMarker
+          ? [
+              {
+                id: "duplicate-id-macro-cards",
+                presetId: "character-reference-preset",
+                identifier: "id_macro_cards",
+                name: "Duplicate ID Macro Cards",
+                content: "",
+                role: "system",
+                enabled: "true",
+                isMarker: "true",
+                groupId: null,
+                markerConfig: JSON.stringify({ type: "id_macro_cards" }),
+                injectionPosition: "ordered",
+                injectionDepth: 0,
+                injectionOrder: 2,
+                forbidOverrides: "false",
+              },
+            ]
+          : []),
       ],
       groups: [],
       choiceBlocks: [],
@@ -979,7 +1000,7 @@ try {
   assert.equal(
     placedReferenceText.match(/<referenced_characters>/gu)?.length,
     1,
-    "The explicit marker must replace rather than duplicate the legacy fallback block",
+    "Only the first explicit marker may own placement, without a duplicate legacy fallback block",
   );
 
   const cappedDirectReferences = [];
@@ -2906,6 +2927,18 @@ assert.deepEqual(
   ).commandCharacterIds,
   ["char-2"],
   "Commands beneath a newline-delimited speaker label must retain the same character attribution as the UI bubble",
+);
+assert.deepEqual(
+  parseCharacterCommandsBySpeaker(
+    "[selfie]\nChar1:\nChar2:\nVisible reply.",
+    [
+      { id: "char-1", name: "Char1" },
+      { id: "char-2", name: "Char2" },
+    ],
+    "char-1",
+  ).commandCharacterIds,
+  ["char-2"],
+  "A leading command must skip an empty named segment and follow the first visible speaker section",
 );
 assert.deepEqual(
   splitGroupedSegmentDisplayLines({

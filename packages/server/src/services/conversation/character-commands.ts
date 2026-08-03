@@ -1511,7 +1511,7 @@ export function parseCharacterCommandsBySpeaker(
 
   // Credit the leading region (above the first name prefix) to the speaker whose
   // section it opens, not the generation-primary character.
-  const firstNamed = segments.find((segment) => !segment.leading);
+  const firstNamed = segments.find((segment) => !segment.leading && segment.text.trim().length > 0);
   if (firstNamed) {
     for (const segment of segments) {
       if (segment.leading) segment.characterId = firstNamed.characterId;

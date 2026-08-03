@@ -4854,6 +4854,7 @@ test("roleplay quick preset editor uses chat settings spacing and surfaces", asy
     await quickEditor.getByRole("button", { name: "Add Section", exact: true }).click();
     await expect(quickEditor.getByRole("button", { name: "ID Macro Cards", exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
+    await expect(quickEditor.getByRole("button", { name: "ID Macro Cards", exact: true })).toBeHidden();
 
     const toolbar = quickEditor.locator(".mari-editor-toolbar");
     const firstToolbarControl = toolbar.locator("button").first();
