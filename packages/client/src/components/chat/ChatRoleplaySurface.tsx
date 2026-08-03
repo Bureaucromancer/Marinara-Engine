@@ -298,6 +298,7 @@ function CrossfadeBackground({
 function StreamingIndicator({
   activeChatId,
   chatCharIds,
+  mergedGroupCharacterIds,
   characterMap,
   personaInfo,
   chatMode,
@@ -306,6 +307,7 @@ function StreamingIndicator({
 }: {
   activeChatId: string;
   chatCharIds: string[];
+  mergedGroupCharacterIds: string[];
   characterMap: CharacterMap;
   personaInfo?: PersonaInfo;
   chatMode: string;
@@ -342,6 +344,7 @@ function StreamingIndicator({
         chatMode={chatMode}
         groupChatMode={groupChatMode}
         chatCharacterIds={chatCharIds}
+        mergedGroupCharacterIds={mergedGroupCharacterIds}
         expressionAvatarResolver={expressionAvatarResolver}
       />
     </div>
@@ -641,49 +644,51 @@ function ActiveContextLinksButton({
         <BookOpen size="0.875rem" />
       </button>
       {open &&
-        (isMobile ? (
-          mobileFrame &&
-          createPortal(
-            <div
-              ref={panelRef}
-              role="menu"
-              data-chat-floating-panel
-              data-component="RoleplayActiveContextPanel"
-              className={cn(ROLEPLAY_POPOVER_SHELL, ROLEPLAY_POPOVER_SCROLL_AREA, "fixed z-[9999] overflow-y-auto p-2")}
-              style={{
-                top: mobileFrame.top,
-                left: mobileFrame.left,
-                width: mobileFrame.width,
-                maxHeight: mobileFrame.maxHeight,
-              }}
-            >
-              {activeContextContent}
-            </div>,
-            document.body,
-          )
-        ) : (
-          desktopAnchor &&
-          createPortal(
-            <div
-              ref={panelRef}
-              role="menu"
-              data-chat-floating-panel
-              data-component="RoleplayActiveContextPanel"
-              className={cn(
-                ROLEPLAY_POPOVER_SHELL,
-                ROLEPLAY_POPOVER_SCROLL_AREA,
-                "fixed z-[9999] max-h-[min(32rem,calc(100vh-6rem))] w-[min(20rem,calc(100vw-2rem))] overflow-y-auto p-2",
-              )}
-              style={{
-                right: getChatFloatingPanelDesktopRight(desktopAnchor),
-                top: `${desktopAnchor.top}px`,
-              }}
-            >
-              {activeContextContent}
-            </div>,
-            document.body,
-          )
-        ))}
+        (isMobile
+          ? mobileFrame &&
+            createPortal(
+              <div
+                ref={panelRef}
+                role="menu"
+                data-chat-floating-panel
+                data-component="RoleplayActiveContextPanel"
+                className={cn(
+                  ROLEPLAY_POPOVER_SHELL,
+                  ROLEPLAY_POPOVER_SCROLL_AREA,
+                  "fixed z-[9999] overflow-y-auto p-2",
+                )}
+                style={{
+                  top: mobileFrame.top,
+                  left: mobileFrame.left,
+                  width: mobileFrame.width,
+                  maxHeight: mobileFrame.maxHeight,
+                }}
+              >
+                {activeContextContent}
+              </div>,
+              document.body,
+            )
+          : desktopAnchor &&
+            createPortal(
+              <div
+                ref={panelRef}
+                role="menu"
+                data-chat-floating-panel
+                data-component="RoleplayActiveContextPanel"
+                className={cn(
+                  ROLEPLAY_POPOVER_SHELL,
+                  ROLEPLAY_POPOVER_SCROLL_AREA,
+                  "fixed z-[9999] max-h-[min(32rem,calc(100vh-6rem))] w-[min(20rem,calc(100vw-2rem))] overflow-y-auto p-2",
+                )}
+                style={{
+                  right: getChatFloatingPanelDesktopRight(desktopAnchor),
+                  top: `${desktopAnchor.top}px`,
+                }}
+              >
+                {activeContextContent}
+              </div>,
+              document.body,
+            ))}
     </div>
   );
 }
@@ -1133,7 +1138,8 @@ type RoleplaySurfaceProps = {
   onWizardFinish: () => void;
   onClosePeekPrompt: () => void;
   onResetSpritePlacements: () => void;
-  onSpriteSideChange: (side: SpriteSide) => void;
+  onResetSpriteCharacterVisualSettings: (characterId: string) => void;
+  onSpriteSideChange: (side: SpriteSide, characterId?: string) => void;
   onToggleSpriteArrange: () => void;
   spriteVisualSettings?: ComponentProps<typeof ChatCommonOverlays>["sceneSettings"]["spriteVisualSettings"];
   onSpriteVisualSettingsChange?: ComponentProps<
@@ -1247,6 +1253,7 @@ export function ChatRoleplaySurface({
   onWizardFinish,
   onClosePeekPrompt,
   onResetSpritePlacements,
+  onResetSpriteCharacterVisualSettings,
   onSpriteSideChange,
   onToggleSpriteArrange,
   spriteVisualSettings,
@@ -1303,8 +1310,7 @@ export function ChatRoleplaySurface({
   const composerFocused = useChatComposerFocused();
   const ambientVisualsPaused =
     generationVisualsPaused || (isMobileToolbarViewport && (keyboardOpen || composerFocused || hasMobileDraftInput));
-  const weatherEffectsPaused =
-    isMobileToolbarViewport && (keyboardOpen || composerFocused || hasMobileDraftInput);
+  const weatherEffectsPaused = isMobileToolbarViewport && (keyboardOpen || composerFocused || hasMobileDraftInput);
   const shouldKeepMobileComposerOpen =
     keyboardOpen || composerFocused || hasLiveStream || hasMobileDraftInput || isFetchingNextPage;
 
@@ -1493,6 +1499,11 @@ export function ChatRoleplaySurface({
   }, [activeChatId, messages]);
 
   const visibleMessages = transcriptWindow.messages;
+  const activeChatCharacterIds = useMemo(() => {
+    const inactiveIds = new Set(readStringArray(chatMeta.inactiveCharacterIds));
+    const activeIds = chatCharIds.filter((id) => !inactiveIds.has(id));
+    return activeIds.length > 0 ? activeIds : chatCharIds;
+  }, [chatCharIds, chatMeta.inactiveCharacterIds]);
   const loadedMessageOffset = totalMessageCount - (messages?.length ?? 0);
   const summaryActiveAgentIds = Array.isArray(chatMeta.activeAgentIds)
     ? chatMeta.activeAgentIds.filter((agentId): agentId is string => typeof agentId === "string")
@@ -1647,6 +1658,7 @@ export function ChatRoleplaySurface({
               spriteDisplayModes={spriteDisplayModes}
               spriteExpressions={spriteExpressions}
               spritePlacements={spritePlacements}
+              characterVisualSettings={spriteVisualSettings?.characterOverrides}
               editing={spriteArrangeMode}
               spriteScale={spriteScale}
               expressionSpriteScale={expressionSpriteScale}
@@ -2078,6 +2090,7 @@ export function ChatRoleplaySurface({
                           isGrouped={isGrouped(sourceIndex)}
                           groupChatMode={groupChatMode}
                           chatCharacterIds={chatCharIds}
+                          mergedGroupCharacterIds={activeChatCharacterIds}
                           expressionAvatarResolver={expressionAvatarResolver}
                           multiSelectMode={multiSelectMode}
                           isSelected={selectedMessageIds.has(msg.id)}
@@ -2109,6 +2122,7 @@ export function ChatRoleplaySurface({
                           isGrouped={isGrouped(sourceIndex)}
                           groupChatMode={groupChatMode}
                           chatCharacterIds={chatCharIds}
+                          mergedGroupCharacterIds={activeChatCharacterIds}
                           expressionAvatarResolver={expressionAvatarResolver}
                           multiSelectMode={multiSelectMode}
                           isSelected={selectedMessageIds.has(msg.id)}
@@ -2135,6 +2149,7 @@ export function ChatRoleplaySurface({
                   <StreamingIndicator
                     activeChatId={activeChatId}
                     chatCharIds={chatCharIds}
+                    mergedGroupCharacterIds={activeChatCharacterIds}
                     characterMap={characterMap}
                     personaInfo={personaInfo}
                     chatMode={chatMode}
@@ -2222,6 +2237,7 @@ export function ChatRoleplaySurface({
           spriteArrangeMode,
           onToggleSpriteArrange,
           onResetSpritePlacements,
+          onResetSpriteCharacterVisualSettings,
           onSpriteSideChange,
           spriteVisualSettings,
           onSpriteVisualSettingsChange,

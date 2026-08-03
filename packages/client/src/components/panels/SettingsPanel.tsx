@@ -1060,6 +1060,14 @@ const SETTINGS_SEARCHABLE_CONTROLS: readonly SettingsSearchableControlMeta[] = [
     kind: "Toggle",
   },
   {
+    id: "narrator-cycling-avatars",
+    sectionId: "roleplay-messages",
+    label: "Narrator's Cycling Avatars",
+    description: "Cycle Narrator avatars or show active characters together.",
+    aliases: ["roleplay", "narrator", "avatars", "cycle", "group"],
+    kind: "Toggle",
+  },
+  {
     id: "roleplay-avatar-style",
     sectionId: "roleplay-messages",
     label: "Roleplay Avatars",
@@ -4218,6 +4226,8 @@ function AppearanceSettings() {
   const setRoleplayAvatarScale = useUIStore((s) => s.setRoleplayAvatarScale);
   const roleplayAvatarsScrollable = useUIStore((s) => s.roleplayAvatarsScrollable);
   const setRoleplayAvatarsScrollable = useUIStore((s) => s.setRoleplayAvatarsScrollable);
+  const roleplayNarratorAvatarCycling = useUIStore((s) => s.roleplayNarratorAvatarCycling);
+  const setRoleplayNarratorAvatarCycling = useUIStore((s) => s.setRoleplayNarratorAvatarCycling);
   const roleplaySpriteScale = useUIStore((s) => s.roleplaySpriteScale);
   const setRoleplaySpriteScale = useUIStore((s) => s.setRoleplaySpriteScale);
   const gameDialogueDisplayMode = useUIStore((s) => s.gameDialogueDisplayMode);
@@ -4813,6 +4823,13 @@ function AppearanceSettings() {
               checked={roleplayAvatarsScrollable}
               onChange={setRoleplayAvatarsScrollable}
               help={localizeUi("settings.controls.scrollableAvatars.help")}
+            />
+            <ToggleSetting
+              anchorId={getSettingsControlAnchorId("narrator-cycling-avatars")}
+              label={localizeUi("settings.controls.narratorCyclingAvatars.label")}
+              checked={roleplayNarratorAvatarCycling}
+              onChange={setRoleplayNarratorAvatarCycling}
+              help={localizeUi("settings.controls.narratorCyclingAvatars.help")}
             />
             <div
               id={getSettingsControlAnchorId("roleplay-avatar-style")}

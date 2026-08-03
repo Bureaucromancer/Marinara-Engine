@@ -13,6 +13,7 @@ import { BookOpen, Eye, Maximize2, Pencil, X } from "lucide-react";
 import { SUPPORTED_MACROS } from "@marinara-engine/shared";
 
 import { applyInlineMarkdown, renderMarkdownBlocks } from "../../lib/markdown";
+import { resolveSelfCardAssets } from "../../lib/card-asset-links";
 import { cn } from "../../lib/utils";
 import { handleTextareaTab } from "../../lib/textarea-editing";
 import { Trans, useTranslation as useUiTranslation } from "react-i18next";
@@ -307,6 +308,8 @@ export interface MacroTextareaProps {
   showMacroReference?: boolean;
   showExpand?: boolean;
   showMarkdownPreview?: boolean;
+  /** Character the edited field belongs to — resolves card://self refs in the preview only. */
+  selfCharacterId?: string | null;
   spellCheck?: boolean;
   /** Optional ref to the underlying textarea (e.g. to insert emoji at the caret). */
   textareaRef?: Ref<HTMLTextAreaElement>;
@@ -333,6 +336,7 @@ export function MacroTextarea({
   showMacroReference = true,
   showExpand = true,
   showMarkdownPreview = false,
+  selfCharacterId,
   spellCheck = true,
   textareaRef,
 }: MacroTextareaProps) {
@@ -389,7 +393,7 @@ export function MacroTextarea({
             )}
           >
             {value.trim() ? (
-              renderMarkdownBlocks(value, applyInlineMarkdown, "field-preview")
+              renderMarkdownBlocks(resolveSelfCardAssets(value, selfCharacterId), applyInlineMarkdown, "field-preview")
             ) : (
               <span className="text-[var(--muted-foreground)]">{placeholder}</span>
             )}

@@ -160,6 +160,7 @@ export function ChatCharacterDropOptions({
                         content={greeting.text.slice(0, 500)}
                         dialogueColor={dialogueColor}
                         className="mt-1 text-[0.6875rem] leading-relaxed"
+                        selfCharacterId={characterId}
                       />
                     </button>
                   );

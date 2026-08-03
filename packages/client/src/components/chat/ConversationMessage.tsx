@@ -22,6 +22,7 @@ import { useTranslate } from "../../hooks/use-translate";
 import { useApplyRegex } from "../../hooks/use-apply-regex";
 import { api } from "../../lib/api-client";
 import { chatKeys } from "../../hooks/use-chats";
+import { useChatGalleryFilenameIndex } from "../../hooks/use-characters";
 import type { CharacterMap, MessageSelectionToggle, PersonaInfo } from "./chat-area.types";
 import { MESSAGE_SELECTION_SURFACE_CLASS } from "./message-selection-styles";
 import { GenerationReplayDetailsModal, hasGenerationReplayDetails } from "./GenerationReplayDetailsModal";
@@ -253,6 +254,21 @@ export const ConversationMessage = memo(function ConversationMessage({
     (scopedCharacterMap
       ? (Array.from(scopedCharacterMap.values()).find((c): c is NonNullable<typeof c> => !!c) ?? null)
       : null);
+  // Speaking character id for portable card://self/gallery refs. Mirrors
+  // resolvedCharacterInfo exactly (same message.characterId gate + fallback),
+  // so the resolved image and the shown name/avatar always belong to the same
+  // character. Null for user/system messages — self never resolves there.
+  const selfCharacterId =
+    isUser || isSystem
+      ? null
+      : message.characterId
+        ? charInfo
+          ? message.characterId
+          : (fallbackChatCharacterEntry?.id ?? message.characterId)
+        : null;
+  // Chat-wide filename index (group chats only): lets card://self refs fall
+  // back to whichever chat character owns the file when the speaker doesn't.
+  const galleryIndex = useChatGalleryFilenameIndex(chatCharacterIds);
 
   const msgPersona = isUser && !plainUserMessages && extra.personaSnapshot ? extra.personaSnapshot : null;
   const avatarUrl = isUser
@@ -489,9 +505,12 @@ export const ConversationMessage = memo(function ConversationMessage({
   );
 
   // ── Speaker-segment parsing (for grouped / group-in-bubble) ──
-  const charByName = useMemo(() => {
-    if (!scopedCharacterMap) return null;
-    const map = new Map<string, NonNullable<ReturnType<CharacterMap["get"]>>>();
+  // Built as a pair in one pass: CharInfo carries no id, and grouped segments
+  // need the speaker's id to resolve portable card://self gallery refs.
+  const { charByName, charIdByName } = useMemo(() => {
+    if (!scopedCharacterMap) return { charByName: null, charIdByName: null };
+    const byName = new Map<string, NonNullable<ReturnType<CharacterMap["get"]>>>();
+    const idByName = new Map<string, string>();
     for (const [id, v] of scopedCharacterMap) {
       if (v) {
         const aliases = [v.name, v.convoDisplayName].filter(
@@ -499,12 +518,14 @@ export const ConversationMessage = memo(function ConversationMessage({
         );
         for (const alias of aliases) {
           const key = normalizeTextForMatch(alias);
-          if (id === message.characterId) map.set(key, v);
-          else if (!map.has(key)) map.set(key, v);
+          if (id === message.characterId || !byName.has(key)) {
+            byName.set(key, v);
+            idByName.set(key, id);
+          }
         }
       }
     }
-    return map;
+    return { charByName: byName, charIdByName: idByName };
   }, [scopedCharacterMap, message.characterId]);
 
   const mentionNames = useMemo(() => {
@@ -795,6 +816,9 @@ export const ConversationMessage = memo(function ConversationMessage({
     onOpenAboutMe,
     mentionNames,
     charByName,
+    charIdByName,
+    selfCharacterId,
+    galleryIndex,
     quoteFormat,
     renderedContent: displayedContent,
     renderedContentParts: displayedContentParts,

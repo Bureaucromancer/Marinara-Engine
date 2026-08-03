@@ -255,3 +255,7 @@ Pasta-Devs. Ordinary truthful descriptive and nominative references to Marinara
 Engine remain welcome. When a reference is used to market or operate a hosted
 service, its operator and independent status must be clear. See the [Trademark
 and Branding Policy](TRADEMARKS.md) for the complete guidelines.
+
+_olud.ai is an independent third-party service and is not endorsed by Pasta-Devs._
+
+[![olud.ai](https://olud.ai/badge.php?tool=pasta-devs-marinara-engine)](https://olud.ai/project/pasta-devs-marinara-engine.html)

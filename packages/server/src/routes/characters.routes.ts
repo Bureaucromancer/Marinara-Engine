@@ -502,16 +502,18 @@ async function readGalleryForCharacter(
   const images = await galleryStorage.listByCharacterId(characterId);
   const result: Array<Record<string, unknown>> = [];
   for (const img of images) {
-    // img.filePath is stored relative to data/gallery/, e.g.
-    // "characters/<id>/<filename>". The original filename is the basename.
+    // img.filePath is stored relative to data/gallery/ — usually
+    // "characters/<id>/<filename>", but GENERATED images keep their canonical
+    // chat-scoped or "shared/<filename>" path. Resolve through the same helper
+    // the serving route uses so those rows export their bytes too instead of
+    // being silently dropped (which stranded card://self refs to them).
     const relPath: string = typeof img.filePath === "string" ? img.filePath : "";
-    const filename = relPath.split("/").pop() ?? "";
-    if (!filename) continue;
-    const galleryDir = join(DATA_DIR, "gallery", "characters", characterId);
-    const dataUrl = await readImageAsDataUrl(galleryDir, filename);
+    const storedFile = relPath ? resolveStoredGalleryFile(relPath) : null;
+    if (!storedFile) continue;
+    const dataUrl = await readImageAsDataUrl(storedFile.directory, storedFile.filename);
     if (!dataUrl) continue;
     result.push({
-      filename,
+      filename: storedFile.filename,
       data: dataUrl,
       prompt: img.prompt ?? "",
       provider: img.provider ?? "",
