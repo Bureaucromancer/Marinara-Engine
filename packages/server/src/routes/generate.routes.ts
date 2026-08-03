@@ -314,7 +314,10 @@ import { registerRawRoute } from "./generate/raw-route.js";
 import { registerRetryAgentsRoute } from "./generate/retry-agents-route.js";
 import { fingerprintChatSummary } from "../services/prompt/chat-summary-fingerprint.js";
 import { sendSseEvent, startSseKeepalive, startSseReply, trySendSseEvent } from "./generate/sse.js";
-import { validateSpatialGenerationRequest } from "./generate/spatial-transition-request.js";
+import {
+  resolveAlreadyAppliedSpatialTurn,
+  validateSpatialGenerationRequest,
+} from "./generate/spatial-transition-request.js";
 import { runTurnGameBotTurns } from "../services/turn-games/turn-game-bot-runner.service.js";
 import { getTurnGameContextBuilder } from "../services/turn-games/turn-game-runner.service.js";
 import { buildRecentSocialMediaActivityBlock } from "../services/noodle/noodle-context.js";
@@ -6395,15 +6398,19 @@ export async function generateRoutes(app: FastifyInstance) {
             } catch (error) {
               if (error instanceof SpatialOwnerTurnError) {
                 if (error.code === "spatial_transition_already_applied") {
+                  const recovered = resolveAlreadyAppliedSpatialTurn(error);
+                  if (!recovered) throw error;
+                  const recoveredMessage = await chats.getMessage(recovered.messageId);
+                  if (!recoveredMessage) throw error;
+                  savedMsg = recoveredMessage;
+                  savedSwipeIndex = recovered.swipeIndex;
                   sendSseEvent(reply, {
                     type: "spatial_transition_committed",
                     data: {
                       chatId: input.chatId,
                       commandId: input.pendingSpatialTransition.commandId,
-                      currentLocationId:
-                        error.details?.snapshot?.currentLocationId ?? error.details?.currentLocationId ?? null,
-                      definitionRevision:
-                        error.details?.snapshot?.definitionRevision ?? error.details?.currentRevision ?? null,
+                      currentLocationId: recovered.currentLocationId,
+                      definitionRevision: recovered.definitionRevision,
                     },
                   });
                 } else {
@@ -6417,9 +6424,11 @@ export async function generateRoutes(app: FastifyInstance) {
                       ...(error.details ?? {}),
                     },
                   });
+                  throw error;
                 }
+              } else {
+                throw error;
               }
-              throw error;
             }
           } else {
             savedMsg = await chats.createMessage({

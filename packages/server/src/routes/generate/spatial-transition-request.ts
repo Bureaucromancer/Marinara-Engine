@@ -1,4 +1,4 @@
-import type { PendingSpatialTransition } from "@marinara-engine/shared";
+import type { PendingSpatialTransition, SpatialContextSnapshot } from "@marinara-engine/shared";
 
 type SpatialGenerationMode = "conversation" | "roleplay" | "game";
 
@@ -7,6 +7,29 @@ export type SpatialGenerationRequestError = {
   error: string;
   code: "spatial_mode_unsupported" | "spatial_transition_requires_new_turn";
 };
+
+export type AlreadyAppliedSpatialTurn = {
+  messageId: string;
+  swipeIndex: number;
+  currentLocationId: string | null;
+  definitionRevision: number;
+};
+
+export function resolveAlreadyAppliedSpatialTurn(error: {
+  code: string;
+  details?: { messageId?: string; snapshot?: SpatialContextSnapshot };
+}): AlreadyAppliedSpatialTurn | null {
+  if (error.code !== "spatial_transition_already_applied") return null;
+  const snapshot = error.details?.snapshot;
+  const messageId = error.details?.messageId?.trim() || snapshot?.messageId.trim();
+  if (!snapshot || !messageId) return null;
+  return {
+    messageId,
+    swipeIndex: snapshot.swipeIndex,
+    currentLocationId: snapshot.currentLocationId,
+    definitionRevision: snapshot.definitionRevision,
+  };
+}
 
 export function validateSpatialGenerationRequest(input: {
   mode: SpatialGenerationMode;

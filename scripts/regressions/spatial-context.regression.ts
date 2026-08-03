@@ -39,7 +39,10 @@ import {
 } from "../../packages/server/src/services/spatial-context/state-resolution.js";
 import { ensureTimestampAfter } from "../../packages/server/src/services/import/import-timestamps.js";
 import { resolveVisibleGameStateAnchor } from "../../packages/server/src/routes/generate/generate-route-utils.js";
-import { validateSpatialGenerationRequest } from "../../packages/server/src/routes/generate/spatial-transition-request.js";
+import {
+  resolveAlreadyAppliedSpatialTurn,
+  validateSpatialGenerationRequest,
+} from "../../packages/server/src/routes/generate/spatial-transition-request.js";
 import { mergeSpatialLocationReferenceImages } from "../../packages/server/src/services/image/spatial-location-reference.js";
 import {
   buildInitialGameMapPatch,
@@ -248,6 +251,24 @@ const snapshotInput = {
 };
 assert.equal(spatialContextSnapshotSchema.safeParse(snapshotInput).success, true);
 assert.equal(spatialContextSnapshotSchema.safeParse({ ...snapshotInput, messageId: "" }).success, false);
+assert.deepEqual(
+  resolveAlreadyAppliedSpatialTurn({
+    code: "spatial_transition_already_applied",
+    details: { messageId: snapshotInput.messageId, snapshot: snapshotInput },
+  }),
+  {
+    messageId: "message-1",
+    swipeIndex: 0,
+    currentLocationId: null,
+    definitionRevision: 0,
+  },
+  "Already-applied generated owner turns recover the original persisted message and snapshot",
+);
+assert.equal(
+  resolveAlreadyAppliedSpatialTurn({ code: "spatial_transition_stale_location" }),
+  null,
+  "Rejected spatial transitions must not enter the idempotent success path",
+);
 assert.deepEqual(
   extractAssistantSpatialDirective('The lift opens onto Level 1.\n[spatial_move: destination_id="tower_level_1"]'),
   {
