@@ -9,6 +9,7 @@ import { logger } from "../../lib/logger.js";
 import { notifyGenerationFallback, type GenerationFallbackNotifier } from "../generation/fallback-notification.js";
 import {
   isConnectionAdmissionFailure,
+  splitConnectionAttemptAcrossFallback,
   withConnectionAdmissionProvider,
   type ConnectionAdmissionMode,
 } from "../generation/connection-admission.js";
@@ -117,6 +118,8 @@ export class ConnectionFallbackProvider extends BaseLLMProvider {
     private readonly connection: FallbackConnection,
     private readonly category: "main" | "agents",
     private readonly onFallback?: GenerationFallbackNotifier,
+    /** Reports the one logical attempt's outcome once the primary-plus-fallback chain settles. */
+    private readonly settleAttempt?: (outcome: "completed" | "failed") => Promise<void>,
   ) {
     super("", "", primary.maxContextValue ?? undefined, null, primary.maxTokensOverrideValue);
   }
@@ -142,6 +145,40 @@ export class ConnectionFallbackProvider extends BaseLLMProvider {
   }
 
   async *chat(messages: ChatMessage[], options: ChatOptions): AsyncGenerator<string, LLMUsage | void, unknown> {
+    // Only the whole chain's result is the logical attempt's outcome. Reporting a leg's own
+    // result would record a successful fallback as the primary's failure, and would call an
+    // empty-primary-then-rejected-fallback chain completed.
+    //
+    // Delivered output settles the attempt just as completion does: a consumer that walks away
+    // after reading usable tokens, or a stream that breaks after emitting them, got what the
+    // attempt was for. Tracking here rather than reusing chatChain's own flag covers tokens the
+    // fallback leg delivered too — that flag only watches the primary.
+    let delivered = false;
+    let outcome: "completed" | "failed" = "failed";
+    const chain = this.chatChain(messages, options);
+    try {
+      let result = await chain.next();
+      while (!result.done) {
+        delivered ||= result.value.trim().length > 0;
+        yield result.value;
+        result = await chain.next();
+      }
+      outcome = "completed";
+      return result.value;
+    } finally {
+      // The manual loop does not forward an early return the way `yield*` would, so close the
+      // chain explicitly or its own cleanup — and the admission slots it holds — never runs.
+      await chain.return(undefined).catch((closeError: unknown) => {
+        logger.warn(closeError, "[%s-fallback] Failed to close the fallback chain", this.category);
+      });
+      await this.settleAttempt?.(outcome === "completed" || delivered ? "completed" : "failed");
+    }
+  }
+
+  private async *chatChain(
+    messages: ChatMessage[],
+    options: ChatOptions,
+  ): AsyncGenerator<string, LLMUsage | void, unknown> {
     let emittedUsableOutput = false;
     try {
       const primaryOptions = options.onToken
@@ -183,6 +220,17 @@ export class ConnectionFallbackProvider extends BaseLLMProvider {
   }
 
   async chatComplete(messages: ChatMessage[], options: ChatOptions): Promise<ChatCompletionResult> {
+    let outcome: "completed" | "failed" = "failed";
+    try {
+      const result = await this.chatCompleteChain(messages, options);
+      outcome = "completed";
+      return result;
+    } finally {
+      await this.settleAttempt?.(outcome);
+    }
+  }
+
+  private async chatCompleteChain(messages: ChatMessage[], options: ChatOptions): Promise<ChatCompletionResult> {
     try {
       const result = await this.primary.chatComplete(messages, options);
       const hasUsableOutput = Boolean(result.content?.trim()) || result.toolCalls.length > 0;
@@ -210,20 +258,17 @@ export function withConnectionFallbackProvider({
   onFallback,
   admissionMode = { kind: "foreground" },
 }: ConnectionFallbackProviderArgs): BaseLLMProvider {
-  const admittedPrimary = withConnectionAdmissionProvider(primary, primaryConnectionId, admissionMode);
-  // `beforeAttempt` is one-shot: it books a scheduled attempt against a quota and returns the
-  // finalizer that closes it out. Falling back is a retry of that same logical attempt on a
-  // different connection, so the fallback must be admitted without booking a second claim.
-  const fallbackAdmissionMode: ConnectionAdmissionMode =
-    admissionMode.kind === "background" ? { kind: "background" } : admissionMode;
+  const { primaryMode, fallbackMode, settle } = splitConnectionAttemptAcrossFallback(admissionMode);
   if (
     !fallbackConnection ||
     fallbackConnection.id === primaryConnectionId ||
     !fallbackConnection.model?.trim() ||
     !fallbackBaseUrl
   ) {
-    return admittedPrimary;
+    // No fallback exists, so the primary is the whole logical attempt and owns its own outcome.
+    return withConnectionAdmissionProvider(primary, primaryConnectionId, admissionMode);
   }
+  const admittedPrimary = withConnectionAdmissionProvider(primary, primaryConnectionId, primaryMode);
   const fallback = withConnectionAdmissionProvider(
     createLLMProvider(
       fallbackConnection.provider,
@@ -237,7 +282,7 @@ export function withConnectionFallbackProvider({
       fallbackConnection.defaultParameters,
     ),
     fallbackConnection.id,
-    fallbackAdmissionMode,
+    fallbackMode,
   );
-  return new ConnectionFallbackProvider(admittedPrimary, fallback, fallbackConnection, category, onFallback);
+  return new ConnectionFallbackProvider(admittedPrimary, fallback, fallbackConnection, category, onFallback, settle);
 }

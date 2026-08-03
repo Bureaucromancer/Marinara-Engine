@@ -1,3 +1,5 @@
+import { isConnectionAdmissionFailure } from "../generation/connection-admission.js";
+
 export const NOODLE_IMAGE_GENERATION_MAX_ATTEMPTS = 2;
 export const NOODLE_IMAGE_GENERATION_RETRY_DELAY_MS = 500;
 
@@ -11,6 +13,9 @@ export async function generateNoodleImageWithRetry<T>(
     try {
       return await generate(attempt);
     } catch (error) {
+      // A busy connection is not a transient provider fault: retrying cannot admit us any
+      // sooner, and the caller needs the rejection now so the run defers instead of degrading.
+      if (isConnectionAdmissionFailure(error)) throw error;
       lastError = error;
       await onAttemptFailure?.(error, attempt, NOODLE_IMAGE_GENERATION_MAX_ATTEMPTS);
       if (attempt < NOODLE_IMAGE_GENERATION_MAX_ATTEMPTS) {

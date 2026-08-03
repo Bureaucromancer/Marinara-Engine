@@ -24,6 +24,17 @@ export type ConnectionAdmissionMode =
       beforeAttempt?: () => void | ConnectionAttemptFinalizer | Promise<void | ConnectionAttemptFinalizer>;
     };
 
+/**
+ * Marks a request the server issued to itself on a scheduler's behalf. Background admission is
+ * strictly self-limiting — it can only make the caller yield — so an outside client setting this
+ * gains nothing; it is a routing hint, not a privilege.
+ */
+export const AUTOMATIC_GENERATION_HEADER = "x-marinara-automatic-generation";
+
+export function admissionModeForRequest(headers: Record<string, unknown>): ConnectionAdmissionMode {
+  return headers[AUTOMATIC_GENERATION_HEADER] === "1" ? { kind: "background" } : { kind: "foreground" };
+}
+
 export class BackgroundConnectionBusyError extends Error {
   constructor(readonly connectionId: string) {
     super(`Connection ${connectionId} is not available for background generation.`);
@@ -147,6 +158,55 @@ export async function withConnectionAdmission<T>(
   } finally {
     await finalizeConnectionAttempt(attempt, outcome);
   }
+}
+
+/**
+ * Split one logical attempt across a primary and its fallback connection. `beforeAttempt` books
+ * the attempt against a quota and hands back the finalizer that closes it out; falling back is a
+ * retry of that same logical attempt, so it must be booked once (on the primary) and reported
+ * once (by `settle`, after the whole chain finishes). Without this the primary's own finalizer
+ * fires `failed` before the fallback even starts and a successful fallback stays recorded as a
+ * failure. Each connection still takes its own physical slot, which is what the modes carry.
+ *
+ * No leg's own outcome is trusted, because no leg knows the chain's result: an empty-but-
+ * successful primary is a `completed` leg inside an attempt that produced nothing, and a
+ * rejection raised between legs never reaches a leg finalizer at all. Only the caller driving
+ * the chain knows whether the logical attempt delivered, so it passes the outcome to `settle`.
+ */
+export function splitConnectionAttemptAcrossFallback(mode: ConnectionAdmissionMode): {
+  primaryMode: ConnectionAdmissionMode;
+  fallbackMode: ConnectionAdmissionMode;
+  settle: (outcome: ConnectionAttemptOutcome) => Promise<void>;
+} {
+  if (mode.kind !== "background" || !mode.beforeAttempt) {
+    return { primaryMode: mode, fallbackMode: mode, settle: async () => {} };
+  }
+  const book = mode.beforeAttempt;
+  let finalize: ConnectionAttemptFinalizer | undefined;
+  const noopLegFinalizer: ConnectionAttemptFinalizer = () => undefined;
+  return {
+    primaryMode: {
+      kind: "background",
+      beforeAttempt: async () => {
+        finalize = (await book()) || undefined;
+        return noopLegFinalizer;
+      },
+    },
+    // The fallback takes its own physical slot but books nothing: it is a retry of the attempt
+    // the primary already booked.
+    fallbackMode: { kind: "background" },
+    settle: async (outcome) => {
+      const pending = finalize;
+      // A rejected primary never booked anything, and settle must stay idempotent because a
+      // stream can be closed more than once.
+      finalize = undefined;
+      try {
+        await pending?.(outcome);
+      } catch (error) {
+        logger.error(error, "[connection-admission] Attempt accounting failed after a fallback chain");
+      }
+    },
+  };
 }
 
 export class ConnectionAdmissionProvider extends BaseLLMProvider {

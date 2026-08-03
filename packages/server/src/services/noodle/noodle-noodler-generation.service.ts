@@ -19,7 +19,10 @@ import { resolveStoredChatOptions, resolveStoredMaxTokens } from "../generation/
 import { clampGenerationMaxOutputTokens } from "../generation/output-token-limits.js";
 import { parseGameJsonish } from "../game/jsonish.js";
 import { withConnectionFallbackProvider } from "../llm/connection-fallback-provider.js";
-import type { ConnectionAdmissionMode } from "../generation/connection-admission.js";
+import {
+  isConnectionAdmissionFailure,
+  type ConnectionAdmissionMode,
+} from "../generation/connection-admission.js";
 import type { ChatMessage } from "../llm/base-provider.js";
 import { createLLMProvider } from "../llm/provider-registry.js";
 import { createCharactersStorage } from "../storage/characters.storage.js";
@@ -58,6 +61,7 @@ export type NoodlerPostGenerationInput = {
   connection: GenerationConnection;
   media?: NoodlerPostMediaUpload;
   prepareOnly?: boolean;
+  /** Scheduler-owned automatic runs pass background so they yield to user generation. */
   admissionMode?: ConnectionAdmissionMode;
 };
 
@@ -436,6 +440,7 @@ export async function generateNoodlerPost(
     imageConnection,
     db,
     debugMode,
+    admissionMode: input.admissionMode,
   };
 
   // Manual Guide review path: persist a pending prompt and hand back a preview for the
@@ -465,6 +470,9 @@ export async function generateNoodlerPost(
   try {
     image = await generateNoodlerPostImage({ ...imageInput, previewOnly: false });
   } catch (err) {
+    // Same rule as the text leg: a busy connection is a deferral, so let it propagate to the
+    // scheduler instead of persisting a post permanently marked as image-failed.
+    if (isConnectionAdmissionFailure(err)) throw err;
     logger.warn(err, "[noodler] Failed to generate image for %s", account.displayName);
     return {
       post: await persist({

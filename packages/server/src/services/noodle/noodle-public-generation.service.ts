@@ -43,6 +43,7 @@ import {
   resolvePersonaAccount,
 } from "./noodle-public-support.js";
 import { noodleResponseFormat } from "./noodle-response-format.js";
+import type { ConnectionAdmissionMode } from "../generation/connection-admission.js";
 import { isUnsupportedNoodleVisionInputError } from "./noodle-vision.js";
 import { formatNoodleMessagesForLog } from "./noodle-generation-log.js";
 
@@ -59,6 +60,8 @@ type PublicGenerationInput = {
   timeZone?: string;
   debugMode: boolean;
   reviewImagePromptsBeforeSend: boolean;
+  /** Scheduler-owned automatic refreshes pass background so they yield to user generation. */
+  admissionMode?: ConnectionAdmissionMode;
 };
 
 const RANDOM_NOODLE_USERS = [
@@ -187,6 +190,7 @@ export function createPublicNoodleGenerationService(db: DB) {
           fallbackConnection,
           fallbackBaseUrl: fallbackConnection ? resolveBaseUrl(fallbackConnection) : "",
           category: "main",
+          admissionMode: input.admissionMode,
         });
         await ensurePersonaAccounts(noodle, characters);
         if (settings.allowProfessorMari) await ensureProfessorMariAccount(noodle, characters);
@@ -456,6 +460,7 @@ export function createPublicNoodleGenerationService(db: DB) {
           imageConnection,
           debugMode,
           reviewImagePromptsBeforeSend: input.reviewImagePromptsBeforeSend,
+          admissionMode: input.admissionMode,
         });
         const activity = await commitGeneratedNoodleActivity({
           db,

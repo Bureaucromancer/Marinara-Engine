@@ -73,6 +73,10 @@ import {
 } from "../services/noodle/noodle-noodler-post.operation.js";
 import { tryNoodlerAccountOperation } from "../services/noodle/noodle-noodler-account-operation-lock.js";
 import { generateAndApplyNoodlerCreatorReply } from "../services/noodle/noodle-noodler-creator-reply.operation.js";
+import {
+  admissionModeForRequest,
+  isConnectionAdmissionFailure,
+} from "../services/generation/connection-admission.js";
 import { generateNoodlerStageProfileDraft } from "../services/noodle/noodle-stage-profile-draft.service.js";
 import { canViewNoodlerPost, isNoodlerHiddenFromViewer } from "../services/noodle/noodler-access.js";
 import { createNoodlerNoodleImagesService } from "../services/noodle/noodle-noodler-images.service.js";
@@ -1427,7 +1431,12 @@ export async function noodleRoutes(app: FastifyInstance) {
     if (!decoded.success) return reply.code(400).send({ error: decoded.error.flatten() });
     if (decoded.data.mode === "noodler") {
       try {
-        const result = await generateAndApplyNoodlerPost(app.db, decoded.data, decoded.media);
+        const result = await generateAndApplyNoodlerPost(
+          app.db,
+          decoded.data,
+          decoded.media,
+          admissionModeForRequest(req.headers),
+        );
         if (result.status === "generated") {
           return result.imagePromptReview
             ? { ...result.post, imagePromptReview: result.imagePromptReview }
@@ -1445,6 +1454,11 @@ export async function noodleRoutes(app: FastifyInstance) {
         }
         return reply.code(404).send({ error: "NoodleR account not found." });
       } catch (error) {
+        // The connection is busy with user work: 409 tells the scheduler to retry shortly
+        // rather than record a configuration failure and back off for minutes.
+        if (isConnectionAdmissionFailure(error)) {
+          return reply.code(409).send({ error: getErrorMessage(error) });
+        }
         logger.error(error, "[noodler] NoodleR post generation failed");
         return reply.code(500).send({ error: getErrorMessage(error) });
       }
@@ -1487,10 +1501,12 @@ export async function noodleRoutes(app: FastifyInstance) {
         timeZone: normalizePromptTimeZone(decoded.data.timeZone),
         debugMode: decoded.data.debugMode === true,
         reviewImagePromptsBeforeSend: decoded.data.reviewImagePromptsBeforeSend === true,
+        admissionMode: admissionModeForRequest(req.headers),
       });
       if (!generated.ok) return reply.code(400).send({ error: generated.error });
       return generated.result;
     } catch (error) {
+      if (isConnectionAdmissionFailure(error)) return reply.code(409).send({ error: getErrorMessage(error) });
       return reply.code(500).send({ error: getErrorMessage(error) });
     } finally {
       refreshInFlight = false;

@@ -13,6 +13,7 @@ import { newId } from "../../utils/id-generator.js";
 import { createConnectionsStorage } from "../storage/connections.storage.js";
 import { createNoodleStorage } from "../storage/noodle.storage.js";
 import { generateNoodlerPost } from "./noodle-noodler-generation.service.js";
+import type { ConnectionAdmissionMode } from "../generation/connection-admission.js";
 import {
   persistNoodlerPostWithUploadedMedia,
   readNoodlerMediaPath,
@@ -50,6 +51,7 @@ export async function generateAndApplyNoodlerPost(
   db: DB,
   request: NoodlerGenerationRequest,
   media?: NoodlerPostMediaUpload,
+  admissionMode?: ConnectionAdmissionMode,
 ): Promise<GenerateAndApplyNoodlerPostResult> {
   const noodle = createNoodleStorage(db);
   const settings = await noodle.getSettings();
@@ -70,7 +72,7 @@ export async function generateAndApplyNoodlerPost(
     if (!connectionId) return { status: "connection_required" } as const;
     const connection = await createConnectionsStorage(db).getWithKey(connectionId);
     if (!connection) return { status: "connection_not_found" } as const;
-    const generated = await generateNoodlerPost(db, { account, request, connection, media });
+    const generated = await generateNoodlerPost(db, { account, request, connection, media, admissionMode });
     return {
       status: "generated",
       post: generated.post,
