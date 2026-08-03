@@ -113,7 +113,6 @@ const PANEL_RESIZE_LARGE_STEP = 48;
 const SHARED_SIDEBAR_WIDTH_MIN = Math.max(SIDEBAR_WIDTH_MIN, RIGHT_PANEL_WIDTH_MIN);
 const SHARED_SIDEBAR_WIDTH_MAX = Math.min(SIDEBAR_WIDTH_MAX, RIGHT_PANEL_WIDTH_MAX);
 const TRACKER_PANEL_EDGE_OFFSET = 8;
-const CHAT_SCROLLBAR_CLEARANCE = 16;
 const TRACKER_PANEL_HUD_GAP = 6;
 const TRACKER_PANEL_CHAT_GAP = 8;
 const TRACKER_PANEL_DESKTOP_MOTION_MS = 260;
@@ -1175,7 +1174,7 @@ export function AppShell() {
           )}px`,
           ...(side === "left"
             ? { left: sidebarOpen ? liveSidebarWidth : 0 }
-            : { right: (rightPanelOpen ? liveRightPanelWidth : 0) + CHAT_SCROLLBAR_CLEARANCE }),
+            : { right: rightPanelOpen ? liveRightPanelWidth : 0 }),
           ...(trackerPanelBackgroundStyle ?? {}),
         }}
       >
