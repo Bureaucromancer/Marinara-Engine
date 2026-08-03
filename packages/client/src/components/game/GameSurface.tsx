@@ -2162,7 +2162,8 @@ function GameSurfaceComponent({
   // combat over the shared narration. Picked at creation and fixed for the game's lifetime, since an
   // experience owns the whole run. Resolved from the MANIFEST, so no package id appears here.
   const gameExperienceId = typeof chatMeta.gameExperienceId === "string" ? chatMeta.gameExperienceId : null;
-  const { data: installedCapabilityPackages } = useInstalledCapabilityPackages(gameExperienceId !== null);
+  const { data: installedCapabilityPackages, isPending: installedCapabilityPackagesPending } =
+    useInstalledCapabilityPackages(gameExperienceId !== null);
   const experienceSurfacePackage = useMemo(() => {
     if (!gameExperienceId) return null;
     return (
@@ -2179,9 +2180,12 @@ function GameSurfaceComponent({
    *  chrome that renders outside its element. Declared rather than pushed, so it applies on first paint. */
   const experienceSurfaceClass = experienceSurfacePackage?.manifest.contributions?.gameSurface?.surfaceClass ?? null;
   const experienceSurfaceActive = experienceSurfaceId !== null;
-  /** Broader than `experienceSurfaceActive`: the surface waits on the installed-packages query, so that is
-   *  still false on a cold cache while the chat already says an experience owns this game. */
-  const experienceOwnsGame = experienceSurfaceActive || gameExperienceId !== null;
+  /** Broader than `experienceSurfaceActive`, but only while the installed-packages query is still in
+   *  flight: on a cold cache that is false for a moment even though the chat says an experience owns this
+   *  game, and built-in chrome would flash. Once the query settles this falls back to the surface, so a
+   *  game whose package was uninstalled gets the built-in chrome back instead of losing both. */
+  const experienceOwnsGame =
+    experienceSurfaceActive || (gameExperienceId !== null && installedCapabilityPackagesPending);
   const { data: agentConfigs } = useAgentConfigs(storyboardAgentActive);
   const storyboardAgentConfig = useMemo(
     () => agentConfigs?.find((config) => config.type === STORYBOARD_AGENT_ID) ?? null,

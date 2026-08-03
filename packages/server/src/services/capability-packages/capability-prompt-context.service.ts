@@ -29,6 +29,7 @@ export interface CapabilityPromptContribution {
   provides?: CapabilityProvidedGameSystems;
 }
 
+/** A package's per-turn contributor. May return a bare string, the rich form, or nothing. */
 export type CapabilityPromptContextContributor = (
   request: CapabilityPromptContextRequest,
 ) =>
@@ -62,6 +63,10 @@ export function registerCapabilityPromptContext(
  *  the turn, so building the prompt can't wait on one indefinitely. */
 const CONTRIBUTOR_TIMEOUT_MS = 2_000;
 
+/**
+ * Reject if `value` has not settled within {@link CONTRIBUTOR_TIMEOUT_MS}. A synchronous return is passed
+ * straight through, and the timer is always cleared so a fast contributor leaves nothing behind.
+ */
 function withDeadline<T>(value: Promise<T> | T, packageId: string): Promise<T> {
   if (!(value instanceof Promise)) return Promise.resolve(value);
   let timer: NodeJS.Timeout;

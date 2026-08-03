@@ -64,6 +64,7 @@ export interface CapabilityLorebookEntrySelection {
 }
 
 // Inputs for the resource write surface. Thin, storage-agnostic shapes the server impl maps to storage.
+/** Fields accepted when a package creates the player persona. */
 export interface CapabilityPersonaCreateInput {
   name: string;
   description: string;
@@ -72,6 +73,7 @@ export interface CapabilityPersonaCreateInput {
   appearance?: string;
   tags?: string;
 }
+/** Fields a package may revise on a persona it created. The name is fixed once stored. */
 export interface CapabilityPersonaUpdateInput {
   description?: string;
   comment?: string;
@@ -82,6 +84,7 @@ export interface CapabilityPersonaUpdateInput {
  *  wrong value is a compile error in the package instead of a silent rejection at write time. */
 export type CapabilityLorebookCategory = "uncategorized" | "world" | "character" | "npc" | "spellbook";
 
+/** Fields accepted when a package creates a lorebook to hold its own world content. */
 export interface CapabilityLorebookCreateInput {
   name: string;
   description?: string;
@@ -91,10 +94,12 @@ export interface CapabilityLorebookCreateInput {
   personaId?: string;
   enabled?: boolean;
 }
+/** The retrieval knobs a package may retune on a lorebook it owns. */
 export interface CapabilityLorebookUpdateInput {
   scanDepth?: number;
   tokenBudget?: number;
 }
+/** One lorebook entry to store. Extra keys pass through to storage; see the index signature below. */
 export interface CapabilityLorebookEntryInput {
   /** Required: an entry with no name cannot be stored, so accepting one here only defers the failure. */
   name: string;

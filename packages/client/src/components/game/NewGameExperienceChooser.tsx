@@ -31,6 +31,10 @@ type InstalledPkg = {
 const SECONDARY_BUTTON =
   "flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-3 text-xs font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]/40 disabled:cursor-wait disabled:opacity-50";
 
+/**
+ * Wraps the game setup step. Renders the built-in wizard with an Experiences block injected into its first
+ * step, and swaps the wizard body for a package's own setup once one is activated.
+ */
 export function NewGameExperienceChooser({
   activeChatId,
   onCancelSetup,
@@ -223,7 +227,7 @@ export function NewGameExperienceChooser({
         >
           <div className={cn(NEUTRAL_PANEL_HEADER, "flex shrink-0 items-center justify-between")}>
             <h3 id="game-experience-setup-title" className={NEUTRAL_PANEL_TITLE}>
-              {activeExperience?.manifest.name ?? "New Game"}
+              {activeExperience?.manifest.name ?? localizeUi("navigation.chatSidebar.new.game")}
             </h3>
             <button
               type="button"
