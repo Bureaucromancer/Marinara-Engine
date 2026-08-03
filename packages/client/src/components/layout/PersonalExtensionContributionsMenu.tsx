@@ -13,7 +13,7 @@ import { cn } from "../../lib/utils";
 import { PersonalExtensionContributionIcon } from "../extensions/PersonalExtensionContributionIcon";
 
 const TOPBAR_CONTRIBUTION_CLASS =
-  "mari-topbar-action relative hidden h-8 w-8 items-center justify-center rounded-lg p-0 text-[var(--muted-foreground)] transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)] active:scale-95 md:flex";
+  "mari-topbar-action relative flex h-8 w-8 items-center justify-center rounded-lg p-0 text-[var(--muted-foreground)] transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)] active:scale-95 max-sm:h-7 max-sm:w-7";
 
 function ContributionAttribution({ contribution }: { contribution: PersonalExtensionHostContribution }) {
   const { t } = useTranslation();
@@ -27,7 +27,9 @@ function ContributionAttribution({ contribution }: { contribution: PersonalExten
 export function PersonalExtensionTopbarButtons() {
   const { t: localizeUi } = useUiTranslation();
   const { contributions } = usePersonalExtensionContributions();
-  const buttons = contributions.filter((contribution) => contribution.kind === "button").slice(0, 2);
+  const buttons = contributions
+    .filter((contribution) => contribution.kind === "button" && (contribution.surface ?? "top-bar") === "top-bar")
+    .slice(0, 2);
 
   return buttons.map((contribution) => (
     <button
@@ -84,9 +86,9 @@ export function PersonalExtensionContributionsMenu() {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
-  const buttons = contributions.filter((contribution) => contribution.kind === "button");
   const menuItems = contributions.filter((contribution) => contribution.kind === "menu-item");
   const panels = contributions.filter((contribution) => contribution.kind === "panel");
+  const menuContributionCount = menuItems.length + panels.length;
 
   useEffect(() => {
     if (!open) return;
@@ -110,10 +112,10 @@ export function PersonalExtensionContributionsMenu() {
   }, [open]);
 
   useEffect(() => {
-    if (contributions.length === 0) setOpen(false);
-  }, [contributions.length]);
+    if (menuContributionCount === 0) setOpen(false);
+  }, [menuContributionCount]);
 
-  if (contributions.length === 0) return null;
+  if (menuContributionCount === 0) return null;
 
   const activate = (contribution: PersonalExtensionHostContribution) => {
     activatePersonalExtensionContribution(contribution.key);
@@ -136,40 +138,12 @@ export function PersonalExtensionContributionsMenu() {
         <Puzzle aria-hidden="true" className="text-[var(--primary)]" size={15} />
         <h2 className="text-xs font-semibold">{t("extensions.contributions.title")}</h2>
         <span className="ml-auto rounded-full bg-[var(--secondary)] px-2 py-0.5 text-[0.6875rem] text-[var(--muted-foreground)]">
-          {contributions.length}
+          {menuContributionCount}
         </span>
       </div>
 
-      {buttons.length > 0 && (
-        <section aria-label={t("extensions.contributions.actions")}>
-          <p className="px-2.5 py-1 text-[0.6875rem] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
-            {t("extensions.contributions.actions")}
-          </p>
-          <div className="flex flex-col gap-1">
-            {buttons.map((contribution) => (
-              <button
-                key={contribution.key}
-                type="button"
-                role="menuitem"
-                onClick={() => activate(contribution)}
-                className="flex min-h-10 items-center gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-3 py-2 text-left transition-colors hover:border-[var(--primary)] hover:bg-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
-              >
-                <PersonalExtensionContributionIcon icon={contribution.icon} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-semibold">{contribution.label}</span>
-                  <ContributionAttribution contribution={contribution} />
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
       {menuItems.length > 0 && (
-        <section
-          aria-label={t("extensions.contributions.tools")}
-          className={cn(buttons.length > 0 && "mt-2 border-t border-[var(--border)] pt-2")}
-        >
+        <section aria-label={t("extensions.contributions.tools")}>
           <p className="px-2.5 py-1 text-[0.6875rem] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
             {t("extensions.contributions.tools")}
           </p>
@@ -186,7 +160,7 @@ export function PersonalExtensionContributionsMenu() {
       {panels.length > 0 && (
         <section
           aria-label={t("extensions.contributions.panels")}
-          className={cn((buttons.length > 0 || menuItems.length > 0) && "mt-2 border-t border-[var(--border)] pt-2")}
+          className={cn(menuItems.length > 0 && "mt-2 border-t border-[var(--border)] pt-2")}
         >
           <p className="px-2.5 py-1 text-[0.6875rem] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
             {t("extensions.contributions.panels")}
@@ -223,7 +197,7 @@ export function PersonalExtensionContributionsMenu() {
       >
         <Puzzle aria-hidden="true" size={15} />
         <span className="absolute -right-0.5 -top-0.5 min-w-3.5 rounded-full bg-[var(--primary)] px-1 text-center text-[0.5625rem] font-bold leading-3.5 text-[var(--primary-foreground)]">
-          {Math.min(contributions.length, 99)}
+          {Math.min(menuContributionCount, 99)}
         </span>
       </button>
       {typeof document === "undefined" ? null : createPortal(menu, document.body)}
