@@ -1276,6 +1276,25 @@ type TrackerCharacterCardIdentity = {
   avatarCrop?: unknown;
 };
 
+function getExplicitTrackerNameAliases(value: unknown): string[] {
+  if (typeof value !== "string") return [];
+  const aliases = new Set<string>();
+  const patterns = [
+    /"([^"\n]{1,80})"/gu,
+    /“([^”\n]{1,80})”/gu,
+    /'([^'\n]{1,80})'/gu,
+    /‘([^’\n]{1,80})’/gu,
+    /\(([^()\n]{1,80})\)/gu,
+  ];
+  for (const pattern of patterns) {
+    for (const match of value.matchAll(pattern)) {
+      const alias = normalizeTextForMatch(match[1]);
+      if (alias) aliases.add(alias);
+    }
+  }
+  return [...aliases];
+}
+
 export function applyTrackerCharacterCardIdentity(
   characters: Array<Record<string, unknown>>,
   cards: TrackerCharacterCardIdentity[],
@@ -1292,14 +1311,42 @@ export function applyTrackerCharacterCardIdentity(
   for (const name of duplicateNames) cardsByName.delete(name);
 
   const matchedIds = new Set<string>();
+  const canonicalCharacters: Array<Record<string, unknown>> = [];
+  const canonicalIndexByCardId = new Map<string, number>();
   for (const character of characters) {
-    const card = cardsById.get(trackerCharacterIdKey(character)) ?? cardsByName.get(trackerCharacterNameKey(character));
-    if (!card) continue;
-    character.characterId = card.id;
-    character.avatarPath = card.avatarPath ?? null;
-    character.avatarCrop = card.avatarCrop ?? null;
+    const cardByAlias = getExplicitTrackerNameAliases(character.name)
+      .map((alias) => cardsByName.get(alias))
+      .filter((candidate): candidate is TrackerCharacterCardIdentity => !!candidate);
+    const uniqueAliasCardIds = new Set(cardByAlias.map((candidate) => candidate.id));
+    const card =
+      cardsById.get(trackerCharacterIdKey(character)) ??
+      cardsByName.get(trackerCharacterNameKey(character)) ??
+      (uniqueAliasCardIds.size === 1 ? cardByAlias[0] : undefined);
+    if (!card) {
+      canonicalCharacters.push(character);
+      continue;
+    }
+
+    const canonicalCharacter = {
+      ...character,
+      characterId: card.id,
+      name: card.name,
+      avatarPath: card.avatarPath ?? null,
+      avatarCrop: card.avatarCrop ?? null,
+    };
+    const existingIndex = canonicalIndexByCardId.get(card.id);
+    if (existingIndex === undefined) {
+      canonicalIndexByCardId.set(card.id, canonicalCharacters.length);
+      canonicalCharacters.push(canonicalCharacter);
+    } else {
+      canonicalCharacters[existingIndex] = {
+        ...canonicalCharacters[existingIndex],
+        ...canonicalCharacter,
+      };
+    }
     matchedIds.add(card.id);
   }
+  characters.splice(0, characters.length, ...canonicalCharacters);
   return matchedIds;
 }
 
