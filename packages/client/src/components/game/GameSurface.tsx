@@ -77,7 +77,7 @@ import {
 } from "../../hooks/use-chats";
 import { useConnections } from "../../hooks/use-connections";
 import { useAgentConfigs } from "../../hooks/use-agents";
-import { useInstalledCapabilityPackages } from "../../hooks/use-capability-packages";
+import { selectGameExperiencePackages, useInstalledCapabilityPackages } from "../../hooks/use-capability-packages";
 import { useGenerate } from "../../hooks/use-generate";
 import { useBackdropDismiss } from "../../hooks/use-backdrop-dismiss";
 import { useGenerateSpatialMapDraft, useSpatialContext } from "../../hooks/use-spatial-context";
@@ -326,6 +326,9 @@ type ExperienceChromeDeclaration = {
   providesCombat?: boolean;
   /** Hides the narration's text input: the experience drives turns through its own menus. */
   providesPlayerInput?: boolean;
+  /** The experience offers the turn's choices itself, so Classic choice cards stay out of its way and the
+   *  in-flow anchor it portals into stays mounted even on a turn the narration emitted choices for. */
+  providesChoices?: boolean;
 };
 const GAME_ACTION_MENU_ITEM =
   "marinara-chat-popover__item flex items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--marinara-chat-chrome-panel-text)] transition-colors hover:bg-[var(--marinara-chat-chrome-highlight-bg-hover)] hover:text-[var(--marinara-chat-chrome-highlight-text)] disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent";
@@ -2166,14 +2169,7 @@ function GameSurfaceComponent({
     useInstalledCapabilityPackages(gameExperienceId !== null);
   const experienceSurfacePackage = useMemo(() => {
     if (!gameExperienceId) return null;
-    return (
-      (installedCapabilityPackages ?? []).find(
-        (pkg) =>
-          pkg.status === "active" &&
-          pkg.id === gameExperienceId &&
-          pkg.manifest.contributions?.slots?.includes("game-surface"),
-      ) ?? null
-    );
+    return selectGameExperiencePackages(installedCapabilityPackages).find((pkg) => pkg.id === gameExperienceId) ?? null;
   }, [gameExperienceId, installedCapabilityPackages]);
   const experienceSurfaceId = experienceSurfacePackage?.id ?? null;
   /** Class the manifest asks the host to stamp on the game area, so the package can restyle the shared
@@ -3420,7 +3416,8 @@ function GameSurfaceComponent({
       if (
         previous?.providesInventory === next?.providesInventory &&
         previous?.providesCombat === next?.providesCombat &&
-        previous?.providesPlayerInput === next?.providesPlayerInput
+        previous?.providesPlayerInput === next?.providesPlayerInput &&
+        previous?.providesChoices === next?.providesChoices
       ) {
         return previous;
       }
@@ -10270,21 +10267,26 @@ function GameSurfaceComponent({
             />
           ) : null}
         </Suspense>
-        <GameJsonRepairModal
-          request={jsonRepairRequest}
-          onClose={() => setJsonRepairRequest(null)}
-          onApplied={handleJsonRepairApplied}
-        />
         {imagePromptReviewModal}
       </>
     );
     // The chooser renders the built-in wizard until an experience is activated, then hands it the body.
     return (
-      <NewGameExperienceChooser
-        activeChatId={activeChatId}
-        onCancelSetup={dismissSetupWizard}
-        renderClassicWizard={(experiencesSlot) => classicSetup(experiencesSlot)}
-      />
+      <>
+        <NewGameExperienceChooser
+          activeChatId={activeChatId}
+          onCancelSetup={dismissSetupWizard}
+          onSetupError={handleJsonRepairError}
+          renderClassicWizard={(experiencesSlot) => classicSetup(experiencesSlot)}
+        />
+        {/* Mounted OUTSIDE the chooser so it is reachable from both setup paths — an experience draws its
+            own wizard body, and a malformed-JSON opening has to stay repairable there too. */}
+        <GameJsonRepairModal
+          request={jsonRepairRequest}
+          onClose={() => setJsonRepairRequest(null)}
+          onApplied={handleJsonRepairApplied}
+        />
+      </>
     );
   }
 
@@ -11675,9 +11677,12 @@ function GameSurfaceComponent({
                       </div>
                     ) : undefined;
 
-                  // Choice cards slot — rendered inside GameNarration above the narration box
+                  // Choice cards slot — rendered inside GameNarration above the narration box.
+                  // An experience that declares `providesChoices` is checked FIRST: it offers the turn's
+                  // choices through its own menu, so the Classic cards would double up, and letting them
+                  // win would unmount the anchor its menu is portaled into.
                   const choicesSlot =
-                    activeChoices && narrationDone ? (
+                    activeChoices && narrationDone && !activeExperienceChrome?.providesChoices ? (
                       compactHudWidgets && !combatUiActive && hudWidgets.length > 0 ? (
                         <div
                           data-component="GameSurface.MobileChoiceStage"

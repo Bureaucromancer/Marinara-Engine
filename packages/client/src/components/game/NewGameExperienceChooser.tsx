@@ -15,17 +15,11 @@ import {
 } from "../ui/neutral-surface-styles";
 import { CapabilityElement } from "../capabilities/CapabilityElement";
 import { useCreateGame, useGameSetup } from "../../hooks/use-game";
-import { useInstalledCapabilityPackages } from "../../hooks/use-capability-packages";
+import { selectGameExperiencePackages, useInstalledCapabilityPackages } from "../../hooks/use-capability-packages";
 import { characterKeys } from "../../hooks/use-characters";
 import { lorebookKeys } from "../../hooks/use-lorebooks";
 import { useUIStore } from "../../stores/ui.store";
 import { useTranslation as useUiTranslation } from "react-i18next";
-
-type InstalledPkg = {
-  id: string;
-  status: string;
-  manifest: { name: string; description: string; contributions?: { slots?: string[] } };
-};
 
 // Same treatment the wizard gives its own "import setup" button, so the block reads as part of the step.
 const SECONDARY_BUTTON =
@@ -38,11 +32,15 @@ const SECONDARY_BUTTON =
 export function NewGameExperienceChooser({
   activeChatId,
   onCancelSetup,
+  onSetupError,
   renderClassicWizard,
 }: {
   activeChatId: string;
   /** Same dismissal the built-in wizard uses, so closing an experience's setup behaves identically. */
   onCancelSetup: () => void;
+  /** Offered a launch failure before it reaches the package. Returns true when the host took it over —
+   *  a malformed-JSON response the player can repair, which the built-in wizard also surfaces. */
+  onSetupError: (error: unknown) => boolean;
   /** Renders the built-in wizard with our block injected into its first step. */
   renderClassicWizard: (experiencesSlot: ReactNode) => ReactNode;
 }) {
@@ -52,19 +50,13 @@ export function NewGameExperienceChooser({
   /** The activated experience. null = the built-in wizard is showing. */
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  const { data: installed = [] } = useInstalledCapabilityPackages(true);
+  const { data: installed } = useInstalledCapabilityPackages(true);
   const createGame = useCreateGame();
   const gameSetup = useGameSetup();
   const openAgentCatalog = useUIStore((s) => s.openAgentCatalog);
 
-  // The same signal GameSurface mounts on, so this list can never offer something that wouldn't render.
-  const experiences = useMemo(
-    () =>
-      (installed as InstalledPkg[]).filter(
-        (p) => p.status === "active" && p.manifest.contributions?.slots?.includes("game-surface"),
-      ),
-    [installed],
-  );
+  // The same helper GameSurface mounts by, so this list can never offer something that wouldn't render.
+  const experiences = useMemo(() => selectGameExperiencePackages(installed), [installed]);
   const activeExperience = experiences.find((e) => e.id === activeId) ?? null;
   // Freezes every control that could tear down the run mid-launch: flipping the experience off here
   // would create a game under one mode and set it up as another. The wizard's `isLoading` equivalent.
@@ -103,12 +95,21 @@ export function NewGameExperienceChooser({
         promptPresetId: cfg.promptPresetId ?? undefined,
       } as Parameters<typeof createGame.mutateAsync>[0]);
       const chatId = res.sessionChat.id;
-      await gameSetup.mutateAsync({
-        chatId,
-        connectionId,
-        preferences: "",
-        promptPresetId: cfg.promptPresetId ?? null,
-      } as Parameters<typeof gameSetup.mutateAsync>[0]);
+      try {
+        await gameSetup.mutateAsync({
+          chatId,
+          connectionId,
+          preferences: "",
+          promptPresetId: cfg.promptPresetId ?? null,
+        } as Parameters<typeof gameSetup.mutateAsync>[0]);
+      } catch (error) {
+        // The opening generation can come back as malformed JSON the player is able to repair. The
+        // built-in wizard offers that repair, so an experience's setup has to reach it too — otherwise
+        // the same failure is recoverable in one path and a dead end in the other. Still rethrown: the
+        // launch did fail, and the package has to unwind its own setup either way.
+        onSetupError(error);
+        throw error;
+      }
       // A setup may have written host resources straight to storage, which nothing on this side knows
       // about. `lorebookKeys.all` rather than `.list()`: the lists are also cached per category.
       queryClient.invalidateQueries({ queryKey: characterKeys.personas });
@@ -116,7 +117,7 @@ export function NewGameExperienceChooser({
       // An experience that keeps its own state needs the chat id to seed itself.
       return chatId;
     },
-    [activeChatId, activeId, createGame, gameSetup, queryClient],
+    [activeChatId, activeId, createGame, gameSetup, onSetupError, queryClient],
   );
 
   const experiencesSlot = (

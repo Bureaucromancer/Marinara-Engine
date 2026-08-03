@@ -49,6 +49,18 @@ export function useCapabilityAgentRegistry() {
   return query;
 }
 
+/**
+ * Installed packages that can provide a game's EXPERIENCE: active, and declaring the `game-surface` slot.
+ * Shared so the setup chooser can only ever offer what `GameSurface` would actually mount.
+ */
+export function selectGameExperiencePackages(
+  installed: InstalledCapabilityPackage[] | undefined,
+): InstalledCapabilityPackage[] {
+  return (installed ?? []).filter(
+    (pkg) => pkg.status === "active" && pkg.manifest.contributions?.slots?.includes("game-surface"),
+  );
+}
+
 export function useInstalledCapabilityPackages(enabled = true) {
   return useQuery({
     queryKey: capabilityPackageKeys.installed(),

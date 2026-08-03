@@ -65,7 +65,8 @@ const CONTRIBUTOR_TIMEOUT_MS = 2_000;
 
 /**
  * Reject if `value` has not settled within {@link CONTRIBUTOR_TIMEOUT_MS}. A synchronous return is passed
- * straight through, and the timer is always cleared so a fast contributor leaves nothing behind.
+ * straight through, and the timer is cleared on settle and unref'd so a pending deadline never holds the
+ * event loop open during shutdown.
  */
 function withDeadline<T>(value: Promise<T> | T, packageId: string): Promise<T> {
   if (!(value instanceof Promise)) return Promise.resolve(value);
@@ -77,6 +78,7 @@ function withDeadline<T>(value: Promise<T> | T, packageId: string): Promise<T> {
         () => reject(new Error(`prompt-context contributor ${packageId} exceeded ${CONTRIBUTOR_TIMEOUT_MS}ms`)),
         CONTRIBUTOR_TIMEOUT_MS,
       );
+      timer.unref?.();
     }),
   ]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
