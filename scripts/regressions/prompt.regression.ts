@@ -3786,6 +3786,23 @@ const cases: RegressionCase[] = [
       assert.deepEqual(resolution.characterIds, ["character-maukie", "character-dottore"]);
       assert.equal(resolution.personaId, "persona-mari");
       assert.deepEqual(resolution.referenceImages, []);
+
+      const groupSelfieResolution = await resolveIllustratorCharacterReferences({
+        charactersStore: {
+          list: async () => [],
+        },
+        chatCharacters: [
+          { id: "character-maukie", name: "Maukie", avatarPath: null, appearance: "Wet brown hair." },
+          { id: "character-dottore", name: "Dottore", avatarPath: null, appearance: "A masked scientist." },
+        ],
+        persona: { id: "persona-mari", name: "Mari", avatarPath: null, appearance: "Chubby woman." },
+        requestedNames: [],
+        promptText: "A group selfie of Maukie and Dottore, seen from Mari's point of view.",
+        includeReferenceImages: false,
+        includePersonaWhenMentionedInPrompt: false,
+      });
+      assert.deepEqual(groupSelfieResolution.characterIds, ["character-maukie", "character-dottore"]);
+      assert.equal(groupSelfieResolution.personaId, null);
     },
   },
   {

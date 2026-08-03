@@ -4271,7 +4271,7 @@ test("legacy browser records are cleaned while extension imports stay locked", a
         };
       }),
     )
-    .toEqual({ version: 87, hasExtensionRecords: false, hasCleanupFlag: false });
+    .toEqual({ version: 88, hasExtensionRecords: false, hasCleanupFlag: false });
 
   expect(
     await page.evaluate(
@@ -4771,6 +4771,44 @@ test("chat toolbar panels close when their trigger is clicked again across modes
     await expect.poll(() => summaryPanel.evaluate((element) => element.parentElement === document.body)).toBe(true);
     await expect(summaryPanel).toHaveCSS("position", "fixed");
     await expect(summaryPanel).toHaveCSS("z-index", "9999");
+    const summaryPromptCard = summaryPanel
+      .getByText("Summary Prompt", { exact: true })
+      .locator("xpath=../../..");
+    const chatSummaryPromptTab = summaryPromptCard.getByRole("tab", { name: "Chat Summary", exact: true });
+    const combinePromptTab = summaryPromptCard.getByRole("tab", { name: "Combine prompt", exact: true });
+    await expect(chatSummaryPromptTab).toHaveAttribute("aria-selected", "true");
+    const summaryPromptViewHeight = await summaryPromptCard.locator(".h-48").first().evaluate((element) =>
+      element.getBoundingClientRect().height,
+    );
+    await combinePromptTab.click();
+    await expect(combinePromptTab).toHaveAttribute("aria-selected", "true");
+    const combinePromptViewHeight = await summaryPromptCard.locator(".h-48").first().evaluate((element) =>
+      element.getBoundingClientRect().height,
+    );
+    expect(combinePromptViewHeight).toBe(summaryPromptViewHeight);
+
+    const promptEditButton = summaryPromptCard.getByRole("button", { name: "Edit", exact: true });
+    await expect(promptEditButton).toBeEnabled();
+    await promptEditButton.click();
+    await expect(summaryPromptCard.getByRole("button", { name: "Done", exact: true })).toBeVisible();
+    const combinePromptInput = summaryPromptCard.getByRole("textbox", { name: "Combine prompt", exact: true });
+    const originalCombinePrompt = await combinePromptInput.inputValue();
+    const updatedCombinePrompt = `${originalCombinePrompt}\nE2E save probe`;
+    await expect(combinePromptInput).toHaveAttribute("rows", "5");
+    await combinePromptInput.fill(updatedCombinePrompt);
+    await summaryPromptCard.getByRole("button", { name: "Done", exact: true }).click();
+    await expect(combinePromptInput).toHaveCount(0);
+    await summaryPromptCard.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(combinePromptInput).toHaveValue(updatedCombinePrompt);
+    await combinePromptInput.fill(originalCombinePrompt);
+    await summaryPromptCard.getByRole("button", { name: "Done", exact: true }).click();
+    await expect(combinePromptInput).toHaveCount(0);
+
+    await chatSummaryPromptTab.click();
+    await summaryPromptCard.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(summaryPromptCard.getByRole("button", { name: "Done", exact: true })).toBeVisible();
+    await summaryPromptCard.getByRole("button", { name: "Done", exact: true }).click();
+    await expect(summaryPromptCard.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
     await summaryButton.click();
     await expect(summaryPanel).toHaveCount(0);
 

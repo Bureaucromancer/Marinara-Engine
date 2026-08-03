@@ -291,6 +291,7 @@ export async function resolveIllustratorCharacterReferences(args: {
   fallbackToChatCharacters?: boolean;
   maxReferences?: number;
   includeReferenceImages?: boolean;
+  includePersonaWhenMentionedInPrompt?: boolean;
 }): Promise<IllustratorReferenceResolution> {
   const maxReferences = Math.max(1, Math.min(args.maxReferences ?? MAX_ILLUSTRATOR_REFERENCE_IMAGES, 12));
   const allRows = await args.charactersStore.list().catch(() => []);
@@ -340,12 +341,14 @@ export async function resolveIllustratorCharacterReferences(args: {
   const personaName = args.persona?.name?.trim() ?? "";
   const personaAliases = personaName ? buildNameAliases(personaName) : [];
   const personaPromptAliases = personaName ? buildNameAliases(personaName, { includeStandaloneTokens: false }) : [];
+  const personaExplicitlyRequested = requestedNames.some((requestedName) =>
+    personaAliases.some((alias) => alias === requestedName || textContainsAlias(requestedName, alias)),
+  );
   const personaRequested =
     personaAliases.length > 0 &&
-    (requestedNames.some((requestedName) =>
-      personaAliases.some((alias) => alias === requestedName || textContainsAlias(requestedName, alias)),
-    ) ||
-      personaPromptAliases.some((alias) => textContainsAlias(normalizedPromptText, alias)));
+    (personaExplicitlyRequested ||
+      (args.includePersonaWhenMentionedInPrompt !== false &&
+        personaPromptAliases.some((alias) => textContainsAlias(normalizedPromptText, alias))));
 
   if (selected.size === 0 && args.fallbackToChatCharacters === true) {
     for (const character of args.chatCharacters) {

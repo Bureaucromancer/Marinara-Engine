@@ -3312,6 +3312,7 @@ async function applyRetryResultEffects(args: {
                 : null,
               requestedNames: illCharacters.filter((name): name is string => typeof name === "string"),
               promptText: [
+                [...agentContext.recentMessages].reverse().find((message) => message.role === "user")?.content ?? "",
                 imagePrompt,
                 style,
                 typeof illData.reason === "string" ? illData.reason : "",
@@ -3319,6 +3320,7 @@ async function applyRetryResultEffects(args: {
               ].join("\n"),
               fallbackToChatCharacters: false,
               includeReferenceImages: useAvatarRefs,
+              includePersonaWhenMentionedInPrompt: false,
               maxReferences: spatialLocationReferenceImage ? 5 : 6,
             });
             if (includeCharacterAppearance && referenceResolution.appearanceBlock) {

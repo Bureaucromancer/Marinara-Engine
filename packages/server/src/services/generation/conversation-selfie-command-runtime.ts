@@ -226,6 +226,7 @@ async function generateSelfie(
   );
   let finalSelfiePrompt = selfiePositivePrompt ? `${imagePrompt}, ${selfiePositivePrompt}` : imagePrompt;
   let selfieReferenceImages: string[] | undefined;
+  let selfieResolvedCharacterIds = args.characterId ? [args.characterId] : [];
   const selfieUseAvatarReferences = args.chatMeta.selfieUseAvatarReferences === true;
   const selfieIncludeCharacterAppearance = args.chatMeta.selfieIncludeCharacterAppearance === true;
   if (selfieUseAvatarReferences || selfieIncludeCharacterAppearance) {
@@ -237,12 +238,15 @@ async function generateSelfie(
         avatarPath: character.avatarPath,
         appearance: character.appearance,
       })),
-      persona: args.persona,
+      persona: null,
       requestedNames: [args.charName],
       promptText: [args.charName, args.command.context ?? "", imagePrompt].join("\n"),
       fallbackToChatCharacters: false,
-      maxReferences: 1,
+      maxReferences: 6,
     });
+    selfieResolvedCharacterIds = Array.from(
+      new Set([...selfieResolvedCharacterIds, ...referenceResolution.characterIds]),
+    );
     if (selfieIncludeCharacterAppearance && referenceResolution.appearanceBlock) {
       finalSelfiePrompt += `\n\n${referenceResolution.appearanceBlock}`;
       logger.debug("[selfie] Added character appearance notes for: %s", referenceResolution.appearanceNames.join(", "));
@@ -312,7 +316,7 @@ async function generateSelfie(
     await persistGeneratedImageToEntityGalleries({
       sourceFilePath: filePath,
       sourceChatImageId: galleryEntry?.id,
-      characterIds: args.characterId ? [args.characterId] : [],
+      characterIds: selfieResolvedCharacterIds,
       characterGallery: createCharacterGalleryStorage(args.db),
       personaGallery: createPersonaGalleryStorage(args.db),
       prompt: compiledSelfiePrompt.prompt,
