@@ -31,6 +31,13 @@ import { logger, logDebugOverride } from "../../lib/logger.js";
 import { assertInsideDir, normalizeLoopbackUrl, safeFetch, validateOutboundUrl } from "../../utils/security.js";
 import { notifyGenerationFallback, type GenerationFallbackNotifier } from "../generation/fallback-notification.js";
 import {
+  isConnectionAdmissionFailure,
+  splitConnectionAttemptAcrossFallback,
+  type ConnectionAttemptOutcome,
+  withConnectionAdmission,
+  type ConnectionAdmissionMode,
+} from "../generation/connection-admission.js";
+import {
   COMFYUI_MAX_REFERENCE_IMAGES,
   findMissingComfyReferenceSlots,
   numberedComfyReferencePlaceholder,
@@ -115,6 +122,8 @@ export interface ImageGenRequest {
   signal?: AbortSignal;
   /** Emit the final provider request even when the global log level is above debug. */
   debugMode?: boolean;
+  /** Defaults to foreground: the caller is servicing a user-visible request. */
+  admissionMode?: ConnectionAdmissionMode;
   /** Called immediately before a configured fallback connection is attempted. */
   onFallback?: GenerationFallbackNotifier;
   /** Optional one-shot backup connection used only when the primary image request fails. */
@@ -195,6 +204,30 @@ const IMAGE_GEN_TIMEOUT = Number(process.env.IMAGE_GEN_TIMEOUT_MS ?? 1_800_000);
 const COMFYUI_GEN_TIMEOUT_SECONDS = Number(process.env.COMFYUI_GEN_TIMEOUT ?? 2400);
 
 /**
+ * Identify the physical image endpoint an admission slot belongs to. RunPod connections share
+ * one API base URL and select the actual endpoint with a separate id, so the base URL alone
+ * would make two independent endpoints contend for a single slot. Every other backend's base
+ * URL already is the physical target, and a stale `imageEndpointId` left on an imported or
+ * copied connection must not split one ComfyUI/A1111 endpoint into separate slots.
+ */
+export function imageAdmissionKey(
+  normalizedBaseUrl: string,
+  resolvedSource: string,
+  imageEndpointId?: string,
+): string {
+  if (resolvedSource === "runpod_comfyui") {
+    const endpointId = imageEndpointId?.trim();
+    return endpointId ? `${normalizedBaseUrl}#${endpointId}` : normalizedBaseUrl;
+  }
+  // OpenAI-compatible backends accept the origin, the `/v1` form, and the full endpoint path as
+  // spellings of one endpoint, so the base URL alone would let work under one spelling ignore
+  // foreground work recorded under another. Key on the URL the request actually goes to.
+  if (resolvedSource === "openai") return openAIImagesUrl(normalizedBaseUrl, "generations");
+  if (resolvedSource === "nanogpt") return nanoGPTImagesUrl(normalizedBaseUrl);
+  return normalizedBaseUrl;
+}
+
+/**
  * Generate an image using the configured image generation connection.
  * Returns the base64 data and metadata needed to save it.
  */
@@ -211,9 +244,16 @@ export async function generateImage(
     resolvedSource === "comfyui" || resolvedSource === "runpod_comfyui"
       ? Math.max(IMAGE_GEN_TIMEOUT, COMFYUI_GEN_TIMEOUT_SECONDS * 1000)
       : IMAGE_GEN_TIMEOUT;
+  // Primary plus fallback is one logical attempt, booked once here and reported once below with
+  // the outcome of the whole chain. Only the outermost call owns this: the recursive fallback
+  // call receives a mode that takes a slot without booking anything.
+  const { primaryMode, fallbackMode, settle } = splitConnectionAttemptAcrossFallback(
+    request.admissionMode ?? { kind: "foreground" },
+  );
+  let outcome: ConnectionAttemptOutcome = "failed";
 
   try {
-    return await withImageGenerationDeadline(request, generationTimeoutMs, async (signal) => {
+    const physicalRequest = () => withImageGenerationDeadline(request, generationTimeoutMs, async (signal) => {
       const allowLocalUrls =
         request.allowLocalUrls ?? (await shouldAllowLocalUrlsForImageConnection(normalizedBaseUrl, resolvedSource));
       const scopedRequest = {
@@ -269,9 +309,22 @@ export async function generateImage(
           return generateOpenAI(normalizedBaseUrl, apiKey, scopedRequest);
       }
     });
+    // Admit on the resolved endpoint rather than a connection id: every caller reaches this
+    // function, but only some have a connection row in scope, and foreground work that
+    // registers nothing would let background preparation start on top of it.
+    // ponytail: image work keys on the endpoint URL while text work keys on the connection
+    // id, so the two do not hold each other off on a connection used for both. Unify the
+    // key if that overlap ever shows up in practice.
+    const primaryResult = await withConnectionAdmission(
+      imageAdmissionKey(normalizedBaseUrl, resolvedSource, request.imageEndpointId),
+      primaryMode,
+      physicalRequest,
+    );
+    outcome = "completed";
+    return primaryResult;
   } catch (error) {
     const fallback = request.fallback;
-    if (!fallback || request.signal?.aborted) throw error;
+    if (!fallback || request.signal?.aborted || isConnectionAdmissionFailure(error)) throw error;
     logger.warn(
       error,
       "[illustrator-fallback] Primary image generation failed; retrying with connection %s (%s)",
@@ -291,12 +344,14 @@ export async function generateImage(
     const result = await generateImage(fallback.source, fallback.baseUrl, fallback.apiKey, fallback.serviceHint, {
       ...request,
       fallback: undefined,
+      admissionMode: fallbackMode,
       model: fallback.model,
       imageEndpointId: fallback.imageEndpointId,
       comfyWorkflow: fallback.comfyWorkflow,
       imageDefaults: fallback.imageDefaults,
       allowLocalUrls: undefined,
     });
+    outcome = "completed";
     return {
       ...result,
       effectiveConnection: {
@@ -306,6 +361,8 @@ export async function generateImage(
         model: fallback.model,
       },
     };
+  } finally {
+    await settle(outcome);
   }
 }
 
