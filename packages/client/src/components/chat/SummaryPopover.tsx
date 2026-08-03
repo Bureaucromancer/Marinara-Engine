@@ -907,16 +907,19 @@ export function SummaryPopover({
       combinePromptDraft.trim().slice(0, CHAT_SUMMARY_PROMPT_MAX_LENGTH) ||
       DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT;
     setCombinePromptDraft(nextPrompt);
-    if (nextPrompt === globalCombinePrompt) return true;
 
     const pendingSave = combinePromptSaveRef.current;
     if (pendingSave?.prompt === nextPrompt) return pendingSave.promise;
+    if (!pendingSave && nextPrompt === globalCombinePrompt) return true;
 
-    const promise = persistPromptTemplates(
-      cleanedPromptTemplates,
-      normalizedActivePromptTemplateId,
-      nextPrompt,
-    );
+    const promise = (async () => {
+      if (pendingSave) await pendingSave.promise;
+      return persistPromptTemplates(
+        cleanedPromptTemplates,
+        normalizedActivePromptTemplateId,
+        nextPrompt,
+      );
+    })();
     combinePromptSaveRef.current = { prompt: nextPrompt, promise };
     try {
       return await promise;

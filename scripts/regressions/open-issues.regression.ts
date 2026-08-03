@@ -3992,6 +3992,11 @@ assert.match(
 );
 assert.match(
   chatRoutesSource,
+  /combinedSummaryInputBudget[\s\S]{0,500}SUMMARY_COMBINE_MESSAGE_OVERHEAD_TOKENS/u,
+  "The combine input budget must reserve message overhead",
+);
+assert.match(
+  chatRoutesSource,
   /estimateChatSummaryTokens\(sourceText\) > combinedSummaryInputBudget[\s\S]{0,500}Selected summaries are too large to combine at once[\s\S]{0,3000}provider\.chatComplete/u,
   "Combined summaries must be rejected before provider generation when they exceed the input budget",
 );
