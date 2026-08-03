@@ -3997,6 +3997,11 @@ assert.doesNotMatch(
 );
 assert.match(
   summaryPopoverSource,
+  /onClick=\{handleEditVisiblePrompt\}[\s\S]{0,240}aria-expanded=/u,
+  "The Summary Prompt Edit action must expose disclosure semantics for its editor",
+);
+assert.match(
+  summaryPopoverSource,
   /className="flex items-center justify-center gap-1\.5"[\s\S]{0,900}handleBackfill/u,
   "The Automatic Summaries backfill action must be centered",
 );

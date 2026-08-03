@@ -1359,7 +1359,7 @@ export function SummaryPopover({
                     type="button"
                     onClick={handleEditVisiblePrompt}
                     disabled={!globalPromptSettingsReady || updateGlobalPromptSettings.isPending}
-                    aria-pressed={summaryPromptView === "combine" ? combinePromptEditorOpen : templateEditorOpen}
+                    aria-expanded={summaryPromptView === "combine" ? combinePromptEditorOpen : templateEditorOpen}
                     className={cn(
                       "shrink-0 rounded-md px-2 py-1 text-xs transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-50",
                       (summaryPromptView === "combine" ? combinePromptEditorOpen : templateEditorOpen)

@@ -447,14 +447,23 @@ async function detectPocketTtsApiMode(cfg: TTSConfig): Promise<PocketTtsApiMode>
         },
         maxResponseBytes: 2 * 1024 * 1024,
       });
-      if (!response.ok) return "openai";
+      if (!response.ok) {
+        pocketTtsApiModeCache.delete(base);
+        return "openai";
+      }
       return resolvePocketTtsApiMode(await response.json());
     } catch {
+      pocketTtsApiModeCache.delete(base);
       return "openai";
     }
   })();
   pocketTtsApiModeCache.set(base, pending);
   return pending;
+}
+
+function clearPocketTtsApiModeCache(cfg: TTSConfig): void {
+  if (cfg.source !== "pockettts") return;
+  pocketTtsApiModeCache.delete(configuredBaseUrl(cfg));
 }
 
 function normalizeElevenLabsTtsModelId(model: string) {
@@ -922,6 +931,8 @@ export async function ttsRoutes(app: FastifyInstance) {
     const input = ttsConfigSchema.parse(req.body);
     const existing = parseStoredConfig(await storage.get(TTS_SETTINGS_KEY));
     const storedConfig = prepareTTSConfigForStorage(input, existing);
+    clearPocketTtsApiModeCache(existing);
+    clearPocketTtsApiModeCache(storedConfig);
     await storage.set(TTS_SETTINGS_KEY, JSON.stringify(storedConfig));
     return reply.status(204).send();
   });

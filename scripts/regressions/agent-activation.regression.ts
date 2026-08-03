@@ -40,5 +40,10 @@ assert.match(
   /const activatedTextRewriteRunAgents = textRewriteRunAgents\.filter/u,
   "Text-rewrite agents must honor the same completed-response activation check",
 );
+assert.match(
+  generateRouteSource,
+  /if \(activatedTextRewriteRunAgents\.length > 0[\s\S]{0,7500}\n\s*\}\n\s*if \(holdForTextRewrite && !textRewriteApplied/u,
+  "A held response must be released even when every custom rewrite agent is inactive",
+);
 
 console.info("Agent activation regression passed.");

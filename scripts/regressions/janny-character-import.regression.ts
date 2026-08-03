@@ -129,8 +129,22 @@ assert.match(
 );
 assert.match(
   clientSource,
-  /return fetch\(`\/api\/bot-browser\/janny\/download\/\$\{encodeURIComponent\(characterId\)\}`\)/u,
+  /return fetch\(`\/api\/bot-browser\/janny\/download\/\$\{encodeURIComponent\(characterId\)\}`, \{[\s\S]{0,80}signal: requestSignal/u,
   "Janny imports should retain the server download route as a CORS fallback",
+);
+const jannyDownloadHelper = clientSource.slice(
+  clientSource.indexOf("async function fetchCompleteJannyCard"),
+  clientSource.indexOf("function encodeProxyPath"),
+);
+assert.match(
+  jannyDownloadHelper,
+  /AbortSignal\.timeout\(45_000\)/u,
+  "Janny imports must bound the direct request, signed download, and server fallback with one timeout",
+);
+assert.equal(
+  jannyDownloadHelper.match(/signal: requestSignal/gu)?.length,
+  3,
+  "Janny imports must apply the bounded signal to all three character-card requests",
 );
 assert.match(
   clientSource,

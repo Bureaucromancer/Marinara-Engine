@@ -59,7 +59,10 @@ const SOURCE_MENU_MIN_WIDTH = 180;
 const SOURCE_MENU_MARGIN = 8;
 const JANNY_DOWNLOAD_API = "https://api.jannyai.com/api/v1/download";
 
-async function fetchCompleteJannyCard(characterId: string): Promise<Response> {
+async function fetchCompleteJannyCard(characterId: string, signal?: AbortSignal): Promise<Response> {
+  const requestSignal = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(45_000)])
+    : AbortSignal.timeout(45_000);
   try {
     // Cloudflare can reject Marinara's server while accepting the user's real
     // browser session. Ask Janny for the signed card URL in-browser first.
@@ -71,6 +74,7 @@ async function fetchCompleteJannyCard(characterId: string): Promise<Response> {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ characterId }),
+      signal: requestSignal,
     });
     if (!downloadResponse.ok) throw new Error(`JannyAI character-card request failed (${downloadResponse.status})`);
 
@@ -84,13 +88,16 @@ async function fetchCompleteJannyCard(characterId: string): Promise<Response> {
     const cardResponse = await fetch(downloadUrl, {
       credentials: "include",
       headers: { Accept: "image/png,application/octet-stream;q=0.9" },
+      signal: requestSignal,
     });
     if (!cardResponse.ok) throw new Error(`JannyAI character-card download failed (${cardResponse.status})`);
     return cardResponse;
   } catch {
     // Retain the server proxy for browsers where Janny permits server traffic
     // but does not expose its download endpoint through CORS.
-    return fetch(`/api/bot-browser/janny/download/${encodeURIComponent(characterId)}`);
+    return fetch(`/api/bot-browser/janny/download/${encodeURIComponent(characterId)}`, {
+      signal: requestSignal,
+    });
   }
 }
 

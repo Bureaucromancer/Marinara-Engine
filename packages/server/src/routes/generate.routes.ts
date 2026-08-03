@@ -8782,10 +8782,10 @@ export async function generateRoutes(app: FastifyInstance) {
           }
 
           // ── Text rewrite/editing agents: run after ALL other agents ──
+          const originalResponseBeforeRewrite = continuedMessageRewriteSource ?? combinedResponse;
+          let textRewriteApplied = false;
           if (activatedTextRewriteRunAgents.length > 0 && messageId && !abortController.signal.aborted) {
-            let currentResponseForRewrite = continuedMessageRewriteSource ?? combinedResponse;
-            const originalResponseBeforeRewrite = currentResponseForRewrite;
-            let textRewriteApplied = false;
+            let currentResponseForRewrite = originalResponseBeforeRewrite;
 
             for (const textRewriteAgent of activatedTextRewriteRunAgents) {
               if (abortController.signal.aborted) break;
@@ -8915,18 +8915,19 @@ export async function generateRoutes(app: FastifyInstance) {
               }
             }
 
-            if (holdForTextRewrite && !textRewriteApplied && !abortController.signal.aborted) {
-              reply.raw.write(
-                `data: ${JSON.stringify({
-                  type: "text_rewrite",
-                  data: {
-                    editedText: originalResponseBeforeRewrite,
-                    changes: [],
-                    rewriteApplied: false,
-                  },
-                })}\n\n`,
-              );
-            }
+          }
+
+          if (holdForTextRewrite && !textRewriteApplied && !abortController.signal.aborted) {
+            reply.raw.write(
+              `data: ${JSON.stringify({
+                type: "text_rewrite",
+                data: {
+                  editedText: originalResponseBeforeRewrite,
+                  changes: [],
+                  rewriteApplied: false,
+                },
+              })}\n\n`,
+            );
           }
         }
 
