@@ -148,13 +148,30 @@ export class ConnectionFallbackProvider extends BaseLLMProvider {
     // Only the whole chain's result is the logical attempt's outcome. Reporting a leg's own
     // result would record a successful fallback as the primary's failure, and would call an
     // empty-primary-then-rejected-fallback chain completed.
+    //
+    // Delivered output settles the attempt just as completion does: a consumer that walks away
+    // after reading usable tokens, or a stream that breaks after emitting them, got what the
+    // attempt was for. Tracking here rather than reusing chatChain's own flag covers tokens the
+    // fallback leg delivered too — that flag only watches the primary.
+    let delivered = false;
     let outcome: "completed" | "failed" = "failed";
+    const chain = this.chatChain(messages, options);
     try {
-      const usage = yield* this.chatChain(messages, options);
+      let result = await chain.next();
+      while (!result.done) {
+        delivered ||= result.value.trim().length > 0;
+        yield result.value;
+        result = await chain.next();
+      }
       outcome = "completed";
-      return usage;
+      return result.value;
     } finally {
-      await this.settleAttempt?.(outcome);
+      // The manual loop does not forward an early return the way `yield*` would, so close the
+      // chain explicitly or its own cleanup — and the admission slots it holds — never runs.
+      await chain.return(undefined).catch((closeError: unknown) => {
+        logger.warn(closeError, "[%s-fallback] Failed to close the fallback chain", this.category);
+      });
+      await this.settleAttempt?.(outcome === "completed" || delivered ? "completed" : "failed");
     }
   }
 

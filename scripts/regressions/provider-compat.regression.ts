@@ -918,6 +918,74 @@ for (const [label, fallbackProvider, expected] of [
   assert.deepEqual(outcomes, [expected], `${label}: the attempt must be finalized once as ${expected}`);
 }
 
+// A consumer that walks away after reading usable tokens still got what the attempt was for, so
+// closing the stream early must settle it completed rather than failed.
+{
+  resetConnectionAdmissionForTests();
+  const earlyCloseOutcomes: string[] = [];
+  const split = splitConnectionAttemptAcrossFallback({
+    kind: "background",
+    beforeAttempt: () => (outcome) => {
+      earlyCloseOutcomes.push(outcome);
+    },
+  });
+  const earlyCloseChain = new ConnectionFallbackProvider(
+    withConnectionAdmissionProvider(
+      new RegressionProvider(["first useful chunk", "second chunk"]),
+      "early-close-primary",
+      split.primaryMode,
+    ),
+    new RegressionProvider(["unused fallback"]),
+    fallbackConnection,
+    "main",
+    async () => undefined,
+    split.settle,
+  );
+  const earlyCloseStream = earlyCloseChain.chat([{ role: "user", content: "hi" }], { model: "early-close" });
+  assert.equal((await earlyCloseStream.next()).value, "first useful chunk");
+  await earlyCloseStream.return(undefined);
+  assert.deepEqual(
+    earlyCloseOutcomes,
+    ["completed"],
+    "a stream closed after delivering usable output must settle the attempt completed",
+  );
+  assert.equal(
+    tryBackgroundConnection("early-close-primary", new Date(Date.now() + BACKGROUND_CONNECTION_IDLE_MS)).acquired,
+    true,
+    "closing the chain early must still release the primary's slot",
+  );
+}
+
+// A stream closed before any usable token is a failed attempt: nothing was delivered. (A stream
+// closed before its first `next()` never runs its body at all, so it never books or admits
+// anything — this case has to advance once to reach the accounting.)
+{
+  resetConnectionAdmissionForTests();
+  const noOutputOutcomes: string[] = [];
+  const split = splitConnectionAttemptAcrossFallback({
+    kind: "background",
+    beforeAttempt: () => (outcome) => {
+      noOutputOutcomes.push(outcome);
+    },
+  });
+  const noOutputChain = new ConnectionFallbackProvider(
+    withConnectionAdmissionProvider(
+      new RegressionProvider(["   ", "useful but never read"]),
+      "no-output-primary",
+      split.primaryMode,
+    ),
+    new RegressionProvider(["unused fallback"]),
+    fallbackConnection,
+    "main",
+    async () => undefined,
+    split.settle,
+  );
+  const noOutputStream = noOutputChain.chat([{ role: "user", content: "hi" }], { model: "no-output" });
+  assert.equal((await noOutputStream.next()).value, "   ", "whitespace is not usable output");
+  await noOutputStream.return(undefined);
+  assert.deepEqual(noOutputOutcomes, ["failed"], "closing before any token must settle the attempt failed");
+}
+
 // A leg's own result is not the attempt's result. An empty-but-successful primary is a completed
 // leg inside an attempt that delivered nothing, and if the fallback is then refused admission the
 // rejection surfaces between legs, where no leg finalizer runs at all. The chain must still be
