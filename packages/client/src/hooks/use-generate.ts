@@ -1629,6 +1629,27 @@ export function useGenerate() {
               break;
             }
 
+            case "spatial_transition_rejected": {
+              const transitionData = event.data as
+                | { chatId?: string; commandId?: string; code?: string; message?: string }
+                | undefined;
+              if (transitionData?.chatId === params.chatId && transitionData.commandId) {
+                spatialCapabilityRefreshDispatched = true;
+                const pending = useChatStore.getState().pendingSpatialTransitions.get(params.chatId);
+                if (pending?.transition.commandId === transitionData.commandId) {
+                  useChatStore.getState().setPendingSpatialTransitionStatus(params.chatId, "needs_review");
+                }
+                dispatchCapabilityClientEvent({
+                  packageId: "hierarchical-maps",
+                  type: event.type,
+                  chatId: params.chatId,
+                  data: event.data,
+                });
+                void qc.invalidateQueries({ queryKey: spatialContextKeys.detail(params.chatId) });
+              }
+              break;
+            }
+
             case "token": {
               const isFirstToken = !receivedContent;
               receivedContent = true;
@@ -2779,7 +2800,9 @@ export function useGenerate() {
             void qc.invalidateQueries({ queryKey: chatKeys.detail(params.chatId) });
             return true;
           }
-          useChatStore.getState().setPendingSpatialTransitionStatus(params.chatId, "needs_review");
+          if (!params.impersonate || spatialErrorCode?.startsWith("spatial_")) {
+            useChatStore.getState().setPendingSpatialTransitionStatus(params.chatId, "needs_review");
+          }
         }
         const msg = error instanceof Error ? error.message : "Generation failed";
         showError(msg);
@@ -2906,7 +2929,8 @@ export function useGenerate() {
           persistedMessages.size === 0 &&
           partialContent &&
           !params.regenerateMessageId &&
-          !params.continueMessageId
+          !params.continueMessageId &&
+          !(params.impersonate && params.pendingSpatialTransition)
         ) {
           const createdAt = new Date().toISOString();
           const partialRole = params.impersonate ? "user" : "assistant";

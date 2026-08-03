@@ -765,7 +765,13 @@ export const ChatInput = memo(function ChatInput({
     return {
       chatId: activeChatId,
       mode,
-      generate: generateWithNarrativeDirector,
+      generate: (params) =>
+        generateWithNarrativeDirector({
+          ...params,
+          ...(params.impersonate && canSubmitSpatialMove && pendingSpatialTransition
+            ? { pendingSpatialTransition: pendingSpatialTransition.transition }
+            : {}),
+        }),
       createMessage: async (data) => {
         await createMessage.mutateAsync(data);
         requestChatScrollToBottom({ chatId: activeChatId, behavior: "auto" });
@@ -790,6 +796,7 @@ export const ChatInput = memo(function ChatInput({
     createMessage,
     activeCharacterNames,
     activeChatCharacters,
+    canSubmitSpatialMove,
     requiresManualGuideTarget,
     removeFromResponseQueue,
     latestAssistantMessage,
@@ -797,6 +804,7 @@ export const ChatInput = memo(function ChatInput({
     onExpressionChange,
     onIllustrate,
     availableCapabilityIds,
+    pendingSpatialTransition,
     qc,
   ]);
 

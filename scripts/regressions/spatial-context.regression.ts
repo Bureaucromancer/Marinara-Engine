@@ -39,6 +39,7 @@ import {
 } from "../../packages/server/src/services/spatial-context/state-resolution.js";
 import { ensureTimestampAfter } from "../../packages/server/src/services/import/import-timestamps.js";
 import { resolveVisibleGameStateAnchor } from "../../packages/server/src/routes/generate/generate-route-utils.js";
+import { validateSpatialGenerationRequest } from "../../packages/server/src/routes/generate/spatial-transition-request.js";
 import { mergeSpatialLocationReferenceImages } from "../../packages/server/src/services/image/spatial-location-reference.js";
 import {
   buildInitialGameMapPatch,
@@ -49,6 +50,54 @@ import {
 assert.equal(ensureTimestampAfter("2026-07-16T07:47:03.766Z", "2026-07-16T07:47:03.765Z"), "2026-07-16T07:47:03.766Z");
 assert.equal(ensureTimestampAfter("2026-07-16T07:47:03.765Z", "2026-07-16T07:47:03.765Z"), "2026-07-16T07:47:03.766Z");
 assert.equal(ensureTimestampAfter("2026-07-16T07:47:03.700Z", "2026-07-16T07:47:03.765Z"), "2026-07-16T07:47:03.766Z");
+const impersonatedMove = {
+  destinationId: "harbor",
+  expectedDefinitionRevision: 4,
+  expectedCurrentLocationId: "world",
+  commandId: "impersonated-owner-move",
+};
+assert.equal(
+  validateSpatialGenerationRequest({
+    mode: "roleplay",
+    pendingSpatialTransition: impersonatedMove,
+    impersonate: true,
+  }),
+  null,
+  "Roleplay impersonation is a generated owner turn and may commit its queued move",
+);
+assert.equal(
+  validateSpatialGenerationRequest({
+    mode: "roleplay",
+    pendingSpatialTransition: null,
+    impersonate: false,
+  }),
+  null,
+  "Guided assistant generation does not submit the queued owner move",
+);
+assert.deepEqual(
+  validateSpatialGenerationRequest({
+    mode: "game",
+    pendingSpatialTransition: impersonatedMove,
+    impersonate: true,
+  }),
+  {
+    statusCode: 400,
+    error: "Impersonated hierarchical location changes are only available in Roleplay mode.",
+    code: "spatial_mode_unsupported",
+  },
+);
+assert.deepEqual(
+  validateSpatialGenerationRequest({
+    mode: "roleplay",
+    pendingSpatialTransition: impersonatedMove,
+    regenerateMessageId: "assistant-message",
+  }),
+  {
+    statusCode: 400,
+    error: "A hierarchical location change must be submitted as a new owner turn.",
+    code: "spatial_transition_requires_new_turn",
+  },
+);
 assert.deepEqual(
   resolveVisibleGameStateAnchor([
     { id: "assistant-anchor", role: "assistant", activeSwipeIndex: 2 },

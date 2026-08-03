@@ -314,6 +314,7 @@ import { registerRawRoute } from "./generate/raw-route.js";
 import { registerRetryAgentsRoute } from "./generate/retry-agents-route.js";
 import { fingerprintChatSummary } from "../services/prompt/chat-summary-fingerprint.js";
 import { sendSseEvent, startSseKeepalive, startSseReply, trySendSseEvent } from "./generate/sse.js";
+import { validateSpatialGenerationRequest } from "./generate/spatial-transition-request.js";
 import { runTurnGameBotTurns } from "../services/turn-games/turn-game-bot-runner.service.js";
 import { getTurnGameContextBuilder } from "../services/turn-games/turn-game-runner.service.js";
 import { buildRecentSocialMediaActivityBlock } from "../services/noodle/noodle-context.js";
@@ -742,16 +743,17 @@ export async function generateRoutes(app: FastifyInstance) {
     if (requestChatMode === "conversation" && input.impersonate) {
       return reply.status(400).send({ error: "Impersonate is not available in Conversation mode" });
     }
-    if (input.pendingSpatialTransition && requestChatMode !== "roleplay" && requestChatMode !== "game") {
-      return reply.status(400).send({
-        error: "Only Roleplay and Game chats can change hierarchical location.",
-        code: "spatial_mode_unsupported",
-      });
-    }
-    if (input.pendingSpatialTransition && (input.impersonate || input.regenerateMessageId || input.continueMessageId)) {
-      return reply.status(400).send({
-        error: "A hierarchical location change must be submitted as a new owner turn.",
-        code: "spatial_transition_requires_new_turn",
+    const spatialRequestError = validateSpatialGenerationRequest({
+      mode: requestChatMode,
+      pendingSpatialTransition: input.pendingSpatialTransition,
+      impersonate: input.impersonate,
+      regenerateMessageId: input.regenerateMessageId,
+      continueMessageId: input.continueMessageId,
+    });
+    if (spatialRequestError) {
+      return reply.status(spatialRequestError.statusCode).send({
+        error: spatialRequestError.error,
+        code: spatialRequestError.code,
       });
     }
     if (input.regenerateMessageId && input.continueMessageId) {
@@ -6372,6 +6374,53 @@ export async function generateRoutes(app: FastifyInstance) {
               typeof savedMsg?.activeSwipeIndex === "number" && Number.isInteger(savedMsg.activeSwipeIndex)
                 ? savedMsg.activeSwipeIndex
                 : 0;
+          } else if (input.impersonate && input.pendingSpatialTransition) {
+            try {
+              const committed = await commitSpatialOwnerTurn({
+                chatId: input.chatId,
+                content: fullResponse,
+                transition: input.pendingSpatialTransition,
+              });
+              savedMsg = committed.message;
+              savedSwipeIndex = 0;
+              sendSseEvent(reply, {
+                type: "spatial_transition_committed",
+                data: {
+                  chatId: input.chatId,
+                  commandId: input.pendingSpatialTransition.commandId,
+                  currentLocationId: committed.snapshot.currentLocationId,
+                  definitionRevision: committed.snapshot.definitionRevision,
+                },
+              });
+            } catch (error) {
+              if (error instanceof SpatialOwnerTurnError) {
+                if (error.code === "spatial_transition_already_applied") {
+                  sendSseEvent(reply, {
+                    type: "spatial_transition_committed",
+                    data: {
+                      chatId: input.chatId,
+                      commandId: input.pendingSpatialTransition.commandId,
+                      currentLocationId:
+                        error.details?.snapshot?.currentLocationId ?? error.details?.currentLocationId ?? null,
+                      definitionRevision:
+                        error.details?.snapshot?.definitionRevision ?? error.details?.currentRevision ?? null,
+                    },
+                  });
+                } else {
+                  sendSseEvent(reply, {
+                    type: "spatial_transition_rejected",
+                    data: {
+                      chatId: input.chatId,
+                      commandId: input.pendingSpatialTransition.commandId,
+                      code: error.code,
+                      message: error.message,
+                      ...(error.details ?? {}),
+                    },
+                  });
+                }
+              }
+              throw error;
+            }
           } else {
             savedMsg = await chats.createMessage({
               chatId: input.chatId,
