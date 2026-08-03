@@ -2287,6 +2287,16 @@ assert.match(
 );
 assert.match(
   chatMessageSource,
+  /const mergedNameColors = useMemo\(\(\) => mergedAvatars\.map\(\(avatar\) => avatar\.nameColor\)/u,
+  "Merged Narrator avatar and name-color indexes must come from the same renderable character list",
+);
+assert.match(
+  chatMessageSource,
+  /useCompactRectangleAvatar \|\| !cycleMergedNarratorAvatars[\s\S]{0,180}rectangleSafeCropStyle/u,
+  "Static compact Narrator avatars must not receive positioned crop dimensions that break their flex layout",
+);
+assert.match(
+  chatMessageSource,
   /cycleMergedNarratorAvatars \? "absolute inset-0 w-full" : "relative w-0 min-w-0 flex-1"/u,
   "Disabling Narrator cycling must place active avatars together",
 );
@@ -2664,6 +2674,10 @@ const conversationSelfieRuntimeSource = readFileSync(
   new URL("../../packages/server/src/services/generation/conversation-selfie-command-runtime.ts", import.meta.url),
   "utf8",
 );
+const illustratorReferencesSource = readFileSync(
+  new URL("../../packages/server/src/services/image/illustrator-references.ts", import.meta.url),
+  "utf8",
+);
 assert.match(appSource, /--marinara-app-accent-static-gradient/u);
 assert.match(appSource, /swipeDirections=\{\["left", "right", "top"\]\}/u);
 assert.doesNotMatch(agentEditorSource, /fetch\(["']\/api\/game-assets\/pick-local-music-folder/u);
@@ -2867,6 +2881,11 @@ assert.match(
   conversationSelfieRuntimeSource,
   /selfieResolvedCharacterIds = Array\.from\([\s\S]{0,300}referenceResolution\.characterIds[\s\S]{0,4500}characterIds: selfieResolvedCharacterIds/u,
   "Conversation group selfies must be saved to every depicted character gallery",
+);
+assert.match(
+  illustratorReferencesSource,
+  /characterIds: orderedSelectedSources\.map\(\(source\) => source\.id\)/u,
+  "Gallery character IDs must retain every depicted character beyond the provider reference-image cap",
 );
 assert.match(
   globalStyles,
@@ -4211,6 +4230,21 @@ assert.match(
   summaryPopoverSource,
   /if \(promptSettingsSaveLockedRef\.current\) \{\s*await promptSettingsSaveQueueRef\.current;[\s\S]{0,350}combinePromptDraftRef\.current/u,
   "Combine prompt saves must wait for active settings writes and then retry the latest draft",
+);
+assert.match(
+  summaryPopoverSource,
+  /queryClient\.getQueryData<ChatSummaryPromptSettings/u,
+  "Queued Combine saves must use the latest prompt settings from the query cache",
+);
+assert.match(
+  summaryPopoverSource,
+  /const currentSettings = readCurrentPromptSettings\(\);\s*const promise = persistPromptTemplates\(currentSettings\.templates, currentSettings\.activeTemplateId, nextPrompt\);/u,
+  "Combine prompt persistence must apply the latest cached templates and active selection",
+);
+assert.doesNotMatch(
+  summaryPopoverSource,
+  /promptTemplatesRef|activePromptTemplateIdRef/u,
+  "Summary prompt saves must not replay mirrored template state from an earlier render",
 );
 assert.match(
   summaryPopoverSource,

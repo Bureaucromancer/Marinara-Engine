@@ -1991,18 +1991,6 @@ export const ChatMessage = memo(function ChatMessage({
   const cycleMergedNarratorAvatars = !isRoleplay || roleplayNarratorAvatarCycling;
   const mergedAvatars = useMemo(() => {
     if (!isMergedGroup || !characterMap) return [];
-    return mergedCharacterIds
-      .map((id) => {
-        const info = characterMap.get(id);
-        const expressionUrl = expressionAvatarResolver?.(message, id) ?? null;
-        const url = expressionUrl ?? info?.avatarUrl;
-        if (!url) return null;
-        return { id, url, crop: expressionUrl ? null : info?.avatarCrop };
-      })
-      .filter(Boolean) as { id: string; url: string; crop?: AvatarCropValue | null }[];
-  }, [isMergedGroup, characterMap, mergedCharacterIds, expressionAvatarResolver, message]);
-  const mergedNameColors = useMemo(() => {
-    if (!isMergedGroup || !characterMap) return [];
     const fallbackPalette = [
       "var(--marinara-chat-chrome-text)",
       "var(--marinara-chat-chrome-accent)",
@@ -2011,11 +1999,27 @@ export const ChatMessage = memo(function ChatMessage({
       "#60a5fa",
       "#facc15",
     ];
-    return mergedCharacterIds.map((id, i) => {
-      const raw = characterMap.get(id)?.nameColor;
-      return raw || fallbackPalette[i % fallbackPalette.length]!;
-    });
-  }, [isMergedGroup, characterMap, mergedCharacterIds]);
+    return mergedCharacterIds
+      .map((id, index) => {
+        const info = characterMap.get(id);
+        const expressionUrl = expressionAvatarResolver?.(message, id) ?? null;
+        const url = expressionUrl ?? info?.avatarUrl;
+        if (!url) return null;
+        return {
+          id,
+          url,
+          crop: expressionUrl ? null : info?.avatarCrop,
+          nameColor: info?.nameColor || fallbackPalette[index % fallbackPalette.length]!,
+        };
+      })
+      .filter(Boolean) as {
+        id: string;
+        url: string;
+        crop?: AvatarCropValue | null;
+        nameColor: string;
+      }[];
+  }, [isMergedGroup, characterMap, mergedCharacterIds, expressionAvatarResolver, message]);
+  const mergedNameColors = useMemo(() => mergedAvatars.map((avatar) => avatar.nameColor), [mergedAvatars]);
   // Cycle index for merged group avatars/names — driven by a ref + 2s setInterval to avoid re-renders
   const cycleIndexRef = useRef(0);
   const cycleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -2155,7 +2159,7 @@ export const ChatMessage = memo(function ChatMessage({
     ? rectangleSafeCropStyle(compactAvatarCrop, avatarCropStyle)
     : avatarCropStyle;
   const compactMergedAvatarCropStyle = (avatar: { crop?: AvatarCropValue | null }): React.CSSProperties =>
-    useCompactRectangleAvatar
+    useCompactRectangleAvatar || !cycleMergedNarratorAvatars
       ? rectangleSafeCropStyle(avatar.crop, getAvatarCropStyle(avatar.crop))
       : getAvatarCropStyle(avatar.crop);
   const panelAvatarCropStyle: React.CSSProperties = rectangleSafeCropStyle(compactAvatarCrop, avatarCropStyle);

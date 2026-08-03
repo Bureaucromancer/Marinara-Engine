@@ -23,9 +23,11 @@ import {
   useUpdateSummaryEntry,
 } from "../../hooks/use-chats";
 import {
+  chatSummaryPromptKeys,
   useChatSummaryPromptSettings,
   useUpdateChatSummaryPromptSettings,
 } from "../../hooks/use-chat-summary-prompts";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRollingBackfillStore } from "../../stores/backfill.store";
 import {
   Check,
@@ -66,6 +68,7 @@ import {
   estimateChatSummaryTokens,
   normalizeChatSummaryEntries,
   type ChatSummaryEntry,
+  type ChatSummaryPromptSettings,
   type ChatSummaryPromptTemplate,
 } from "@marinara-engine/shared";
 import { showConfirmDialog } from "../../lib/app-dialogs";
@@ -369,6 +372,7 @@ export function SummaryPopover({
   const updateMeta = useUpdateChatMetadata();
   const globalPromptSettings = useChatSummaryPromptSettings();
   const updateGlobalPromptSettings = useUpdateChatSummaryPromptSettings();
+  const queryClient = useQueryClient();
   const { data: connectionsData } = useConnections();
   const updateSummaryEntry = useUpdateSummaryEntry();
   const deleteSummaryEntry = useDeleteSummaryEntry();
@@ -487,12 +491,21 @@ export function SummaryPopover({
   const activeSummaryPrompt = isLongTermMemoryPromptSelected
     ? DEFAULT_LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT
     : activePromptTemplate?.prompt ?? DEFAULT_CHAT_SUMMARY_PROMPT;
-  const promptTemplatesRef = useRef(cleanedPromptTemplates);
-  const activePromptTemplateIdRef = useRef(normalizedActivePromptTemplateId);
-  useEffect(() => {
-    promptTemplatesRef.current = cleanedPromptTemplates;
-    activePromptTemplateIdRef.current = normalizedActivePromptTemplateId;
-  }, [cleanedPromptTemplates, normalizedActivePromptTemplateId]);
+  const readCurrentPromptSettings = useCallback(() => {
+    const cached = queryClient.getQueryData<ChatSummaryPromptSettings & { hasPersistedSettings?: boolean }>(
+      chatSummaryPromptKeys.settings,
+    );
+    if (cached?.hasPersistedSettings) {
+      return {
+        templates: cached.templates,
+        activeTemplateId: cached.activeTemplateId?.trim() || null,
+      };
+    }
+    return {
+      templates: cleanedPromptTemplates,
+      activeTemplateId: normalizedActivePromptTemplateId,
+    };
+  }, [cleanedPromptTemplates, normalizedActivePromptTemplateId, queryClient]);
 
   useEffect(() => {
     if (!combinePromptFocused.current) {
@@ -914,8 +927,6 @@ export function SummaryPopover({
             activeTemplateId: activeId,
             combinePrompt: normalizedCombinePrompt,
           });
-          promptTemplatesRef.current = templates;
-          activePromptTemplateIdRef.current = activeId;
           return true;
         } catch {
           toast.error(localizeUi("ui.chat.summarypopover.couldNotSaveGlobalSummaryPromptSettings"));
@@ -951,11 +962,8 @@ export function SummaryPopover({
     if (pendingSave?.prompt === nextPrompt) return pendingSave.promise;
     if (!pendingSave && nextPrompt === globalCombinePrompt) return true;
 
-    const promise = persistPromptTemplates(
-      promptTemplatesRef.current,
-      activePromptTemplateIdRef.current,
-      nextPrompt,
-    );
+    const currentSettings = readCurrentPromptSettings();
+    const promise = persistPromptTemplates(currentSettings.templates, currentSettings.activeTemplateId, nextPrompt);
     combinePromptSaveRef.current = { prompt: nextPrompt, promise };
     try {
       return await promise;
@@ -967,6 +975,7 @@ export function SummaryPopover({
   }, [
     globalCombinePrompt,
     persistPromptTemplates,
+    readCurrentPromptSettings,
   ]);
 
   const handleCombinePromptBlur = useCallback(async () => {
@@ -1011,11 +1020,12 @@ export function SummaryPopover({
 
   const handleSelectPromptTemplate = useCallback(
     async (templateId: string | null) => {
-      const saved = await persistPromptTemplates(cleanedPromptTemplates, templateId);
+      const currentSettings = readCurrentPromptSettings();
+      const saved = await persistPromptTemplates(currentSettings.templates, templateId);
       if (!saved) return;
       setTemplateSelectOpen(false);
     },
-    [cleanedPromptTemplates, persistPromptTemplates],
+    [persistPromptTemplates, readCurrentPromptSettings],
   );
 
   const resetTemplateDraft = useCallback(() => {
@@ -1097,12 +1107,13 @@ export function SummaryPopover({
     if (!hasTemplateDraft) return;
     const trimmedName = templateNameDraft.trim().slice(0, 80);
     const trimmedPrompt = templatePromptDraft.trim();
+    const currentSettings = readCurrentPromptSettings();
     const nextTemplates = isEditingExistingTemplate
-      ? cleanedPromptTemplates.map((template) =>
+      ? currentSettings.templates.map((template) =>
           template.id === editingTemplateId ? { ...template, name: trimmedName, prompt: trimmedPrompt } : template,
         )
       : [
-          ...cleanedPromptTemplates,
+          ...currentSettings.templates,
           {
             id: generateClientId(),
             name: trimmedName,
@@ -1110,18 +1121,17 @@ export function SummaryPopover({
           },
         ];
     const nextActiveId = isEditingExistingTemplate
-      ? normalizedActivePromptTemplateId
+      ? currentSettings.activeTemplateId
       : nextTemplates[nextTemplates.length - 1]!.id;
     const saved = await persistPromptTemplates(nextTemplates, nextActiveId ?? null);
     if (!saved) return;
     resetTemplateDraft();
   }, [
-    normalizedActivePromptTemplateId,
-    cleanedPromptTemplates,
     editingTemplateId,
     hasTemplateDraft,
     isEditingExistingTemplate,
     persistPromptTemplates,
+    readCurrentPromptSettings,
     resetTemplateDraft,
     templateNameDraft,
     templatePromptDraft,
@@ -1141,10 +1151,11 @@ export function SummaryPopover({
         tone: "destructive",
       });
       if (!confirmed) return;
-      const nextTemplates = cleanedPromptTemplates.filter((template) => template.id !== templateId);
+      const currentSettings = readCurrentPromptSettings();
+      const nextTemplates = currentSettings.templates.filter((template) => template.id !== templateId);
       const saved = await persistPromptTemplates(
         nextTemplates,
-        normalizedActivePromptTemplateId === templateId ? null : normalizedActivePromptTemplateId,
+        currentSettings.activeTemplateId === templateId ? null : currentSettings.activeTemplateId,
       );
       if (!saved) return;
       if (editingTemplateId === templateId) resetTemplateDraft();
@@ -1153,8 +1164,9 @@ export function SummaryPopover({
       cleanedPromptTemplates,
       editingTemplateId,
       persistPromptTemplates,
+      readCurrentPromptSettings,
       resetTemplateDraft,
-      normalizedActivePromptTemplateId, localizeUi,
+      localizeUi,
     ],
   );
 
@@ -1517,7 +1529,7 @@ export function SummaryPopover({
                         name={localizeUi("ui.chat.summarypopover.builtInDefault")}
                         detail={localizeUi("chat.summary.template.appDefault")}
                         disabled={promptSettingsSaveLocked}
-                        onSelect={() => void persistPromptTemplates(cleanedPromptTemplates, null)}
+                        onSelect={() => void handleSelectPromptTemplate(null)}
                         onCopy={() => handleDuplicatePromptTemplate(null, DEFAULT_CHAT_SUMMARY_PROMPT)}
                       />
                       {longTermMemorySummaryPromptAvailable && (
@@ -1526,9 +1538,7 @@ export function SummaryPopover({
                           name={localizeUi("chat.summary.template.longTermMemory")}
                           detail={localizeUi("chat.summary.template.appDefault")}
                           disabled={promptSettingsSaveLocked}
-                          onSelect={() =>
-                            void persistPromptTemplates(cleanedPromptTemplates, LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID)
-                          }
+                          onSelect={() => void handleSelectPromptTemplate(LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID)}
                           onCopy={() =>
                             handleDuplicatePromptTemplate(null, DEFAULT_LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT)
                           }
@@ -1543,7 +1553,7 @@ export function SummaryPopover({
                             count: Math.ceil(template.prompt.length / 4),
                           })}
                           disabled={promptSettingsSaveLocked}
-                          onSelect={() => void persistPromptTemplates(cleanedPromptTemplates, template.id)}
+                          onSelect={() => void handleSelectPromptTemplate(template.id)}
                           onCopy={() => handleDuplicatePromptTemplate(template)}
                           onEdit={() => handleEditPromptTemplate(template)}
                           onDelete={() => void handleDeletePromptTemplate(template.id)}
