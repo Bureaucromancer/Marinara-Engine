@@ -2487,7 +2487,6 @@ export function ChatSettingsDrawer({
 
   const setSpriteSide = useCallback(
     (nextSide: "left" | "right") => {
-      if (nextSide === editedSpritePosition) return;
       if (selectedSpriteLayoutCharacterId) {
         if (onSpriteSideChange) {
           onSpriteSideChange(nextSide, selectedSpriteLayoutCharacterId);
@@ -2496,6 +2495,7 @@ export function ChatSettingsDrawer({
         patchSelectedSpriteCharacterVisualSettings({ spritePosition: nextSide });
         return;
       }
+      if (nextSide === editedSpritePosition) return;
       if (onSpriteSideChange) {
         onSpriteSideChange(nextSide);
         return;

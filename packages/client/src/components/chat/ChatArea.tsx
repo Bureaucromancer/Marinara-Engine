@@ -1666,8 +1666,9 @@ export function ChatArea() {
       if (characterId) {
         const currentSettings = spriteCharacterVisualSettings[characterId] ?? {};
         const currentSide = currentSettings.spritePosition ?? spritePosition;
-        if (nextSide === currentSide) return;
-        const nextPlacements = mirrorCharacterSpritePlacements(spritePlacements, characterId);
+        if (nextSide === currentSettings.spritePosition) return;
+        const nextPlacements =
+          nextSide === currentSide ? spritePlacements : mirrorCharacterSpritePlacements(spritePlacements, characterId);
         pendingSpritePlacements.current = nextPlacements;
         patchLocalSpriteVisualSettings({
           characterOverrides: {

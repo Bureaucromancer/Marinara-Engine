@@ -49,9 +49,8 @@ export function HapticConnectionPanel({
   useEffect(() => {
     if (autoConnectAttempted || isLoading || !status || status.connected || connect.isPending) return;
     setAutoConnectAttempted(true);
-    const trimmed = saveIntifaceUrl();
-    connect.mutate(trimmed || undefined);
-  }, [autoConnectAttempted, connect, isLoading, saveIntifaceUrl, status]);
+    connect.mutate(intifaceUrl.trim() || undefined);
+  }, [autoConnectAttempted, connect, intifaceUrl, isLoading, status]);
 
   if (isLoading) {
     return (

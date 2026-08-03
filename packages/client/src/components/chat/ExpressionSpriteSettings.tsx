@@ -224,11 +224,13 @@ export function ExpressionSpriteSettings({
             <button
               type="button"
               onClick={onToggleSpriteArrange}
+              disabled={!onToggleSpriteArrange}
               className={cn(
                 "rounded-md px-2.5 py-1 text-[0.625rem] font-medium transition-colors ring-1 ring-[var(--border)]",
                 spriteArrangeMode
                   ? "bg-[var(--primary)] text-white"
                   : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+                !onToggleSpriteArrange && "cursor-not-allowed opacity-40",
               )}
             >
               {spriteArrangeMode
