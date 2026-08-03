@@ -341,13 +341,15 @@ If you accept the broader container privileges and need these features in Docker
 ```yaml
 services:
   marinara:
+    environment:
+      MARINARA_DOCKER_USER: root
     cap_add:
       - SYS_ADMIN
     security_opt:
       - apparmor=unconfined
 ```
 
-Recreate the container after adding the override. `SYS_ADMIN` is a broad capability, and disabling the container's AppArmor profile weakens its outer security boundary; do not enable this merely to silence the unavailable-sandbox message. Docker's default seccomp profile adapts to added capabilities, so a blanket `seccomp=unconfined` setting should not be necessary on current Docker releases.
+Recreate the container after adding the override. Keeping the server process as root is necessary here so the added capability is not discarded when Marinara's entrypoint normally drops to the `node` user. Running the server as root with `SYS_ADMIN` is a broad privilege escalation, and disabling the container's AppArmor profile further weakens its outer security boundary; do not enable this merely to silence the unavailable-sandbox message. Docker's default seccomp profile adapts to added capabilities, so a blanket `seccomp=unconfined` setting should not be necessary on current Docker releases.
 
 Windows, Android, and other unsupported hosts deliberately refuse Server Extension execution instead of falling back to the main server process. Browser Extensions can still use their opaque-origin Worker sandbox.
 
