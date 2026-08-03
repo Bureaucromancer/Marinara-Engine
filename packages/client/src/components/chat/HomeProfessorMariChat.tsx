@@ -31,6 +31,7 @@ import {
   PackagePlus,
   Palette,
   Paperclip,
+  Pencil,
   Plus,
   RefreshCw,
   Save,
@@ -81,6 +82,7 @@ import { applyInlineMarkdown, renderMarkdownBlocks } from "../../lib/markdown";
 import { prepareImageAttachment } from "../../lib/chat-attachment-images";
 import { cn } from "../../lib/utils";
 import { ProfessorMariWorkingWindow } from "../ui/ProfessorMariWorkingWindow";
+import { MacroTextarea } from "../ui/MacroTextarea";
 import { SettingsSwitch } from "../panels/settings/SettingControls";
 import { HomeFaq } from "./HomeFaq";
 import {
@@ -1156,7 +1158,7 @@ function CompactMarkdown({ content, streaming }: { content: string; streaming?: 
   );
 }
 
-function ProfessorMariAttachedFiles({ attachments }: { attachments: ProfessorMariAttachment[] }) {
+function ProfessorMariAttachedFiles({ attachments, onRemove }: { attachments: ProfessorMariAttachment[]; onRemove?: (index: number) => void }) {
   if (attachments.length === 0) return null;
   return (
     <div className="mt-2 flex flex-wrap gap-2">
@@ -1167,7 +1169,7 @@ function ProfessorMariAttachedFiles({ attachments }: { attachments: ProfessorMar
             href={attachment.data}
             target="_blank"
             rel="noreferrer"
-            className="block overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--background)]/70"
+            className="relative block overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--background)]/70"
             title={attachment.name}
           >
             <img
@@ -1176,6 +1178,14 @@ function ProfessorMariAttachedFiles({ attachments }: { attachments: ProfessorMar
               className="h-24 w-24 object-cover sm:h-28 sm:w-28"
               draggable={false}
             />
+            {onRemove && (
+              <button
+                onClick={(e) => { e.preventDefault(); onRemove(index); }}
+                className="absolute right-1 top-1 rounded bg-[var(--background)]/80 p-0.5 text-[var(--foreground)] hover:bg-[var(--destructive)] hover:text-white"
+              >
+                <X size="0.75rem" />
+              </button>
+            )}
           </a>
         ) : (
           <a
@@ -1184,11 +1194,19 @@ function ProfessorMariAttachedFiles({ attachments }: { attachments: ProfessorMar
             target="_blank"
             rel="noreferrer"
             download={attachment.name}
-            className="flex max-w-[14rem] items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--background)]/70 px-2.5 py-2 text-xs text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+            className="relative flex max-w-[14rem] items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--background)]/70 px-2.5 py-2 text-xs text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
             title={attachment.name}
           >
             <FileText size="0.875rem" className="shrink-0 text-[var(--primary)]" />
             <span className="min-w-0 truncate">{attachment.name}</span>
+            {onRemove && (
+              <button
+                onClick={(e) => { e.preventDefault(); onRemove(index); }}
+                className="ml-auto rounded p-0.5 text-[var(--muted-foreground)] hover:bg-[var(--destructive)] hover:text-white"
+              >
+                <X size="0.75rem" />
+              </button>
+            )}
           </a>
         ),
       )}
@@ -1449,19 +1467,84 @@ function WorkspaceTimelineList({
   );
 }
 
-function CompactMariMessage({ message, thinking }: { message: Message; thinking?: string | null }) {
+function CompactMariMessage({
+  message,
+  thinking,
+  onDelete,
+  onEdit,
+  onRegenerate,
+  onRemoveAttachment,
+}: {
+  message: Message;
+  thinking?: string | null;
+  onDelete?: (messageId: string) => void;
+  onEdit?: (messageId: string, content: string) => void;
+  onRegenerate?: (messageId: string) => void;
+  onRemoveAttachment?: (messageId: string, attachmentIndex: number) => void;
+}) {
   const { t: localizeUi } = useUiTranslation();
   const content = message.content ?? "";
   const attachments = getProfessorMariAttachments(message);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState(content);
 
-  if (message.role === "user") {
+ if (message.role === "user") {
     return (
       <TranscriptRow
-        className="border-y border-[var(--border)]/60 py-2.5"
+        className="group border-y border-[var(--border)]/60 py-2.5"
         marker={<span className="pt-0.5 text-[0.6875rem] font-semibold text-[var(--muted-foreground)]">{localizeUi("ui.chat.compactmarimessage.you")}</span>}
       >
-        <CompactMarkdown content={content} />
-        <ProfessorMariAttachedFiles attachments={attachments} />
+        {isEditing ? (
+          <div className="mt-1">
+            <MacroTextarea
+              value={editContent}
+              onChange={setEditContent}
+              rows={8}
+              title="Edit Message"
+              showMacroReference={false}
+              showMarkdownPreview={false}
+              className="w-full"
+            />
+            <div className="mt-1 flex gap-2">
+              <button
+                onClick={() => { onEdit?.(message.id, editContent); setIsEditing(false); }}
+                className="rounded bg-[var(--primary)] px-2 py-1 text-xs text-[var(--primary-foreground)]"
+              >Save</button>
+              <button
+                onClick={() => setIsEditing(false)}
+                className="rounded px-2 py-1 text-xs text-[var(--muted-foreground)] hover:bg-[var(--accent)]"
+              >Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <CompactMarkdown content={content} />
+        )}
+        <ProfessorMariAttachedFiles
+          attachments={attachments}
+          onRemove={onRemoveAttachment ? (index) => onRemoveAttachment(message.id, index) : undefined}
+        />
+        {(onDelete || onEdit) && (
+          <div className="mt-1 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+            {onEdit && (
+              <button
+                onClick={() => { setEditContent(content); setIsEditing(true); }}
+                className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                title="Edit"
+              >
+                <Pencil size="0.8rem" />
+              </button>
+            )}
+            {onDelete && (
+              <button
+                onClick={() => onDelete(message.id)}
+                className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--destructive)]"
+                title="Delete"
+              >
+                <Trash2 size="0.8rem" />
+              </button>
+            )}
+          </div>
+        )}
       </TranscriptRow>
     );
   }
@@ -1469,14 +1552,55 @@ function CompactMariMessage({ message, thinking }: { message: Message; thinking?
   const workspaceTrace = getMessageWorkspaceTrace(message);
   if (workspaceTrace) {
     return (
-      <WorkspaceTimelineList items={timelineItemsFromTrace(workspaceTrace, message)} active={false} openReasoning />
+      <div className="group">
+        <WorkspaceTimelineList items={timelineItemsFromTrace(workspaceTrace, message)} active={false} openReasoning />
+        {(onDelete || onRegenerate) && (
+          <div className="mt-1 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+            {onRegenerate && (
+              <button onClick={() => onRegenerate(message.id)} className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]" title="Regenerate">
+                <RefreshCw size="0.8rem" />
+              </button>
+            )}
+            {onDelete && (
+              <button onClick={() => onDelete(message.id)} className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--destructive)]" title="Delete">
+                <Trash2 size="0.8rem" />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     );
   }
 
   return (
     <>
-      <TranscriptRow marker={<MariAvatar />}>
+      <TranscriptRow
+        className="group"
+        marker={<MariAvatar />}
+      >
         <CompactMarkdown content={content} />
+        {(onDelete || onRegenerate) && (
+          <div className="mt-1 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+            {onRegenerate && (
+              <button
+                onClick={() => onRegenerate(message.id)}
+                className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                title="Regenerate"
+              >
+                <RefreshCw size="0.8rem" />
+              </button>
+            )}
+            {onDelete && (
+              <button
+                onClick={() => onDelete(message.id)}
+                className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--destructive)]"
+                title="Delete"
+              >
+                <Trash2 size="0.8rem" />
+              </button>
+            )}
+          </div>
+        )}
       </TranscriptRow>
       {thinking && (
         <TranscriptRow marker={<Brain size="0.78rem" className="mt-1 text-[var(--muted-foreground)]" />}>
@@ -3281,6 +3405,77 @@ export function HomeProfessorMariChat({
     },
     [clearMariPlan, effectiveConnectionId, setMariChips, setMariPlan],
   );
+  const handleDeleteMessage = useCallback(async (messageId: string) => {
+    const confirmed = await showConfirmDialog({
+      title: "Delete Message",
+      message: "Are you sure you want to delete this message? This cannot be undone.",
+      confirmLabel: "Delete",
+      tone: "destructive",
+    });
+    if (!confirmed) return;
+    // Optimistic update from local state
+    setMessages((current) => current.filter((m) => m.id !== messageId));
+    try {
+      await api.delete(`/chats/${chatId}/messages/${messageId}`);
+    } catch {
+      // Revert on failure — reload messages
+    }
+  }, [chatId]);
+
+  const handleEditMessage = useCallback(async (messageId: string, content: string) => {
+    setMessages((current) =>
+      current.map((m) => m.id === messageId ? { ...m, content } : m)
+    );
+    try {
+      await api.patch(`/chats/${chatId}/messages/${messageId}`, { content });
+    } catch {
+      // revert
+    }
+  }, [chatId]);
+
+  const handleRegenerateMessage = useCallback(async (messageId: string) => {
+    const confirmed = await showConfirmDialog({
+      title: "Regenerate Response",
+      message: "Are you sure you want to regenerate this response? This cannot be undone.",
+      confirmLabel: "Regenerate",
+      tone: "destructive",
+    });
+    if (!confirmed) return;
+    const index = messages.findIndex((m) => m.id === messageId);
+    if (index <= 0) return;
+    // Find the preceding user message
+    const userMessage = messages[index - 1];
+    if (userMessage.role !== "user") return;
+    // Delete the old assistant response
+    setMessages((current) => current.filter((m) => m.id !== messageId));
+    await api.delete(`/chats/${chatId}/messages/${messageId}`);
+    // Re-send the user message (re-runs the workspace prompt)
+    await sendWorkspaceMessage({ id: chatId! } as Chat, userMessage.content, getProfessorMariAttachments(userMessage));
+  }, [chatId, messages, sendWorkspaceMessage]);
+
+  const handleRemoveAttachment = useCallback(async (messageId: string, attachmentIndex: number) => {
+    const confirmed = await showConfirmDialog({
+      title: "Remove Attachment",
+      message: "Are you sure you want to remove this attachment? This cannot be undone.",
+      confirmLabel: "Remove",
+      tone: "destructive",
+    });
+    if (!confirmed) return;
+    const message = messages.find((m) => m.id === messageId);
+    if (!message) return;
+    const currentAttachments = getProfessorMariAttachments(message);
+    const updated = currentAttachments.filter((_, i) => i !== attachmentIndex);
+    // Optimistic update
+    setMessages((current) =>
+      current.map((m) => {
+        if (m.id !== messageId) return m;
+        const extra = toMessageExtra(m);
+        return { ...m, extra: { ...extra, attachments: updated } };
+      })
+    );
+    // Persist
+    await api.patch(`/chats/${chatId}/messages/${messageId}/extra`, { attachments: updated });
+  }, [chatId, messages]);
 
   const handleSubmit = async (overrideText?: string) => {
     const text = (overrideText ?? draft).trim();
@@ -3351,6 +3546,10 @@ export function HomeProfessorMariChat({
                 key={message.id}
                 message={message}
                 thinking={message.role === "assistant" ? getMessageThinking(message) : null}
+                onDelete={handleDeleteMessage}
+                onEdit={handleEditMessage}
+                onRegenerate={handleRegenerateMessage}
+                onRemoveAttachment={handleRemoveAttachment}
               />
             ))}
             {workspaceTimeline.length === 0 && workspaceTimelineActive && !showDottoreSupport && (
@@ -3999,6 +4198,10 @@ export function HomeProfessorMariChat({
                                 key={message.id}
                                 message={message}
                                 thinking={message.role === "assistant" ? getMessageThinking(message) : null}
+                                onDelete={handleDeleteMessage}
+                                onEdit={handleEditMessage}
+                                onRegenerate={handleRegenerateMessage}
+                                onRemoveAttachment={handleRemoveAttachment}
                               />
                             ))}
                             {workspaceTimeline.length === 0 && workspaceTimelineActive && !showDottoreSupport && (
