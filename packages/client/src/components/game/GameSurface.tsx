@@ -3401,6 +3401,7 @@ function GameSurfaceComponent({
     speakerAvatars: ReadonlyMap<string, { url: string }>;
     playerAvatarUrl?: string;
   } | null>(null);
+  /** Seam setter: replaces the pushed portrait map, or clears it when the map is empty or null. */
   const setExperienceSpeakerAvatars = useCallback(
     (value: { speakerAvatars: ReadonlyMap<string, { url: string }>; playerAvatarUrl?: string } | null) => {
       setExperienceAvatars(value && value.speakerAvatars.size > 0 ? value : null);
@@ -3413,6 +3414,7 @@ function GameSurfaceComponent({
   // Chrome the experience DECLARES it replaces; nothing is inferred from which package is running.
   // `providesPlayerInput` changes DURING play, so this is a live declaration, not a one-shot at mount.
   const [experienceChrome, setExperienceChromeState] = useState<ExperienceChromeDeclaration | null>(null);
+  /** Seam setter: records the chrome declaration, keeping the previous object when nothing changed. */
   const setExperienceChrome = useCallback((value: ExperienceChromeDeclaration | null) => {
     setExperienceChromeState((previous) => {
       const next = value && typeof value === "object" ? value : null;
@@ -6432,6 +6434,7 @@ function GameSurfaceComponent({
   // Background seam: the experience pushes a background and we render it behind the narration, so it
   // doesn't have to draw an opaque layer of its own.
   const [experienceBackgroundUrl, setExperienceBackgroundUrl] = useState<string | null>(null);
+  /** Seam setter: resolves a pushed tag or asset path to a URL, or clears the override when given null. */
   const pushExperienceBackground = useCallback(
     (value: string | null) => {
       // A package pushes a ready asset path (it knows its own bundled art); a tag is looked up as well.
@@ -10077,6 +10080,7 @@ function GameSurfaceComponent({
   // Setup wizard — show when explicitly active, when game needs creation, or when status is still "setup" (e.g. previous setup failed)
   if (shouldShowSetupWizard) {
     // Shared with an experience's own setup, so closing either one behaves identically.
+    /** Closes setup from either wizard: no-op while a launch is pending, and drops an empty chat. */
     const dismissSetupWizard = () => {
       if (
         createGame.isPending ||
@@ -10099,6 +10103,7 @@ function GameSurfaceComponent({
       }
     };
 
+    /** Renders the built-in wizard with the given Experiences block injected into its first step. */
     const classicSetup = (experiencesSlot: ReactNode) => (
       <>
         <Suspense

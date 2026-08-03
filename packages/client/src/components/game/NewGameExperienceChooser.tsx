@@ -92,38 +92,41 @@ export function NewGameExperienceChooser({
       const cfg: Record<string, unknown> =
         typeof setupConfig === "object" && setupConfig !== null ? (setupConfig as Record<string, unknown>) : {};
       const promptPresetId = typeof cfg.promptPresetId === "string" ? cfg.promptPresetId : undefined;
-      // Stamps which experience owns this game; /game/create copies it to the chat metadata.
-      const res = await createGame.mutateAsync({
-        name: gameName,
-        setupConfig: { ...cfg, gameExperienceId: selectedId } as unknown,
-        preferences: "",
-        chatId: activeChatId,
-        connectionId,
-        promptPresetId,
-      } as Parameters<typeof createGame.mutateAsync>[0]);
-      const chatId = res.sessionChat.id;
       try {
-        await gameSetup.mutateAsync({
-          chatId,
-          connectionId,
+        // Stamps which experience owns this game; /game/create copies it to the chat metadata.
+        const res = await createGame.mutateAsync({
+          name: gameName,
+          setupConfig: { ...cfg, gameExperienceId: selectedId } as unknown,
           preferences: "",
-          promptPresetId: promptPresetId ?? null,
-        } as Parameters<typeof gameSetup.mutateAsync>[0]);
-      } catch (error) {
-        // The opening generation can come back as malformed JSON the player is able to repair. The
-        // built-in wizard offers that repair, so an experience's setup has to reach it too — otherwise
-        // the same failure is recoverable in one path and a dead end in the other. Still rethrown: the
-        // launch did fail, and the package has to unwind its own setup either way.
-        onSetupError(error);
-        throw error;
+          chatId: activeChatId,
+          connectionId,
+          promptPresetId,
+        } as Parameters<typeof createGame.mutateAsync>[0]);
+        const chatId = res.sessionChat.id;
+        try {
+          await gameSetup.mutateAsync({
+            chatId,
+            connectionId,
+            preferences: "",
+            promptPresetId: promptPresetId ?? null,
+          } as Parameters<typeof gameSetup.mutateAsync>[0]);
+        } catch (error) {
+          // The opening generation can come back as malformed JSON the player is able to repair, and the
+          // built-in wizard offers that repair — so an experience's setup has to reach it too, or the
+          // same failure is recoverable in one path and a dead end in the other. Rethrown either way:
+          // the launch did fail, and the package still has to unwind its own setup.
+          onSetupError(error);
+          throw error;
+        }
+        // An experience that keeps its own state needs the chat id to seed itself.
+        return chatId;
       } finally {
-        // In a `finally`: the package may have written these before it called us, so a failed opening
-        // still leaves records nothing on this side knows about. `.all`, since lists cache per category.
+        // Wraps BOTH steps: the package may have written the player persona and a lorebook before it
+        // ever called us, so a failure at either one still leaves records the client knows nothing
+        // about. `.all`, since the lists are also cached per category.
         queryClient.invalidateQueries({ queryKey: characterKeys.personas });
         queryClient.invalidateQueries({ queryKey: lorebookKeys.all });
       }
-      // An experience that keeps its own state needs the chat id to seed itself.
-      return chatId;
     },
     [activeChatId, selectedId, createGame, gameSetup, onSetupError, queryClient],
   );
