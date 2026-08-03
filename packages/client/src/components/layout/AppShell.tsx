@@ -1,8 +1,8 @@
 // ──────────────────────────────────────────────
 // Layout: Main App Shell (Discord-like three-column)
 // ──────────────────────────────────────────────
-import { ChatSidebar } from "./ChatSidebar";
 import { useQueryClient } from "@tanstack/react-query";
+import { ChatSidebar } from "./ChatSidebar";
 import { TopBar } from "./TopBar";
 import { SpotifyMobileWidget } from "../spotify/SpotifyMiniPlayer";
 import { YouTubeMobileWidget } from "../chat/YouTubePlayer";
