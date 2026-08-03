@@ -2030,26 +2030,29 @@ export const ChatMessage = memo(function ChatMessage({
   useEffect(() => {
     cycleIndexRef.current = 0;
     if (!isMergedGroup || !cycleMergedNarratorAvatars) return;
-    const total = Math.max(mergedAvatars.length, mergedNameColors.length);
-    if (total <= 1) return;
-    cycleTimerRef.current = setInterval(() => {
-      cycleIndexRef.current = (cycleIndexRef.current + 1) % total;
-      const idx = cycleIndexRef.current;
+    const applyMergedCycleIndex = (index: number) => {
       // Update avatar opacity via DOM directly (no re-render)
       mergedAvatarRefs.current.forEach((img, i) => {
-        if (img) img.style.opacity = i === idx ? "1" : "0";
+        if (img) img.style.opacity = i === index ? "1" : "0";
       });
       mergedAvatarTailRefs.current.forEach((img, i) => {
-        if (img) img.style.opacity = i === idx ? "1" : "0";
+        if (img) img.style.opacity = i === index ? "1" : "0";
       });
       // Update name color opacity via DOM directly
       const nameEl = mergedNameRef.current;
       if (nameEl) {
         const spans = nameEl.querySelectorAll<HTMLSpanElement>("[data-cycle-name]");
         spans.forEach((span, i) => {
-          span.style.opacity = i === idx % mergedNameColors.length ? "1" : "0";
+          span.style.opacity = i === index % mergedNameColors.length ? "1" : "0";
         });
       }
+    };
+    applyMergedCycleIndex(0);
+    const total = Math.max(mergedAvatars.length, mergedNameColors.length);
+    if (total <= 1) return;
+    cycleTimerRef.current = setInterval(() => {
+      cycleIndexRef.current = (cycleIndexRef.current + 1) % total;
+      applyMergedCycleIndex(cycleIndexRef.current);
     }, 2000);
     return () => {
       if (cycleTimerRef.current) clearInterval(cycleTimerRef.current);
@@ -2057,31 +2060,30 @@ export const ChatMessage = memo(function ChatMessage({
   }, [cycleMergedNarratorAvatars, isMergedGroup, mergedCycleKey, mergedAvatars.length, mergedNameColors.length]);
 
   /** Render a stack of absolutely-positioned "Narrator" labels that crossfade via opacity. */
-  const mergedNameElement =
-    isMergedGroup && mergedNameColors.length > 0 ? (
-      cycleMergedNarratorAvatars ? (
-        <span ref={mergedNameRef} className="relative inline-block">
-          {/* Invisible sizer so the parent reserves the right width */}
-          <span className="invisible">{localizeUi("ui.chat.chatmessage.narrator")}</span>
-          {mergedNameColors.map((c, i) => (
-            <span
-              key={i}
-              data-cycle-name
-              className="absolute inset-0"
-              style={{
-                ...solidNameColorStyle(c),
-                opacity: i === 0 ? 1 : 0,
-                transition: "opacity 1s ease",
-              }}
-            >
-              <NameColorText color={c}>{localizeUi("ui.chat.chatmessage.narrator")}</NameColorText>
-            </span>
-          ))}
+  const mergedNameElement = !isMergedGroup ? null : mergedNameColors.length === 0 ? (
+    <NameColorText color={msgNameColor}>{localizeUi("ui.chat.chatmessage.narrator")}</NameColorText>
+  ) : cycleMergedNarratorAvatars ? (
+    <span ref={mergedNameRef} className="relative inline-block">
+      {/* Invisible sizer so the parent reserves the right width */}
+      <span className="invisible">{localizeUi("ui.chat.chatmessage.narrator")}</span>
+      {mergedNameColors.map((c, i) => (
+        <span
+          key={i}
+          data-cycle-name
+          className="absolute inset-0"
+          style={{
+            ...solidNameColorStyle(c),
+            opacity: i === 0 ? 1 : 0,
+            transition: "opacity 1s ease",
+          }}
+        >
+          <NameColorText color={c}>{localizeUi("ui.chat.chatmessage.narrator")}</NameColorText>
         </span>
-      ) : (
-        <NameColorText color={mergedNameColors[0]}>{localizeUi("ui.chat.chatmessage.narrator")}</NameColorText>
-      )
-    ) : null;
+      ))}
+    </span>
+  ) : (
+    <NameColorText color={mergedNameColors[0]}>{localizeUi("ui.chat.chatmessage.narrator")}</NameColorText>
+  );
 
   // Render content with dialogue highlighting (or HTML rendering)
   const text = typeof displayContent === "string" ? displayContent : message.content;

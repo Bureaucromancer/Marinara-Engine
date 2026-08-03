@@ -2287,8 +2287,18 @@ assert.match(
 );
 assert.match(
   chatMessageSource,
+  /const applyMergedCycleIndex = \(index: number\) => \{[\s\S]{0,1200}applyMergedCycleIndex\(0\);/u,
+  "Narrator cycling must immediately apply its reset index to avatar and name opacity",
+);
+assert.match(
+  chatMessageSource,
   /const mergedNameColors = useMemo\(\(\) => mergedAvatars\.map\(\(avatar\) => avatar\.nameColor\)/u,
   "Merged Narrator avatar and name-color indexes must come from the same renderable character list",
+);
+assert.match(
+  chatMessageSource,
+  /mergedNameColors\.length === 0 \? \([\s\S]{0,180}<NameColorText color=\{msgNameColor\}>\{localizeUi\("ui\.chat\.chatmessage\.narrator"\)\}/u,
+  "Merged messages must retain a Narrator label when no active character avatar resolves",
 );
 assert.match(
   chatMessageSource,
