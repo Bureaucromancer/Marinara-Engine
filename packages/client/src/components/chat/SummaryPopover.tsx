@@ -107,6 +107,7 @@ interface SummaryPopoverAnchor {
 }
 
 type SummarySourceMode = "last" | "range";
+type SummaryPromptView = "summary" | "combine";
 type SummaryConnectionOption = Pick<APIConnection, "id" | "name" | "provider" | "model"> & {
   defaultForAgents?: boolean | string | null;
 };
@@ -331,6 +332,8 @@ export function SummaryPopover({
   const [draftEntry, setDraftEntry] = useState<ChatSummaryEntry | null>(null);
   const [templateEditorOpen, setTemplateEditorOpen] = useState(false);
   const [templateSelectOpen, setTemplateSelectOpen] = useState(false);
+  const [summaryPromptView, setSummaryPromptView] = useState<SummaryPromptView>("summary");
+  const [combinePromptEditorOpen, setCombinePromptEditorOpen] = useState(false);
   const [showInactiveSummaries, setShowInactiveSummaries] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [templateNameDraft, setTemplateNameDraft] = useState("");
@@ -477,6 +480,9 @@ export function SummaryPopover({
   const promptTemplateSummary = isLongTermMemoryPromptSelected
     ? localizeUi("chat.summary.template.longTermMemory")
     : activePromptTemplate?.name ?? localizeUi("ui.chat.summarypopover.builtInDefault");
+  const activeSummaryPrompt = isLongTermMemoryPromptSelected
+    ? DEFAULT_LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT
+    : activePromptTemplate?.prompt ?? DEFAULT_CHAT_SUMMARY_PROMPT;
 
   useEffect(() => {
     if (!combinePromptFocused.current) setCombinePromptDraft(globalCombinePrompt);
@@ -1037,6 +1043,14 @@ export function SummaryPopover({
     handleDuplicatePromptTemplate(null);
   }, [activePromptTemplate, handleDuplicatePromptTemplate, handleEditPromptTemplate]);
 
+  const handleEditVisiblePrompt = useCallback(() => {
+    if (summaryPromptView === "combine") {
+      if (!combinePromptEditorOpen) setCombinePromptEditorOpen(true);
+      return;
+    }
+    if (!templateEditorOpen) handleEditActivePrompt();
+  }, [combinePromptEditorOpen, handleEditActivePrompt, summaryPromptView, templateEditorOpen]);
+
   const handleSavePromptTemplate = useCallback(async () => {
     if (!hasTemplateDraft) return;
     const trimmedName = templateNameDraft.trim().slice(0, 80);
@@ -1310,7 +1324,7 @@ export function SummaryPopover({
                     </div>
                   )}
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center justify-center gap-1.5">
                     {backfillState.status === "running" && backfillState.chatId === chatId ? (
                       <button
                         type="button"
@@ -1341,33 +1355,60 @@ export function SummaryPopover({
                   <div className="min-w-0">
                     <p className="text-[0.6875rem] font-semibold text-[var(--popover-foreground)]">{localizeUi("ui.chat.summarypopover.summaryPrompt")}</p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={handleEditActivePrompt}
-                      disabled={!globalPromptSettingsReady || updateGlobalPromptSettings.isPending}
-                      className="rounded-md px-2 py-1 text-xs text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-50"
-                    >{localizeUi("ui.noodle.noodlepostcard.edit")}</button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTemplateEditorOpen((open) => !open);
-                        if (templateEditorOpen) resetTemplateDraft();
-                      }}
-                      disabled={!globalPromptSettingsReady}
-                      className={cn(
-                        "shrink-0 rounded-md px-2 py-1 text-xs transition-colors",
-                        templateEditorOpen
-                          ? "bg-[var(--accent)] text-[var(--foreground)] ring-1 ring-[var(--border)]"
-                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
-                        !globalPromptSettingsReady && "cursor-not-allowed opacity-50",
-                      )}
-                    >
-                      {templateEditorOpen ?localizeUi("lorebook.editor.batch.done") :localizeUi("ui.chat.summarypopover.templates")}
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={handleEditVisiblePrompt}
+                    disabled={!globalPromptSettingsReady || updateGlobalPromptSettings.isPending}
+                    aria-pressed={summaryPromptView === "combine" ? combinePromptEditorOpen : templateEditorOpen}
+                    className={cn(
+                      "shrink-0 rounded-md px-2 py-1 text-xs transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-50",
+                      (summaryPromptView === "combine" ? combinePromptEditorOpen : templateEditorOpen)
+                        ? "bg-[var(--accent)] text-[var(--foreground)] ring-1 ring-[var(--border)]"
+                        : "text-[var(--muted-foreground)]",
+                    )}
+                  >
+                    {localizeUi("ui.noodle.noodlepostcard.edit")}
+                  </button>
                 </div>
-                <div className="grid grid-cols-[1fr_auto] gap-1">
+
+                <div
+                  role="tablist"
+                  aria-label={localizeUi("ui.chat.summarypopover.summaryPromptView")}
+                  className="grid grid-cols-2 rounded-md bg-[var(--background)]/30 p-0.5 ring-1 ring-[var(--border)]"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={summaryPromptView === "summary"}
+                    onClick={() => setSummaryPromptView("summary")}
+                    className={cn(
+                      "rounded px-2 py-1 text-[0.625rem] font-semibold transition-colors",
+                      summaryPromptView === "summary"
+                        ? "bg-[var(--card)] text-[var(--foreground)] shadow-sm"
+                        : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
+                    )}
+                  >
+                    {localizeUi("ui.chat.summarypopover.chatSummaryPrompt")}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={summaryPromptView === "combine"}
+                    onClick={() => setSummaryPromptView("combine")}
+                    className={cn(
+                      "rounded px-2 py-1 text-[0.625rem] font-semibold transition-colors",
+                      summaryPromptView === "combine"
+                        ? "bg-[var(--card)] text-[var(--foreground)] shadow-sm"
+                        : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
+                    )}
+                  >
+                    {localizeUi("ui.chat.summarypopover.combinePrompt")}
+                  </button>
+                </div>
+
+                {summaryPromptView === "summary" ? (
+                  <>
+                <div className="grid grid-cols-1 gap-1">
                   <div className="relative min-w-0">
                     <button
                       type="button"
@@ -1415,16 +1456,10 @@ export function SummaryPopover({
                       </div>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleDuplicatePromptTemplate(activePromptTemplate ?? null)}
-                    disabled={!globalPromptSettingsReady}
-                    className="rounded-md p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-50"
-                    title={localizeUi("ui.chat.summarypopover.copyCurrentPromptToANewTemplate")}
-                    aria-label={localizeUi("ui.chat.summarypopover.copyCurrentPromptToANewTemplate")}
-                  >
-                    <Copy size="0.75rem" />
-                  </button>
+                </div>
+
+                <div className="max-h-28 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--background)]/25 px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
+                  {activeSummaryPrompt}
                 </div>
 
                 {templateEditorOpen && (
@@ -1476,6 +1511,14 @@ export function SummaryPopover({
 
                     {(templateNameDraft || templatePromptDraft) && (
                       <div className="space-y-1.5 rounded-lg bg-[var(--background)]/30 p-2 ring-1 ring-[var(--border)]">
+                        <div className="space-y-1">
+                          <p className="text-[0.625rem] font-semibold text-[var(--muted-foreground)]">
+                            {localizeUi("ui.chat.summarypopover.currentChatSummaryPrompt")}
+                          </p>
+                          <div className="max-h-24 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--card)] px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
+                            {activeSummaryPrompt}
+                          </div>
+                        </div>
                         <input
                           value={templateNameDraft}
                           onChange={(event) => setTemplateNameDraft(event.target.value)}
@@ -1514,27 +1557,36 @@ export function SummaryPopover({
                     )}
                   </div>
                 )}
-                <label className="block space-y-1 border-t border-[var(--border)] pt-2">
+                  </>
+                ) : (
+                <div className="space-y-1">
                   <span className="text-[0.625rem] font-semibold text-[var(--muted-foreground)]">
                     {localizeUi("ui.chat.summarypopover.combinePrompt")}
                   </span>
-                  <textarea
-                    value={combinePromptDraft}
-                    onFocus={() => {
-                      combinePromptFocused.current = true;
-                    }}
-                    onChange={(event) => setCombinePromptDraft(event.target.value)}
-                    onBlur={() => void handleCombinePromptBlur()}
-                    maxLength={CHAT_SUMMARY_PROMPT_MAX_LENGTH}
-                    rows={4}
-                    disabled={!globalPromptSettingsReady || updateGlobalPromptSettings.isPending}
-                    aria-label={localizeUi("ui.chat.summarypopover.combinePrompt")}
-                    className="max-h-36 w-full resize-y rounded-md bg-[var(--card)] px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50"
-                  />
+                  {combinePromptEditorOpen ? (
+                    <textarea
+                      value={combinePromptDraft}
+                      onFocus={() => {
+                        combinePromptFocused.current = true;
+                      }}
+                      onChange={(event) => setCombinePromptDraft(event.target.value)}
+                      onBlur={() => void handleCombinePromptBlur()}
+                      maxLength={CHAT_SUMMARY_PROMPT_MAX_LENGTH}
+                      rows={8}
+                      disabled={!globalPromptSettingsReady || updateGlobalPromptSettings.isPending}
+                      aria-label={localizeUi("ui.chat.summarypopover.combinePrompt")}
+                      className="max-h-48 w-full resize-y rounded-md bg-[var(--card)] px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                  ) : (
+                    <div className="max-h-36 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--background)]/25 px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
+                      {combinePromptDraft}
+                    </div>
+                  )}
                   <span className="block text-[0.5625rem] leading-snug text-[var(--muted-foreground)]">
                     {localizeUi("ui.chat.summarypopover.combinePromptHelp")}
                   </span>
-                </label>
+                </div>
+                )}
               </div>
             </div>
 

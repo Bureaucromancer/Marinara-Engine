@@ -119,7 +119,7 @@ const clientSource = readFileSync(
 );
 assert.match(
   clientSource,
-  /sourceId === "janny" \? await fetchCompleteJannyCard\(card\.id\)/u,
+  /sourceId === "janny" \? prefetchedJannyCard! : await fetch\(downloadUrl\)/u,
   "Janny imports must use the complete PNG card instead of rebuilding from search metadata",
 );
 assert.match(
@@ -136,6 +136,21 @@ assert.match(
   clientSource,
   /const cardRes = await fetchCompleteJannyCard\(charId\);/u,
   "Janny detail loading must use the complete PNG card through the browser-first downloader",
+);
+assert.match(
+  clientSource,
+  /prefetchedJannyCard = await fetchCompleteJannyCard\(card\.id\);[\s\S]{0,100}if \(!prefetchedJannyCard\.ok\) downloadUrl = "";/u,
+  "Janny imports must fall back to recovered page fields when the PNG endpoint is blocked",
+);
+assert.match(
+  clientSource,
+  /sourceId === "janny" && !hasJannyCharacterDefinition\(cardDetail\)/u,
+  "Janny imports must reject creator notes and search metadata when no character definition was recovered",
+);
+assert.match(
+  clientSource,
+  /description: descriptionText \|\| personalityText,[\s\S]{0,500}post_history_instructions: cardDetail\?\.postHistoryInstructions \|\| ""/u,
+  "Recovered Janny page imports must preserve the supported definition fields",
 );
 
 console.info("Janny character-import regression passed.");

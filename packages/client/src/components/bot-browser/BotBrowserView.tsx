@@ -185,6 +185,19 @@ interface CardDetail {
   extra?: { title: string; content: string }[];
 }
 
+function hasJannyCharacterDefinition(detail: CardDetail | null | undefined): boolean {
+  return Boolean(
+    detail?.description ||
+      detail?.personality ||
+      detail?.scenario ||
+      detail?.firstMessage ||
+      detail?.exampleDialogs ||
+      detail?.systemPrompt ||
+      detail?.postHistoryInstructions ||
+      detail?.alternateGreetings?.length,
+  );
+}
+
 // ════════════════════════════════════════════════
 // Helpers
 // ════════════════════════════════════════════════
@@ -1695,8 +1708,18 @@ export function BotBrowserView() {
       else if (sourceId === "chartavern") downloadUrl = `/api/bot-browser/chartavern/download/${card.id}`;
       else if (sourceId === "janny") downloadUrl = `/api/bot-browser/janny/download/${encodeURIComponent(card.id)}`;
 
+      let prefetchedJannyCard: Response | null = null;
+      if (sourceId === "janny") {
+        try {
+          prefetchedJannyCard = await fetchCompleteJannyCard(card.id);
+          if (!prefetchedJannyCard.ok) downloadUrl = "";
+        } catch {
+          downloadUrl = "";
+        }
+      }
+
       if (downloadUrl) {
-        const res = sourceId === "janny" ? await fetchCompleteJannyCard(card.id) : await fetch(downloadUrl);
+        const res = sourceId === "janny" ? prefetchedJannyCard! : await fetch(downloadUrl);
         if (!res.ok) {
           throw new Error(
             sourceId === "janny"
@@ -1744,6 +1767,9 @@ export function BotBrowserView() {
       } else {
         let cardDetail = detail;
         if (!cardDetail) cardDetail = await provider.fetchDetail(card);
+        if (sourceId === "janny" && !hasJannyCharacterDefinition(cardDetail)) {
+          throw new Error(localizeUi("ui.botBrowser.botbrowserview.jannyCompleteCardUnavailable"));
+        }
         const importEmbeddedLorebook = confirmEmbeddedLorebookImport(card.name, cardDetail?.embeddedLorebook);
         // For extracted JanitorAI data, description contains the full personality definition
         const descriptionText = cardDetail?.description || "";
