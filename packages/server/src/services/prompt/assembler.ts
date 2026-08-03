@@ -490,6 +490,7 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
   let lorebookDepthEntriesCount = 0;
   let hasChatSummaryMarker = false;
   let outletScanAttempted = false;
+  let idMacroCardMarkerSection: ResolvedSection | null = null;
   const runtimeAgentTypesUsed = new Set<string>();
 
   for (const sectionId of sectionOrder) {
@@ -546,12 +547,22 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
     }
 
     if (!resolved) continue;
+    if (resolved.isIdMacroCards && !idMacroCardMarkerSection) {
+      idMacroCardMarkerSection = resolved;
+    }
 
     if (!resolved.isChatHistory && section.injectionPosition === "depth" && section.injectionDepth >= 0) {
       depthSections.push(resolved);
     } else {
       orderedSections.push(resolved);
     }
+  }
+
+  const referencedCharacterContent = referencedCharacterContextBlocks.join("\n");
+  if (referencedCharacterContent && idMacroCardMarkerSection) {
+    idMacroCardMarkerSection.messages = [
+      { role: idMacroCardMarkerSection.role, content: referencedCharacterContent, contextKind: "prompt" },
+    ];
   }
 
   // ── Phase 2: Group wrapping ──
@@ -596,10 +607,10 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
       }
     }
   }
-  if (referencedCharacterContextBlocks.length > 0) {
+  if (referencedCharacterContent && !idMacroCardMarkerSection) {
     messages.unshift({
       role: "system",
-      content: referencedCharacterContextBlocks.join("\n"),
+      content: referencedCharacterContent,
       contextKind: "prompt",
     });
   }
@@ -724,6 +735,8 @@ interface ResolvedSection {
   messages: ChatMLMessage[];
   depth: number;
   isChatHistory?: boolean;
+  /** Placement placeholder for dynamically discovered character-ID macro cards. */
+  isIdMacroCards?: boolean;
 }
 
 interface ResolveSectionCtx {
@@ -756,6 +769,16 @@ async function resolveSection(
   // Handle marker sections
   if (section.isMarker === "true" && section.markerConfig) {
     const markerConfig = JSON.parse(section.markerConfig) as MarkerConfig;
+    if (markerConfig.type === "id_macro_cards") {
+      return {
+        id: section.id,
+        groupId: section.groupId,
+        role,
+        messages: [],
+        depth: section.injectionDepth,
+        isIdMacroCards: true,
+      };
+    }
     const runtimeAgentType =
       markerConfig.type === "agent_data" && markerConfig.agentType ? markerConfig.agentType : null;
     const runtimeAgentData = runtimeAgentType !== null ? ctx.runtimeAgentData[runtimeAgentType] : undefined;

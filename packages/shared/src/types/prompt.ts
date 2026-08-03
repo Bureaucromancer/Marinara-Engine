@@ -24,6 +24,7 @@ export type MarkerType =
   | "persona"
   | "chat_history"
   | "chat_summary"
+  | "id_macro_cards"
   | "world_info_before"
   | "world_info_after"
   | "dialogue_examples"
