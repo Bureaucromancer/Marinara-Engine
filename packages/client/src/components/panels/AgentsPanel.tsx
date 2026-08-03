@@ -217,7 +217,7 @@ export function AgentsPanel() {
   const { t: localizeUi } = useUiTranslation();
   const localize = useLocalizedUiText();
   const { data: agentConfigs, isLoading } = useAgentConfigs();
-  const { data: capabilityAgents } = useCapabilityAgentRegistry();
+  const { data: capabilityAgents, isLoading: capabilityAgentsLoading } = useCapabilityAgentRegistry();
   const { data: capabilityCatalog } = useCapabilityCatalog();
   const createAgent = useCreateAgent();
   const importAgent = useImportAgent();
@@ -307,6 +307,7 @@ export function AgentsPanel() {
       ),
     [capabilityAgents],
   );
+  const capabilityAgentRegistryReady = !capabilityAgentsLoading && capabilityAgents !== undefined;
   const catalogArtworkByAgentId = useMemo(
     () =>
       new Map(
@@ -460,6 +461,7 @@ export function AgentsPanel() {
 
   const confirmAndRemoveAgent = useCallback(
     async (agent: AgentConfigRow) => {
+      if (!capabilityAgentRegistryReady) return;
       const name = getAgentLibraryDisplayName(agent);
       const packageId = packageIdByAgentType.get(agent.type);
       const confirmed = await showConfirmDialog({
@@ -492,7 +494,7 @@ export function AgentsPanel() {
         );
       }
     },
-    [builtInAgentIds, localizeUi, packageIdByAgentType, removeAgentResource],
+    [builtInAgentIds, capabilityAgentRegistryReady, localizeUi, packageIdByAgentType, removeAgentResource],
   );
 
   const handleCreateAgent = () => {
@@ -630,12 +632,19 @@ export function AgentsPanel() {
   );
 
   const handleDeleteSelectedAgents = useCallback(async () => {
-    if (selectedAgents.length === 0) return;
+    if (!capabilityAgentRegistryReady || selectedAgents.length === 0) return;
+
+    const includesPackageAgents = selectedAgents.some((agent) => packageIdByAgentType.has(agent.type));
 
     if (
       !(await showConfirmDialog({
         title: localizeUi("ui.panels.agentspanel.removeAgents"),
-        message: localizeUi("ui.panels.agentspanel.removeSelectedAgents", { count: selectedAgents.length }),
+        message: localizeUi(
+          includesPackageAgents
+            ? "ui.panels.agentspanel.removeSelectedPackageAgents"
+            : "ui.panels.agentspanel.removeSelectedAgents",
+          { count: selectedAgents.length },
+        ),
         confirmLabel: localizeUi("ui.panels.agentspanel.remove"),
         tone: "destructive",
       }))
@@ -676,7 +685,14 @@ export function AgentsPanel() {
     }
 
     exitSelectionMode();
-  }, [exitSelectionMode, localizeUi, packageIdByAgentType, removeAgentResource, selectedAgents]);
+  }, [
+    capabilityAgentRegistryReady,
+    exitSelectionMode,
+    localizeUi,
+    packageIdByAgentType,
+    removeAgentResource,
+    selectedAgents,
+  ]);
 
   const prepareAgentEntries = useCallback(
     (entries: FolderPackageImportEntry[], source: "file" | "folder", skippedFunctionCount = 0) => {
@@ -910,12 +926,13 @@ export function AgentsPanel() {
         nativeDragEnabled: nativeAgentDragEnabled,
         touchSafeDragMode: touchSafeAgentDragMode,
         suppressClickRef: suppressAgentClickRef,
-        onDelete: () => void confirmAndRemoveAgent(agent),
+        onDelete: capabilityAgentRegistryReady ? () => void confirmAndRemoveAgent(agent) : undefined,
       });
     },
     [
       availableBuiltInAgents,
       catalogArtworkByAgentId,
+      capabilityAgentRegistryReady,
       confirmAndRemoveAgent,
       draggedAgentId,
       getDraggedAgentIds,
@@ -1319,7 +1336,9 @@ export function AgentsPanel() {
                   nativeDragEnabled: nativeAgentDragEnabled,
                   touchSafeDragMode: touchSafeAgentDragMode,
                   suppressClickRef: suppressAgentClickRef,
-                  onDelete: () => void confirmAndRemoveAgent(sourceAgent),
+                  onDelete: capabilityAgentRegistryReady
+                    ? () => void confirmAndRemoveAgent(sourceAgent)
+                    : undefined,
                 });
               })
             )}
@@ -1389,7 +1408,7 @@ export function AgentsPanel() {
                 nativeDragEnabled: nativeAgentDragEnabled,
                 touchSafeDragMode: touchSafeAgentDragMode,
                 suppressClickRef: suppressAgentClickRef,
-                onDelete: () => void confirmAndRemoveAgent(agent),
+                onDelete: capabilityAgentRegistryReady ? () => void confirmAndRemoveAgent(agent) : undefined,
               }),
             )
           )}
@@ -1402,6 +1421,7 @@ export function AgentsPanel() {
           selectedCount={selectedAgents.length}
           onExport={() => void handleExportSelectedAgents()}
           onDelete={handleDeleteSelectedAgents}
+          deleteDisabled={!capabilityAgentRegistryReady}
           exporting={exportingSelected}
         />
       )}

@@ -790,7 +790,7 @@ try {
       name: "Susie",
       description: "A trusted friend from the western district.",
       first_mes: "REFERENCED_GREETING_MUST_STAY_OUT",
-      mes_example: "REFERENCED_EXAMPLE_MUST_STAY_OUT",
+      mes_example: "REFERENCED_EXAMPLE_SHOULD_APPEAR",
       extensions: {
         appearance: "Blonde hair and a blue summer dress.",
       },
@@ -847,7 +847,7 @@ try {
   assert.match(referencedContext.content, /Blonde hair and a blue summer dress\./u);
   assert.match(referencedContext.content, /REFERENCED_LOREBOOK_MEMORY/u);
   assert.doesNotMatch(referencedContext.content, /REFERENCED_GREETING_MUST_STAY_OUT/u);
-  assert.match(referencedContext.content, /REFERENCED_EXAMPLE_MUST_STAY_OUT/u);
+  assert.match(referencedContext.content, /REFERENCED_EXAMPLE_SHOULD_APPEAR/u);
 
   const macroLorebook = await lorebookStorage.create(
     createLorebookSchema.parse({
@@ -922,7 +922,7 @@ try {
   const assembledReferenceText = assembledReference.messages.map((message) => message.content).join("\n");
   assert.match(assembledReferenceText, /The cafe companion is Susie\./u);
   assert.match(assembledReferenceText, /A trusted friend from the western district\./u);
-  assert.match(assembledReferenceText, /REFERENCED_EXAMPLE_MUST_STAY_OUT/u);
+  assert.match(assembledReferenceText, /REFERENCED_EXAMPLE_SHOULD_APPEAR/u);
   assert.doesNotMatch(assembledReferenceText, /REFERENCED_GREETING_MUST_STAY_OUT/u);
 
   await lorebookStorage.update(hiddenCharacterLorebook.id, { hiddenFromLibrary: false });
@@ -3943,7 +3943,12 @@ assert.match(
 );
 assert.match(
   chatRoutesSource,
-  /combinedTokenEstimate[\s\S]{0,500}Selected summaries are too large to combine at once[\s\S]{0,3000}provider\.chatComplete/u,
+  /estimateChatSummaryTokens\(summaryPrompt\)[\s\S]{0,200}estimateChatSummaryTokens\(combinePrompt\)/u,
+  "The combine input budget must reserve the actual system and combine prompt sizes",
+);
+assert.match(
+  chatRoutesSource,
+  /estimateChatSummaryTokens\(sourceText\) > combinedSummaryInputBudget[\s\S]{0,500}Selected summaries are too large to combine at once[\s\S]{0,3000}provider\.chatComplete/u,
   "Combined summaries must be rejected before provider generation when they exceed the input budget",
 );
 const chatSidebarSource = readFileSync(

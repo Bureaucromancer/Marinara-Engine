@@ -25,6 +25,7 @@ import {
   normalizeStoryboardAgentSettings,
   LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID,
   DEFAULT_AGENT_TOOLS,
+  CHAT_SUMMARY_PROMPT_MAX_LENGTH,
   DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT,
   DEFAULT_CHAT_SUMMARY_PROMPT,
   DEFAULT_LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT,
@@ -6826,6 +6827,11 @@ Use HTML sparingly and diegetically. Do not replace normal prose/dialogue unless
           JSON.stringify({ templates, activeTemplateId: null, combinePrompt: " Merge these notes. " }),
         ),
         "Merge these notes.",
+      );
+      assert.equal(
+        normalizeChatSummaryPromptSettings({ combinePrompt: "x".repeat(CHAT_SUMMARY_PROMPT_MAX_LENGTH + 1) })
+          .combinePrompt.length,
+        CHAT_SUMMARY_PROMPT_MAX_LENGTH,
       );
       assert.equal(
         resolveChatSummaryPrompt({
