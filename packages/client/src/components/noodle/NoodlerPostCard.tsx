@@ -7,6 +7,8 @@
 // ──────────────────────────────────────────────
 import {
   AtSign,
+  Bell,
+  Eye,
   Heart,
   Image as ImageIcon,
   MessageCircle,
@@ -15,9 +17,10 @@ import {
   Repeat2,
   Smile,
   Trash2,
+  Lock,
   X,
 } from "lucide-react";
-import { Fragment, useRef } from "react";
+import { Fragment, useRef, useState } from "react";
 import {
   canManageNoodleReply,
   noodlePollInputSchema,
@@ -25,11 +28,14 @@ import {
   readNoodlePostImageCrop,
   type NoodleAccount,
   type NoodleInteraction,
+  type NoodlerPostView,
+  type NoodlerStageProfile,
 } from "@marinara-engine/shared";
 import { cn } from "../../lib/utils";
 import { ConversationMediaPickerPanel } from "../chat/ConversationMediaPickerPanel";
 import type { ChatImage } from "../../hooks/use-gallery";
-import { Avatar } from "./NoodleShell";
+import { Modal } from "../ui/Modal";
+import { Avatar, ProfileInitial } from "./NoodleShell";
 import { formatTime } from "./NoodleBrowserChrome";
 import { useTranslation as useUiTranslation } from "react-i18next";
 import {
@@ -53,6 +59,239 @@ import {
 } from "./NoodlePostCard";
 import { NoodlePollComposer } from "./NoodlePollComposer";
 import { PostImageFrame } from "./PostImageCropEditor";
+
+export function LockedNoodlerPostCard({
+  post,
+  profile,
+  controllerOnly = false,
+  subscribed,
+  unlockPending,
+  subscriptionPending,
+  onUnlock,
+  onToggleSubscription,
+  onManage,
+  onOpenProfile,
+  demo,
+}: {
+  post: Pick<NoodlerPostView, "id" | "access" | "createdAt" | "title" | "imageUrl"> &
+    Partial<Pick<NoodlerPostView, "likeCount" | "replyCount" | "hasImage">>; // controller-locked managed posts carry no counts
+  profile: NoodlerStageProfile;
+  controllerOnly?: boolean;
+  subscribed: boolean;
+  unlockPending: boolean;
+  subscriptionPending: boolean;
+  onUnlock: (postId: string) => void;
+  onToggleSubscription: (creatorAccountId: string, subscribed: boolean) => void;
+  onManage?: () => void;
+  onOpenProfile?: (accountId: string) => void;
+  /** Onboarding only: unlocking reveals this text locally instead of calling the server. */
+  /** `unlockedImageUrl` lets the demo pay off with a different image than the locked teaser. */
+  demo?: {
+    body: string;
+    unlockedLabel: string;
+    unlockedImageUrl?: string;
+    lockedTitle?: string;
+    onReveal?: () => void;
+  };
+}) {
+  const { t: localizeUi } = useUiTranslation();
+  const [unlockSheetOpen, setUnlockSheetOpen] = useState(false);
+  const [demoUnlocked, setDemoUnlocked] = useState(false);
+  const likeCount = post.likeCount ?? 0;
+  const replyCount = post.replyCount ?? 0;
+  const openProfile = onOpenProfile ? () => onOpenProfile(profile.id) : undefined;
+  const revealed = Boolean(demo && demoUnlocked);
+  // Locked posts report hasImage without a URL: the frame renders, the bytes stay server-side.
+  const mediaSrc = (revealed && demo?.unlockedImageUrl) || post.imageUrl || null;
+  return (
+    <article
+      data-noodle-post-id={post.id}
+      className="border-b border-[var(--noodle-divider)] px-4 py-5 transition-colors hover:bg-[var(--accent)]/25"
+    >
+      {/* Author row */}
+      <div className="flex gap-3">
+        <button
+          type="button"
+          onClick={openProfile}
+          disabled={!openProfile}
+          className="h-fit rounded-full text-left transition-opacity enabled:hover:opacity-80 disabled:cursor-default"
+          title={openProfile ? localizeUi("ui.noodle.noodlehome.viewValue1", { value1: profile.handle }) : undefined}
+        >
+          <ProfileInitial profile={profile} />
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <button
+              type="button"
+              onClick={openProfile}
+              disabled={!openProfile}
+              className="font-semibold transition-colors enabled:hover:text-[var(--noodle-accent)] disabled:cursor-default"
+            >
+              {profile.displayName}
+            </button>
+            <span className="inline-flex items-center gap-1 rounded-md bg-[var(--noodle-accent)]/12 px-2 py-1 text-[0.68rem] font-bold text-[var(--noodle-accent)] ring-1 ring-inset ring-[var(--noodle-accent)]/20">
+              <Lock size={11} />
+              {revealed && demo ? demo.unlockedLabel : localizeUi("ui.noodle.postaccess.locked")}
+            </span>
+          </div>
+          <p className="text-xs text-[var(--muted-foreground)]">
+            @{profile.handle} · {formatTime(post.createdAt)}
+          </p>
+        </div>
+      </div>
+
+      {/* Full-width body */}
+      <div>
+        {/* Media frame with Locked badge — only when the post has an image */}
+        {(mediaSrc || post.hasImage) && (
+          <div
+            className={cn(
+              "relative mt-3 aspect-[4/3] w-full overflow-hidden rounded-lg bg-[var(--muted)] ring-1 ring-inset ring-white/10",
+            )}
+          >
+            {mediaSrc ? (
+              <img
+                src={mediaSrc}
+                alt={
+                  revealed
+                    ? localizeUi("ui.noodle.post.imageBy", { name: profile.displayName })
+                    : localizeUi("ui.noodle.lockednoodlerpostcard.lockedImageFrom", { name: profile.displayName })
+                }
+                className={cn(
+                  "h-full w-full object-cover transition-[filter,transform] duration-500 motion-reduce:transition-none",
+                  // The demo teaser ships pre-blurred, so a full blur-xl on top turns it to mush.
+                  revealed ? "scale-100 blur-0" : cn("scale-110", demo ? "blur-sm" : "blur-xl"),
+                )}
+              />
+            ) : (
+              <span className="sr-only">
+                {localizeUi("ui.noodle.lockednoodlerpostcard.lockedImageFrom", { name: profile.displayName })}
+              </span>
+            )}
+            {!revealed && <div className="absolute inset-0 bg-black/35" aria-hidden="true" />}
+            {/* Icon only: the header badge already says "Locked", and the alt text carries it for AT. */}
+            {!revealed && (
+              <span className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
+                <span className="rounded-full bg-black/70 p-2.5 text-white ring-1 ring-white/15">
+                  <Lock size={16} />
+                </span>
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Title */}
+        {(() => {
+          // The demo's real title is a punchline; showing it while locked spoils the reveal.
+          const title = demo && !revealed ? demo.lockedTitle ?? post.title : post.title;
+          return title && <h3 className="mt-3 text-lg font-bold leading-snug">{title}</h3>;
+        })()}
+
+        {/* Body: unreadable teaser until unlocked */}
+        {revealed && demo ? (
+          <p className="mt-3 whitespace-pre-line text-sm leading-6">{demo.body}</p>
+        ) : (
+          !controllerOnly && (
+            <div className="mt-3 space-y-2 select-none" aria-hidden="true">
+              <div className="h-2.5 w-full rounded-sm bg-[var(--muted-foreground)]/20" />
+              <div className="h-2.5 w-3/4 rounded-sm bg-[var(--muted-foreground)]/15" />
+            </div>
+          )
+        )}
+
+        {/* CTA */}
+        {controllerOnly ? (
+          <p className="mt-3 text-xs text-[var(--muted-foreground)]">
+            {localizeUi("ui.noodle.lockednoodlerpostcard.openTheControllerToolsToManageThisPost")}
+          </p>
+        ) : (
+          !revealed && (
+            <button
+              type="button"
+              disabled={unlockPending || subscriptionPending}
+              onClick={() => setUnlockSheetOpen(true)}
+              className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-md bg-[var(--noodle-accent)] px-4 text-xs font-bold text-zinc-950 transition-[opacity,scale] hover:opacity-90 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:!text-zinc-950"
+            >
+              <Eye size={14} /> {localizeUi("ui.noodle.lockednoodlerpostcard.unlock")}
+            </button>
+          )
+        )}
+
+        {/* Footer */}
+        <div className="mt-4 flex items-center gap-4 text-sm tabular-nums text-[var(--muted-foreground)]">
+          <span className="flex items-center gap-1.5">
+            <Heart size={18} /> {likeCount}
+          </span>
+          <span className="flex items-center gap-1.5">
+            <MessageCircle size={18} /> {replyCount}
+          </span>
+          <div className="ml-auto flex items-center gap-3">
+            {onManage && (
+              <button
+                type="button"
+                onClick={onManage}
+                className="flex items-center gap-1.5 hover:text-[var(--foreground)]"
+              >
+                <Pencil size={18} /> {localizeUi("ui.noodle.lockednoodlerpostcard.managePost")}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+      <Modal
+        open={unlockSheetOpen}
+        onClose={() => setUnlockSheetOpen(false)}
+        title={localizeUi("ui.noodle.unlocksheet.title")}
+        width="max-w-sm"
+      >
+        <div data-component="NoodlerHome.UnlockSheet" className="divide-y divide-[var(--noodle-divider)]">
+          <button
+            type="button"
+            data-noodler-unlock-action="post"
+            disabled={unlockPending}
+            onClick={() => {
+              setUnlockSheetOpen(false);
+              if (demo) {
+                setDemoUnlocked(true);
+                demo.onReveal?.();
+              } else onUnlock(post.id);
+            }}
+            className="flex min-h-16 w-full items-center gap-3 px-1 py-3 text-left hover:bg-[var(--accent)] disabled:opacity-50"
+          >
+            <Eye size={20} className="shrink-0 text-[var(--noodle-accent)]" />
+            <span>
+              <span className="block text-sm font-bold">{localizeUi("ui.noodle.unlocksheet.unlockThisPost")}</span>
+              <span className="block text-xs text-[var(--muted-foreground)]">
+                {localizeUi("ui.noodle.unlocksheet.unlockThisPostDetail")}
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            data-noodler-unlock-action="subscribe"
+            disabled={subscriptionPending}
+            onClick={() => {
+              setUnlockSheetOpen(false);
+              if (demo) {
+                setDemoUnlocked(true);
+                demo.onReveal?.();
+              } else onToggleSubscription(profile.id, subscribed);
+            }}
+            className="flex min-h-16 w-full items-center gap-3 px-1 py-3 text-left hover:bg-[var(--accent)] disabled:opacity-50"
+          >
+            <Bell size={20} className="shrink-0 text-[var(--noodle-accent)]" />
+            <span>
+              <span className="block text-sm font-bold">{localizeUi("ui.noodle.unlocksheet.subscribe")}</span>
+              <span className="block text-xs text-[var(--muted-foreground)]">
+                {localizeUi("ui.noodle.unlocksheet.subscribeDetail")}
+              </span>
+            </span>
+          </button>
+        </div>
+      </Modal>
+    </article>
+  );
+}
 
 export function NoodlerPostCard({ post, ctx }: { post: NoodlePostCardModel; ctx: NoodlePostCardCtx }) {
   const { t: localizeUi } = useUiTranslation();
@@ -402,7 +641,7 @@ export function NoodlerPostCard({ post, ctx }: { post: NoodlePostCardModel; ctx:
       key={post.id}
       data-noodle-post-id={post.id}
       tabIndex={-1}
-      className="border-b border-[var(--noodle-divider)] px-4 py-4 transition-colors hover:bg-[var(--accent)]/35"
+      className="border-b border-[var(--noodle-divider)] px-4 py-5 transition-colors hover:bg-[var(--accent)]/25"
     >
       <div className="flex gap-3">
         {author ? (
@@ -431,18 +670,14 @@ export function NoodlerPostCard({ post, ctx }: { post: NoodlePostCardModel; ctx:
                 disabled={!canOpenAuthorProfile}
                 className="font-semibold transition-colors enabled:hover:text-[var(--noodle-accent)] disabled:cursor-default"
               >
-                {author?.displayName ?? "Noodle User"}
+                {author?.displayName ?? localizeUi("ui.noodle.noodlepostcard.noodleUser")}
               </button>
               <span className="rounded-full bg-[var(--noodle-accent)]/15 px-2 py-0.5 text-[0.68rem] font-bold text-[var(--noodle-accent)]">
-                {post.access === "ppv"
-                  ? localizeUi("ui.noodle.postaccess.ppv")
-                  : post.access === "subscriber"
-                    ? localizeUi("ui.noodle.postaccess.subscriber")
-                    : localizeUi("ui.noodle.postaccess.public")}
+                {localizeUi(post.access === "locked" ? "ui.noodle.postaccess.unlocked" : "ui.noodle.postaccess.public")}
               </span>
             </div>
             <p className="text-xs text-[var(--muted-foreground)]">
-              @{author?.handle ?? "noodle"} · {formatTime(post.createdAt)}
+              @{author?.handle ?? localizeUi("ui.noodle.noodleshell.noodleHandle")} · {formatTime(post.createdAt)}
             </p>
           </div>
           {ctx.postManagement && (
@@ -486,7 +721,7 @@ export function NoodlerPostCard({ post, ctx }: { post: NoodlePostCardModel; ctx:
           <button
             type="button"
             onClick={() => setImageLightbox(createNoodleLightboxImage(post.id, post.imageUrl!, post.imagePrompt ?? ""))}
-            className="mt-3 block w-full overflow-hidden rounded-xl text-left ring-offset-[var(--background)] transition-opacity hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--noodle-accent)] focus-visible:ring-offset-2"
+            className="mt-3 block w-full overflow-hidden rounded-lg text-left ring-1 ring-inset ring-white/10 ring-offset-[var(--background)] transition-opacity hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--noodle-accent)] focus-visible:ring-offset-2"
             title={localizeUi("ui.noodle.noodlepostcard.openImage")}
             aria-label={localizeUi("ui.noodle.noodlepostcard.openPostImage")}
           >
@@ -504,7 +739,7 @@ export function NoodlerPostCard({ post, ctx }: { post: NoodlePostCardModel; ctx:
                 alt={localizeUi("ui.noodle.post.imageBy", {
                   name: author?.displayName ?? localizeUi("ui.noodle.profile.fallbackUser"),
                 })}
-                className="max-h-96 w-full object-cover"
+                className="aspect-[4/3] max-h-[32rem] w-full object-cover"
               />
             )}
           </button>
@@ -552,7 +787,9 @@ export function NoodlerPostCard({ post, ctx }: { post: NoodlePostCardModel; ctx:
                 onClose={cancelEditingPost}
                 onSubmit={() => saveEditedPost(post)}
                 submitLabel={
-                  updatePostPending ? localizeUi("ui.noodle.noodlehome.saving") : localizeUi("ui.noodle.noodlehome.save")
+                  updatePostPending
+                    ? localizeUi("ui.noodle.noodlehome.saving")
+                    : localizeUi("ui.noodle.noodlehome.save")
                 }
                 submitDisabled={saveEditDisabled}
                 disabled={updatePostPending}
@@ -590,7 +827,7 @@ export function NoodlerPostCard({ post, ctx }: { post: NoodlePostCardModel; ctx:
             onOpenProfile={openProfile}
           />
         )}
-        <div className="mt-3 flex max-w-md items-center justify-between gap-1">
+        <div className="mt-4 flex max-w-md items-center justify-between gap-1 tabular-nums">
           <button
             type="button"
             className={cn(noodleIconButtonClass, "rounded-full", likedByPersona && "bg-[var(--noodle-accent)]/10")}
