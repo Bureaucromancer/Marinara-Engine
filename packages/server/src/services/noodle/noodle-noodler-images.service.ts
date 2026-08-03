@@ -53,6 +53,8 @@ export async function generateNoodlerPostImage(input: {
   debugMode: boolean;
   previewOnly?: boolean;
   promptOverride?: { prompt: string; negativePrompt?: string };
+  beforeProviderAttempt?: (attempt: number) => Promise<void>;
+  onProviderAttemptFailure?: (attempt: number) => Promise<void>;
   admissionMode?: ConnectionAdmissionMode;
 }): Promise<{
   metadata: Record<string, unknown>;
@@ -163,8 +165,9 @@ export async function generateNoodlerPostImage(input: {
   }
 
   const image = await generateNoodleImageWithRetry(
-    () =>
-      generateImage(imageSource, imageBaseUrl, input.imageConnection.apiKey || "", imageServiceHint, {
+    async (attempt) => {
+      await input.beforeProviderAttempt?.(attempt);
+      return generateImage(imageSource, imageBaseUrl, input.imageConnection.apiKey || "", imageServiceHint, {
         prompt: finalPrompt,
         negativePrompt: finalNegativePrompt,
         model: imageModel,
@@ -175,10 +178,12 @@ export async function generateNoodlerPostImage(input: {
         imageDefaults,
         referenceImages,
         debugMode: input.debugMode,
-        fallback: imageFallback,
         admissionMode: input.admissionMode,
-      }),
-    (error, attempt, maxAttempts) => {
+        fallback: imageFallback,
+      });
+    },
+    async (error, attempt, maxAttempts) => {
+      await input.onProviderAttemptFailure?.(attempt);
       logger.warn(
         error,
         "[noodler] Image generation attempt %d/%d failed for %s",

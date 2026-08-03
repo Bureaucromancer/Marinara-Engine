@@ -5,7 +5,7 @@
 // based on a user's configured image_generation connection.
 
 import { createHash, createHmac, randomBytes } from "crypto";
-import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { inflateRawSync } from "zlib";
 import { DATA_DIR } from "../../utils/data-dir.js";
@@ -418,6 +418,30 @@ export type StagedGalleryImage = {
   promote: () => void;
   compensate: () => void;
 };
+
+/**
+ * Staged files are named for the writing process and only survive it if that process was killed
+ * between writing the image and promoting or compensating it. Nothing can reference them, so a
+ * startup sweep reclaims the space.
+ */
+export function sweepStagedImages(): number {
+  const stagingDir = assertInsideDir(GALLERY_DIR, join(GALLERY_DIR, ".staging", "noodle"));
+  let removed = 0;
+  try {
+    for (const entry of readdirSync(stagingDir)) {
+      if (!entry.endsWith(".tmp")) continue;
+      try {
+        unlinkSync(assertInsideDir(stagingDir, join(stagingDir, entry)));
+        removed += 1;
+      } catch {
+        /* best-effort sweep */
+      }
+    }
+  } catch {
+    /* no staging directory yet */
+  }
+  return removed;
+}
 
 /** Stage provider output without making it visible in the gallery. */
 export function stageImageToDisk(chatId: string, base64: string, ext: string): StagedGalleryImage {
