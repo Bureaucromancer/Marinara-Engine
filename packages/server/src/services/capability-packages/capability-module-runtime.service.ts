@@ -168,9 +168,8 @@ class CapabilityModuleRuntime {
           registerConversationCommand: (registration) =>
             trackCleanup(registerCapabilityConversationCommand(registration)),
           registerService: (key, service) => trackCleanup(registerCapabilityService(key, service)),
-          // Contribute a block of text to the system prompt of each turn. Gated on the `prompt-context`
-          // permission the manifest already declares, so a package can't reach the prompt without asking
-          // for it up front. See capability-prompt-context.service.ts for the contract.
+          // Gated on the permission the manifest already declares, so a package can't reach the prompt
+          // without asking for it up front. Contract in capability-prompt-context.service.ts.
           registerPromptContext: (contributor) => {
             if (!installed.manifest.permissions?.includes("prompt-context")) {
               throw new Error(

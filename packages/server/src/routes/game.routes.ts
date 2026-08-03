@@ -1648,6 +1648,9 @@ function sourceIllustrationPathForMetadata(assetPath: string): string {
 }
 
 const MAX_GAME_HUD_WIDGETS = 4;
+/** Cap for the opaque `experienceConfig`, so it can't grow into a payload every later write of the
+ *  setup config has to carry. Generous next to what a setup wizard actually collects. */
+const MAX_EXPERIENCE_CONFIG_CHARS = 32_000;
 const GAME_REPUTATION_ACTION_MAX_LENGTH = 500;
 const trimmedWidgetString = (max: number) => z.string().trim().min(1).max(max);
 
@@ -1684,10 +1687,20 @@ const gameSetupConfigSchema = z.object({
   gmCharacterId: z.string().nullable().optional(),
   partyCharacterIds: z.array(z.string()),
   personaId: z.string().nullable().optional(),
-  /** Installed package that provides this game's experience (its id; same charset the manifest allows). */
-  gameExperienceId: z.string().max(80).optional(),
+  /** Installed package that provides this game's experience. Same shape the manifest allows for an id,
+   *  since this is matched against one to mount the surface. */
+  gameExperienceId: z
+    .string()
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+    .max(80)
+    .optional(),
   /** Opaque config owned by that experience — persisted verbatim, never read by the host. */
-  experienceConfig: z.record(z.string(), z.unknown()).optional(),
+  experienceConfig: z
+    .record(z.string().max(120), z.unknown())
+    .refine((value) => JSON.stringify(value).length <= MAX_EXPERIENCE_CONFIG_CHARS, {
+      message: `experienceConfig must serialize to at most ${MAX_EXPERIENCE_CONFIG_CHARS} characters`,
+    })
+    .optional(),
   sceneConnectionId: z.string().optional(),
   enableAgents: z.boolean().optional(),
   enableSpriteGeneration: z.boolean().optional(),
@@ -6329,7 +6342,7 @@ export async function gameRoutes(app: FastifyInstance) {
       gameSystemPrompt,
       gameSpecialInstructions,
       gameSceneConnectionId: setupConfig.sceneConnectionId || null,
-      // The experience is chosen at creation and belongs to the game for its lifetime (see GameSetupConfig).
+      // Chosen at creation and fixed for the game's lifetime (see GameSetupConfig).
       gameExperienceId: setupConfig.gameExperienceId || null,
       gameNpcs: [],
       enableAgents: setupConfig.enableAgents === true,

@@ -1,21 +1,9 @@
 // ──────────────────────────────────────────────
-// Capability prompt-context registry.
+// Capability prompt-context registry — gives the `prompt-context` permission its mechanism.
 //
-// Lets an installed package contribute a block of text to the system prompt of a turn, so a package that
-// owns live state (a game surface, a tracker, a companion system) can keep the model in sync with what the
-// player is actually seeing instead of leaving it to guess.
-//
-// Gated by the `prompt-context` permission, which already existed in the manifest schema but had no
-// mechanism behind it. Contributors are keyed by packageId so re-activation replaces rather than stacks.
-//
-// Contract: a contributor is called ONCE per generation with a read-only view of the chat, and returns the
-// text to append (or null to contribute nothing this turn). It must not mutate anything, and a throw is
-// swallowed by the collector — a package must never be able to break a turn.
-//
-// A contributor may also DECLARE which built-in game systems it replaces with its own (`provides`). The
-// built-in prompt then stops asking the model to drive that system, so an experience with its own inventory
-// isn't fighting the stock one. Same shape as the client-side chrome declaration: whatever isn't declared
-// stays built-in, so a package that wants the host's systems simply says nothing.
+// A contributor is called ONCE per generation with a read-only view of the chat and returns the text to
+// append, or null for nothing this turn. It must not mutate anything, and a throw is swallowed by the
+// collector. It may also declare which built-in game systems it replaces; undeclared stays built-in.
 // ──────────────────────────────────────────────
 
 import { logger } from "../../lib/logger.js";
@@ -70,10 +58,28 @@ export function registerCapabilityPromptContext(
   };
 }
 
+/** Deadline per contributor. A throw is already non-fatal, but a promise that never settles would hang
+ *  the turn, so building the prompt can't wait on one indefinitely. */
+const CONTRIBUTOR_TIMEOUT_MS = 2_000;
+
+function withDeadline<T>(value: Promise<T> | T, packageId: string): Promise<T> {
+  if (!(value instanceof Promise)) return Promise.resolve(value);
+  let timer: NodeJS.Timeout;
+  return Promise.race([
+    value,
+    new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`prompt-context contributor ${packageId} exceeded ${CONTRIBUTOR_TIMEOUT_MS}ms`)),
+        CONTRIBUTOR_TIMEOUT_MS,
+      );
+    }),
+  ]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
 /**
- * Collect every registered contribution for this turn. Never throws and never returns partial garbage: a
- * contributor that fails or returns nothing is simply skipped, so one bad package can't block generation.
- * Order follows registration order, which is activation order — deterministic across a run.
+ * Collect every registered contribution for this turn. A contributor that fails, times out or returns
+ * nothing is skipped, so one bad package can't block generation. Contributors run in registration order:
+ * they compose one prompt, so the block order has to be stable across a run.
  */
 export async function collectCapabilityPromptContext(
   request: CapabilityPromptContextRequest,
@@ -83,7 +89,7 @@ export async function collectCapabilityPromptContext(
   const provides: CapabilityProvidedGameSystems = {};
   for (const [packageId, contribute] of contributorsByPackage) {
     try {
-      const contribution = await contribute(request);
+      const contribution = await withDeadline(contribute(request), packageId);
       if (contribution === null || contribution === undefined) continue;
       const text = typeof contribution === "string" ? contribution : contribution.text;
       if (typeof text === "string" && text.trim().length > 0) blocks.push(text.trim());
@@ -94,7 +100,7 @@ export async function collectCapabilityPromptContext(
       }
     } catch (error) {
       // Non-fatal by design: a broken contributor costs its own context, not the player's turn.
-      logger.warn("[capability] prompt-context contributor failed for %s: %s", packageId, String(error));
+      logger.warn(error, "[capability] prompt-context contributor failed for %s", packageId);
     }
   }
   return { blocks, provides };

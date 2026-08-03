@@ -203,13 +203,10 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
 
   // Trusted downloaded server capabilities register while Fastify is still mutable.
   await capabilityModuleRuntime.start(app);
-  // Re-scan game assets now that packages have activated. A package can install its own art during
-  // activate() (backgrounds, sprites, sfx), which happens AFTER the boot-time scan above — so without
-  // this its assets stay invisible to everything that reads the manifest (scene analysis, the asset
-  // pickers) until the NEXT restart. Cheap and idempotent: the same scan the upload routes already re-run.
-  // Guarded because this one runs over files a package just wrote: the scan uses bare readdirSync/statSync,
-  // so a broken symlink or an unreadable file would otherwise take down startup. A stale manifest only
-  // costs that package its art until the next scan; failing to boot costs the user everything.
+  // A package can install its own art during activate(), which runs AFTER the boot-time scan above, so
+  // without this its assets stay invisible to everything reading the manifest until the NEXT restart.
+  // Idempotent — the same scan the upload routes already re-run. Guarded because it walks files a package
+  // just wrote: a stale manifest costs that package its art, failing to boot costs the user everything.
   try {
     buildAssetManifest();
   } catch (error) {

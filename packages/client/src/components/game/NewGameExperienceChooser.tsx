@@ -1,19 +1,7 @@
-// Installed game EXPERIENCES, offered inside the setup wizard.
-//
-// The built-in wizard stays exactly as it is and remains the default. This ADDS one block to its first
-// step — right below "reuse a game setup", above the game name — listing the installed packages that
-// provide an experience. They're discovered from their manifest (they declare the `game-surface` slot),
-// so no package is named here and a new one needs no engine change. Nothing installed → an affordance to
-// open the catalog.
-//
-// Activating one swaps the wizard BODY for that package's own setup; the block stays put, so deactivating
-// brings the built-in wizard right back. Nothing is committed until a wizard is finished.
-//
-// The choice travels in the game's setup config as `gameExperienceId`, so it belongs to the game from
-// creation onward. It is deliberately NOT enabled as a per-chat agent: an experience replaces the whole
-// game mode — its own HUD, inventory, combat and state — so toggling it mid-run would leave a half-built
-// game either way.
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+// Installed game EXPERIENCES, offered as one block inside the setup wizard's first step. They are
+// discovered from their manifest (the `game-surface` slot), so no package is named here. Activating one
+// swaps the wizard BODY for that package's own setup; the choice travels in the setup config.
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Gamepad2, Sparkles, X } from "lucide-react";
@@ -65,8 +53,7 @@ export function NewGameExperienceChooser({
   const gameSetup = useGameSetup();
   const openAgentCatalog = useUIStore((s) => s.openAgentCatalog);
 
-  // An "experience" is any active package declaring the game-surface slot — the same signal GameSurface
-  // uses to mount it, so this list can never offer something that wouldn't render.
+  // The same signal GameSurface mounts on, so this list can never offer something that wouldn't render.
   const experiences = useMemo(
     () =>
       (installed as InstalledPkg[]).filter(
@@ -75,20 +62,23 @@ export function NewGameExperienceChooser({
     [installed],
   );
   const activeExperience = experiences.find((e) => e.id === activeId) ?? null;
-  // While the campaign is being built, every control that could change or tear down the run is frozen —
-  // flipping the experience off mid-launch would leave a game created under one mode and set up as another.
-  // Same guard the built-in wizard applies with its `isLoading`.
+  // Freezes every control that could tear down the run mid-launch: flipping the experience off here
+  // would create a game under one mode and set it up as another. The wizard's `isLoading` equivalent.
   const launching = createGame.isPending || gameSetup.isPending;
 
-  // Host launcher handed to the package's setup wizard. The package prepares the config; the host creates
-  // the game with it and runs the opening, because it owns navigation and the query cache. The host never
-  // calls into the package's own routes — whatever else the experience needs is its own business.
-  //
-  // The experience MUST supply the connection: it is the one showing the picker, so it is the one that
-  // knows what the player chose. The host deliberately does not fall back to guessing a connection here —
-  // that would duplicate the connection-eligibility rules that live in the setup wizard, in a code path
-  // nothing can reach (a chat cannot even be created without a connection, see NewChatConnectionGate), so
-  // it could drift out of sync with the real rules and never fail visibly.
+  // Escape closes the package's setup, matching the backdrop click and the wizard this panel replaces.
+  useEffect(() => {
+    if (!activeId || launching) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCancelSetup();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeId, launching, onCancelSetup]);
+
+  // The package prepares the config; the host creates the game and runs the opening, since it owns
+  // navigation and the query cache. The experience must supply the connection — guessing one here would
+  // duplicate the eligibility rules that live in the setup wizard.
   const onLaunch = useCallback(
     async (
       setupConfig: unknown,
@@ -99,8 +89,7 @@ export function NewGameExperienceChooser({
       const connectionId = connections?.gmConnectionId;
       if (!connectionId) throw new Error("The experience must provide a gmConnectionId to launch a game");
       const cfg = setupConfig as { promptPresetId?: string };
-      // Stamp WHICH experience owns this game; /game/create copies it to the chat metadata and GameSurface
-      // mounts the matching package from then on.
+      // Stamps which experience owns this game; /game/create copies it to the chat metadata.
       const res = await createGame.mutateAsync({
         name: gameName,
         setupConfig: { ...(setupConfig as Record<string, unknown>), gameExperienceId: activeId } as unknown,
@@ -116,23 +105,16 @@ export function NewGameExperienceChooser({
         preferences: "",
         promptPresetId: cfg.promptPresetId ?? null,
       } as Parameters<typeof gameSetup.mutateAsync>[0]);
-      // An experience's setup may have created host resources on its way here — the player persona and a
-      // lorebook, through the capability resource writes. Those go straight to storage on the server, so
-      // nothing on this side knows they exist: the cached lists stay stale until a full reload, and a chat
-      // pointing at the fresh persona renders it as "Unknown persona". Refresh them here, where we already
-      // know a setup just finished.
-      // `lorebookKeys.all` and not `.list()`: the lists are also cached per category, and a lorebook an
-      // experience just created lands in one of those — invalidating only the flat list leaves it stale.
+      // A setup may have written host resources straight to storage, which nothing on this side knows
+      // about. `lorebookKeys.all` rather than `.list()`: the lists are also cached per category.
       queryClient.invalidateQueries({ queryKey: characterKeys.personas });
       queryClient.invalidateQueries({ queryKey: lorebookKeys.all });
-      // Hand back the created chat id: an experience that keeps its own state needs it to seed itself, and
-      // this way the host doesn't have to know anything about the package's routes to make that possible.
+      // An experience that keeps its own state needs the chat id to seed itself.
       return chatId;
     },
     [activeChatId, activeId, createGame, gameSetup, queryClient],
   );
 
-  // The block itself — same card, type scale and button treatment as the wizard's "reuse a game setup".
   const experiencesSlot = (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -214,11 +196,10 @@ export function NewGameExperienceChooser({
     </div>
   );
 
-  // No experience activated → the built-in wizard, with our block inside its first step.
   if (!activeId) return <>{renderClassicWizard(experiencesSlot)}</>;
 
-  // Activated → the package draws the wizard body, inside the SAME shell the built-in one uses (same
-  // backdrop, panel, header), with the block kept above it so the player can switch back.
+  // Activated → the package draws the wizard body inside the same shell the built-in one uses, with the
+  // block kept above it so the player can switch back.
   return (
     <>
       <div
@@ -226,10 +207,12 @@ export function NewGameExperienceChooser({
         onClick={launching ? undefined : onCancelSetup}
       />
       <div className="fixed inset-0 z-[10001] flex items-center justify-center p-3 pointer-events-none max-md:pt-[max(0.75rem,env(safe-area-inset-top))] max-md:pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4">
-        {/* NEUTRAL_PANEL_SHELL is what remaps --foreground/--primary/--secondary to the chrome palette
-            INSIDE the panel — the same shell the built-in wizard uses. Without it the package's setup
-            inherits the global (themed) tokens and comes out tinted, which is not the host's look. */}
+        {/* NEUTRAL_PANEL_SHELL remaps the theme tokens to the chrome palette inside the panel, the same
+            way the built-in wizard does. Without it the package's setup comes out tinted. */}
         <motion.div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="game-experience-setup-title"
           initial={{ opacity: 0, y: 12, scale: 0.97 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ duration: 0.2, ease: "easeOut" }}
@@ -239,7 +222,9 @@ export function NewGameExperienceChooser({
           )}
         >
           <div className={cn(NEUTRAL_PANEL_HEADER, "flex shrink-0 items-center justify-between")}>
-            <h3 className={NEUTRAL_PANEL_TITLE}>{activeExperience?.manifest.name ?? "New Game"}</h3>
+            <h3 id="game-experience-setup-title" className={NEUTRAL_PANEL_TITLE}>
+              {activeExperience?.manifest.name ?? "New Game"}
+            </h3>
             <button
               type="button"
               onClick={onCancelSetup}

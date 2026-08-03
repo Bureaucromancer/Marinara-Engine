@@ -4666,9 +4666,7 @@ export function GameNarration({
                 return (
                   <div className="flex min-w-0 gap-3 max-[420px]:gap-2" style={gameAvatarScaleStyle}>
                     {/* Left: Speaker avatar with reaction indicator */}
-                    {/* Inert theming hook (same contract as experience-dialogue-wrap below): a game-mode
-                        EXPERIENCE reframes the speaker portrait from under its surface class. No-op
-                        otherwise — the base engine styles nothing here, so Classic renders unchanged. */}
+                    {/* Inert theming hook — see experience-dialogue-wrap below. */}
                     <div className="experience-dialogue-avatar relative flex shrink-0 flex-col items-center gap-1">
                       {activeCanUploadPortrait ? (
                         <div className="group/avatar relative">
@@ -4750,10 +4748,8 @@ export function GameNarration({
                     <div className="flex min-w-0 flex-1 flex-col">
                       <div className="mb-1.5 flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
-                          {/* Inert theming hook (see experience-dialogue-wrap): an experience turns the
-                              speaker label into its own name plate. The inner span exists so a skewed
-                              plate can counter-skew its text; unstyled it collapses to plain inline text,
-                              so Classic renders exactly as before. */}
+                          {/* Inert theming hook. The inner span lets a skewed name plate counter-skew its
+                              text; unstyled it collapses to plain inline text. */}
                           <span
                             className="experience-dialogue-speaker text-sm font-bold"
                             style={
@@ -4783,10 +4779,8 @@ export function GameNarration({
                       <div
                         className={cn(
                           "relative",
-                          // Inert theming hook. A game-mode EXPERIENCE styles the dialogue box into its own
-                          // shape (speech balloon, tail, borders) by targeting this class under its surface
-                          // class. No-op otherwise: nothing in the base engine styles it, so Classic renders
-                          // exactly as before. Only main spoken dialogue — thoughts and whispers keep theirs.
+                          // Inert theming hook: an experience reshapes the dialogue box from under its
+                          // surface class. Nothing in the base engine styles it, so Classic is unchanged.
                           (!active.partyType || active.partyType === "main") && "experience-dialogue-wrap",
                         )}
                       >
@@ -5896,10 +5890,8 @@ function PartyOverlayBox({
   return (
     <div
       className={cn(
-        // Inert theming hook (same family as experience-dialogue-*): the side/aside remark box, which an
-        // experience needs to restyle along with the main dialogue box or it reads as foreign chrome.
-        // `data-line-type` exposes the variant so a theme can tint thought/whisper differently without
-        // depending on the utility classes below. No-op in Classic — nothing here styles them.
+        // Inert theming hook for the aside box. `data-line-type` exposes the variant so a theme can tint
+        // thought and whisper differently without depending on the utility classes below.
         "experience-side-line isolate flex w-fit min-w-0 max-w-full transform-gpu items-start gap-2 rounded-xl border bg-clip-padding px-3 py-2 sm:max-w-[75%]",
         (line.type === "side" || line.type === "extra") && "shadow-[0_16px_38px_rgba(0,0,0,0.45)]",
         style.border,

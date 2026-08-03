@@ -43,7 +43,7 @@ const capabilityPackageManifestBaseSchema = z
               "spatial-workspace",
               "chat-runtime",
               "game-world-map",
-              // Full-screen Game-mode surface slot (mounts the package's own game UI over the narration).
+              // Mounts the package's own game UI over the narration.
               "game-surface",
             ]),
           )
@@ -51,9 +51,9 @@ const capabilityPackageManifestBaseSchema = z
         /** Options for the `game-surface` slot. */
         gameSurface: z
           .object({
-            /** Class the host puts on the game area while this surface is mounted, so the package's own
-             *  stylesheet can restyle the SHARED chrome (narration box, inputs) that renders outside its
-             *  element. Declared here rather than pushed at runtime so the theme applies on first paint. */
+            /** Class the host puts on the game area while this surface is mounted, so the package can
+             *  restyle the shared chrome that renders outside its element. Declared rather than pushed at
+             *  runtime, so the theme applies on first paint. */
             surfaceClass: z
               .string()
               .regex(/^[a-z][a-z0-9-]*$/)

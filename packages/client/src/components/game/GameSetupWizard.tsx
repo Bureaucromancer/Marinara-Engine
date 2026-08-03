@@ -100,8 +100,7 @@ function normalizeCapabilitySetupSelectionKind(
 }
 
 interface GameSetupWizardProps {
-  /** Optional block rendered in the first step, with the other pre-start choices (right after "reuse a
-   *  game setup"). The host uses it to offer installed game EXPERIENCES; absent when there are none. */
+  /** Optional block rendered with the other pre-start choices, used to offer installed game experiences. */
   experiencesSlot?: ReactNode;
   onComplete: (
     config: GameSetupConfig,
@@ -1262,9 +1261,7 @@ export function GameSetupWizard({
               )}
             </div>
 
-            {/* Slot for installed game EXPERIENCES (packages that replace the whole game mode). Sits with
-                the other "before you start" choices — reuse a setup, pick an experience — and is simply
-                absent when nothing provides one, leaving this step exactly as it was. */}
+            {/* Absent when nothing provides an experience, leaving this step exactly as it was. */}
             {experiencesSlot}
 
             <div>

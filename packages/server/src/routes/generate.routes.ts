@@ -2963,10 +2963,8 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           }
 
-          // Let installed packages contribute live context to this turn (the `prompt-context` permission).
-          // A package that owns state the player can see — a game surface, a tracker — appends it here so
-          // the model narrates in sync with it instead of guessing. Appended to the system message, same as
-          // the lorebook block above. Nothing registered (the normal case) ⇒ zero effect on the prompt.
+          // A package holding `prompt-context` appends its live state to the system message, the same way
+          // the lorebook block above does. Nothing registered (the normal case) ⇒ no effect on the prompt.
           const capabilityPromptContext = await collectCapabilityPromptContext({
             chatId: input.chatId,
             chatMeta,
@@ -3043,8 +3041,7 @@ export async function generateRoutes(app: FastifyInstance) {
               artStylePrompt: gmCtx.artStylePrompt,
               addressMode,
               playerDiceRollSubmitted,
-              // A package that brought its own inventory (declared via prompt-context) takes the built-in
-              // one out of the prompt, so the GM isn't told to drive a system the player can't see.
+              // A package that brought its own inventory takes the built-in one out of the prompt.
               experienceProvidedSystems: capabilityPromptContext.provides,
               playerInventory: (() => {
                 try {

@@ -626,8 +626,7 @@ export function buildGmFormatReminder(
     addressMode?: "party" | "gm";
     /** Whether the current player turn already includes a resolved [dice: ...] roll. */
     playerDiceRollSubmitted?: boolean;
-    /** Built-in systems an installed experience replaces with its own (see capability prompt-context).
-     *  Undeclared systems stay built-in, so an ordinary game is unaffected. */
+    /** Built-in systems an installed experience replaces with its own. Undeclared systems stay built-in. */
     experienceProvidedSystems?: { inventory?: boolean };
   },
 ): string {
@@ -655,8 +654,8 @@ export function buildGmFormatReminder(
       return lines;
     });
   const hudWidgets = Array.isArray(ctx.hudWidgets) ? ctx.hudWidgets : [];
-  // An experience that tracks items itself owns the whole loop (its own UI, its own state), so asking the
-  // GM for [inventory:] here would only produce commands nothing consumes.
+  // An experience that tracks items itself owns the whole loop, so asking the GM for [inventory:] here
+  // would only produce commands nothing consumes.
   const experienceOwnsInventory = ctx.experienceProvidedSystems?.inventory === true;
   const playerInventory = Array.isArray(ctx.playerInventory)
     ? ctx.playerInventory.flatMap((item) => {
@@ -824,8 +823,8 @@ export function buildGmFormatReminder(
     );
   }
 
-  // Inventory context (skipped when an experience owns items — a legacy save could still carry a stale
-  // built-in list, and showing it would contradict the inventory the player actually has on screen).
+  // Inventory context. Skipped when an experience owns items: an older save can still carry a stale
+  // built-in list, which would contradict the inventory the player has on screen.
   if (!experienceOwnsInventory && playerInventory.length > 0) {
     lines.push(``, `PLAYER INVENTORY: ${buildCompactInventoryLine(playerInventory)}`);
   }

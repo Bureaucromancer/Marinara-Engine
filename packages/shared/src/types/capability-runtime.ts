@@ -63,8 +63,7 @@ export interface CapabilityLorebookEntrySelection {
   excludedSourceAgentIds?: string[];
 }
 
-// [capability writes] Inputs for the resource WRITE surface (used by game-mode setup: seed the player persona +
-// its lorebook). Thin, storage-agnostic shapes — the server impl maps them to engine storage.
+// Inputs for the resource write surface. Thin, storage-agnostic shapes the server impl maps to storage.
 export interface CapabilityPersonaCreateInput {
   name: string;
   description: string;
@@ -109,14 +108,10 @@ export interface CapabilityResourceHost {
   listPersonas(personaIds?: string[]): Promise<CapabilityPersonaRecord[]>;
   listLorebooks(lorebookIds?: string[]): Promise<CapabilityLorebookRecord[]>;
   listEligibleLorebookEntries(selection: CapabilityLorebookEntrySelection): Promise<CapabilityLorebookEntryRecord[]>;
-  // [capability writes] WRITE surface — used by a package's game-mode setup to find-or-create the
-  // player persona and its lorebook. Passthroughs to engine storage in capability-resources.service.ts.
-  //
-  // OPTIONAL on purpose. The engine's own host implements all six, so a package always gets them here;
-  // declaring them required would make adding them a breaking change for any other implementation of this
-  // published interface, and would force a host that only wants to expose reads to stub six throwers.
-  // A package should feature-detect (`typeof resources.createPersona === "function"`) exactly the way it
-  // already does for `registerPromptContext`.
+  // Write surface, used by a package's setup to find-or-create the player persona and its lorebook.
+  // OPTIONAL on purpose: the engine's host implements all six, but requiring them would make adding them
+  // a breaking change for any other implementation of this published interface. A package feature-detects
+  // (`typeof resources.createPersona === "function"`) the way it already does for `registerPromptContext`.
   createPersona?(input: CapabilityPersonaCreateInput): Promise<CapabilityPersonaRecord>;
   updatePersona?(personaId: string, updates: CapabilityPersonaUpdateInput): Promise<void>;
   createLorebook?(input: CapabilityLorebookCreateInput): Promise<CapabilityLorebookRecord>;

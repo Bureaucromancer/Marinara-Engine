@@ -99,9 +99,8 @@ export function createCapabilityResourceHost(db: DB): CapabilityResourceHost {
       }));
     },
 
-    // [capability writes] WRITE surface — thin passthroughs to engine storage, used by a package's setup
-    // flow to find-or-create the player persona + its lorebook. The capability input types are declared
-    // narrowly enough to hand straight to storage, so nothing here needs a cast.
+    // Write surface — thin passthroughs to storage. The capability input types are declared narrowly
+    // enough to hand straight to it, so nothing here needs a cast.
     async createPersona(input: CapabilityPersonaCreateInput): Promise<CapabilityPersonaRecord> {
       const record = await characters.createPersona(input.name, input.description, input.avatarPath, {
         comment: input.comment,
