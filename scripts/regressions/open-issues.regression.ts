@@ -56,6 +56,7 @@ import {
   resolveTrackerPanelDesktopWidth,
 } from "../../packages/client/src/lib/tracker-panel-layout.js";
 import { getApiErrorMessage } from "../../packages/client/src/lib/api-client.js";
+import { scrollProfessorMariTranscriptToBottom } from "../../packages/client/src/lib/professor-mari-transcript-scroll.js";
 import { parseCustomParametersDraft } from "../../packages/client/src/lib/generation-custom-parameters.js";
 import { parseGenerationParameterDraft } from "../../packages/client/src/lib/generation-parameter-draft.js";
 import {
@@ -2225,10 +2226,22 @@ const professorMariHomeSource = readFileSync(
 assert.match(professorMariHomeSource, /chatHistorySelectionMode/u);
 assert.match(professorMariHomeSource, /toggleProfessorChatSelection/u);
 assert.match(professorMariHomeSource, /handleBulkDeleteProfessorChats/u);
+const professorMariTranscript = { scrollHeight: 720, scrollTop: 0 };
+scrollProfessorMariTranscriptToBottom(professorMariTranscript);
+assert.equal(
+  professorMariTranscript.scrollTop,
+  professorMariTranscript.scrollHeight,
+  "Professor Mari transcript scrolling must align a mounted pane with its newest message",
+);
 assert.match(
   professorMariHomeSource,
-  /loadedMessagesChatId !== chatId[\s\S]{0,350}requestAnimationFrame[\s\S]{0,200}node\.scrollTop = node\.scrollHeight/u,
-  "Professor Mari history must scroll to the latest rendered message after the selected chat finishes loading",
+  /ref=\{setTranscriptScrollNode\}[\s\S]{0,100}data-component="HomeProfessorMariChat\.Transcript"/u,
+  "Professor Mari transcript panes must trigger scrolling from their mounted ref",
+);
+assert.match(
+  professorMariHomeSource,
+  /messageLoadAbortRef\.current !== controller[\s\S]{0,80}activeChatIdRef\.current !== id/u,
+  "Professor Mari message loads must discard stale requests and inactive chat results",
 );
 assert.match(
   professorMariHomeSource,

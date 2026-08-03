@@ -9574,6 +9574,53 @@ test("Professor Mari chat fills the mobile home viewport and keeps its composer 
     .toBe(true);
 });
 
+test("Professor Mari history opens a loaded chat at its newest message", async ({ page }) => {
+  const firstResponse = await page.request.get("/api/chats/internal/professor-mari");
+  expect(firstResponse.ok()).toBeTruthy();
+  const firstChat = (await firstResponse.json()) as { id: string };
+  for (let index = 0; index < 18; index += 1) {
+    const messageResponse = await page.request.post(`/api/chats/${firstChat.id}/messages`, {
+      data: {
+        role: index % 2 === 0 ? "user" : "assistant",
+        content: `Professor Mari history message ${index + 1}. ${"A long transcript line makes the pane overflow. ".repeat(8)}`,
+      },
+    });
+    expect(messageResponse.ok()).toBeTruthy();
+  }
+  const secondResponse = await page.request.post("/api/chats/internal/professor-mari/restart");
+  expect(secondResponse.ok()).toBeTruthy();
+  const secondChat = (await secondResponse.json()) as { id: string };
+
+  try {
+    await page.goto("/");
+    await page
+      .locator('[data-component="HomeProfessorMariChat.MariPanel"]')
+      .getByRole("button", { name: "Ask Professor Mari" })
+      .click();
+
+    const window = page.locator('[data-component="HomeProfessorMariChat.Window"]');
+    await window.getByRole("button", { name: "Chats" }).click();
+    await window.locator(`[data-professor-mari-chat-id="${firstChat.id}"] button`).first().click();
+
+    const transcript = window.locator('[data-component="HomeProfessorMariChat.Transcript"]');
+    await expect(transcript).toBeVisible();
+    await expect
+      .poll(() =>
+        transcript.evaluate((node) => ({
+          atBottom: Math.abs(node.scrollHeight - node.clientHeight - node.scrollTop) <= 2,
+          overflows: node.scrollHeight > node.clientHeight,
+        })),
+      )
+      .toEqual({ atBottom: true, overflows: true });
+  } finally {
+    await Promise.all(
+      [firstChat.id, secondChat.id].map((id) =>
+        page.request.delete(`/api/chats/internal/professor-mari/chats/${id}`).catch(() => undefined),
+      ),
+    );
+  }
+});
+
 test("Professor Mari bulk chat deletion follows the active accent", async ({ page }) => {
   const firstResponse = await page.request.get("/api/chats/internal/professor-mari");
   expect(firstResponse.ok()).toBeTruthy();
