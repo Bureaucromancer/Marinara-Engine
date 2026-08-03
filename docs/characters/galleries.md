@@ -70,7 +70,7 @@ If a gallery name matches a name in the global pool, the gallery version wins fo
 
 ## Reuse a gallery image in messages and greetings
 
-Any image in a character's Gallery can be displayed inside chat text — a greeting, an example message, or a message the character sends. Hover a gallery image and click **Copy image reference** (the link icon). It copies a small piece of Markdown you can paste anywhere the character speaks:
+Any image in a character's Gallery can be displayed inside chat text: a greeting, an example message, or a message the character sends. Hover a gallery image and click **Copy image reference** (the link icon). It copies a small piece of Markdown you can paste anywhere the character speaks:
 
 ```text
 ![sunset selfie](card://self/gallery/k3m2xq7.png)
@@ -82,19 +82,19 @@ Where it works:
 
 - **First Message**, **Alternate Greetings**, and **Example Dialogue** on the character card. The field's Markdown preview shows the image while you edit.
 - Any message a character sends, in **Roleplay** and **Conversation** mode alike.
-- **Group chats**: in a multi-speaker reply, `self` resolves per speaker — each character's line shows that character's own gallery image. If the speaker's gallery does not have the file, Marinara looks it up in the other chat characters' galleries, so the right image still appears even when a reply is merged under one speaker.
+- **Group chats**: in a multi-speaker reply, `self` resolves per speaker, so each character's line shows that character's own gallery image. If the speaker's gallery does not have the file, Marinara looks it up in the other chat characters' galleries, so the right image still appears even when a reply is merged under one speaker.
 
 Where it does not work, by design:
 
 - **Your own messages**. They have no speaking character, so a `self` reference shows as a broken image. If you want to post a character's gallery image yourself, use the chat asset browser's insert (which writes the full `card://characters/<id>/...` form).
-- **System messages**. They do not render Markdown image syntax at all — a reference shows as literal text.
-- **Persona galleries**. Persona images appear in your messages, which have no speaker — use the persona form `card://personas/<id>/gallery/<file>` instead.
+- **System messages**. They do not render Markdown image syntax at all, so a reference shows as literal text.
+- **Persona galleries**. Persona images appear in your messages, which have no speaker. Use the persona form `card://personas/<id>/gallery/<file>` instead.
 
-One nuance for group chats: if two characters in the chat have gallery images with the **same filename**, the speaking character's image always wins. When the speaker does not have the file, the **first match wins** — the other characters are checked in the chat's character order. Give shared-name images distinct filenames if you need a specific character's version to show from another character's line.
+One nuance for group chats: if two characters in the chat have gallery images with the **same filename**, the speaking character's image always wins. When the speaker does not have the file, the **first match wins**: the other characters are checked in the chat's character order. Give shared-name images distinct filenames if you need a specific character's version to show from another character's line.
 
 ### Why `self` instead of the full link
 
-A full link contains the character's internal id (`card://characters/<id>/gallery/<file>`), and ids are regenerated whenever a character is imported — so full links break for anyone you share the character with. The `self` form carries no id and no server address. It survives a **native JSON export and import**: the gallery images travel inside the export and keep their filenames, so every reference keeps working on the other side.
+A full link contains the character's internal id (`card://characters/<id>/gallery/<file>`), and ids are regenerated whenever a character is imported, so full links break for anyone you share the character with. The `self` form carries no id and no server address. It survives a **native JSON export and import**: the gallery images travel inside the export and keep their filenames, so every reference keeps working on the other side.
 
 One honest caveat: **PNG card exports do not include the gallery**, so no gallery reference of any kind can work after a PNG-only share. Ship the native `.json` export when your character uses gallery images.
 

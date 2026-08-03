@@ -51,9 +51,9 @@ Messages support Markdown image syntax, and Marinara resolves special `card://` 
 ![a caption](card://characters/<character-id>/gallery/<filename>.png)
 ```
 
-In Roleplay Mode, the chat's asset browser can insert one of these links for you. You can also paste one anywhere text is written — messages, greetings, example dialogue.
+In Roleplay Mode, the chat's asset browser can insert one of these links for you. You can also paste one anywhere text is written: messages, greetings, example dialogue.
 
-For images from a **character's own gallery**, prefer the portable form `card://self/gallery/<filename>` — it keeps working after the character is exported and imported. The character gallery has a **Copy image reference** button that produces it. See [Character galleries → Reuse a gallery image in messages and greetings](../characters/galleries.md#reuse-a-gallery-image-in-messages-and-greetings) for the details.
+For images from a **character's own gallery**, prefer the portable form `card://self/gallery/<filename>`, which keeps working after the character is exported and imported. The character gallery has a **Copy image reference** button that produces it. See [Character galleries → Reuse a gallery image in messages and greetings](../characters/galleries.md#reuse-a-gallery-image-in-messages-and-greetings) for the details.
 
 ## Streaming the reply
 
