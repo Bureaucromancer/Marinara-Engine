@@ -125,17 +125,24 @@ export function buildNoodlerPublicIdentity(
   };
 }
 
-export async function resolveNoodlerPublicIdentity(
+/** Identity for a linked public account the caller has already read. */
+export async function noodlerPublicIdentityFor(
   db: DB,
-  account: Pick<NoodleAccount, "noodleAccountId">,
+  publicAccount: NoodleAccount | null,
 ): Promise<PublicIdentity | null> {
-  const noodle = createNoodleStorage(db);
-  const publicAccount = account.noodleAccountId ? await noodle.getAccountById(account.noodleAccountId) : null;
   if (!publicAccount) return null;
   return buildNoodlerPublicIdentity(
     publicAccount,
     publicAccount.kind === "character" ? await createCharactersStorage(db).getById(publicAccount.entityId) : null,
   );
+}
+
+export async function resolveNoodlerPublicIdentity(
+  db: DB,
+  account: Pick<NoodleAccount, "noodleAccountId">,
+): Promise<PublicIdentity | null> {
+  const noodle = createNoodleStorage(db);
+  return noodlerPublicIdentityFor(db, account.noodleAccountId ? await noodle.getAccountById(account.noodleAccountId) : null);
 }
 
 export function stageProfileContainsPublicIdentity(
@@ -283,7 +290,8 @@ export async function generateNoodlerPost(
   const recentPosts = await noodle.listNoodlerPostsByAccount(account.id, 8);
   const disclosureMode = account.settings.privacy.identityDisclosure ?? "secret";
   const linkedPublicAccount = account.noodleAccountId ? await noodle.getAccountById(account.noodleAccountId) : null;
-  const publicIdentity = await resolveNoodlerPublicIdentity(db, account);
+  // Derive the identity from the row already in hand; resolving it again would re-read it.
+  const publicIdentity = await noodlerPublicIdentityFor(db, linkedPublicAccount);
   const messages = buildNoodlerPostMessages({
     account,
     stagePersonality: account.settings.privacy.stagePersonality ?? "",
