@@ -2177,10 +2177,13 @@ function GameSurfaceComponent({
    *  chrome that renders outside its element. Declared rather than pushed, so it applies on first paint. */
   const experienceSurfaceClass = experienceSurfacePackage?.manifest.contributions?.gameSurface?.surfaceClass ?? null;
   const experienceSurfaceActive = experienceSurfaceId !== null;
-  /** Broader than `experienceSurfaceActive`, but only while the installed-packages query is still in
-   *  flight: on a cold cache that is false for a moment even though the chat says an experience owns this
-   *  game, and built-in chrome would flash. Once the query settles this falls back to the surface, so a
-   *  game whose package was uninstalled gets the built-in chrome back instead of losing both. */
+  /** Whether an experience owns this game, which is what every built-in-chrome gate tests. Broader than
+   *  `experienceSurfaceActive`, but only while the installed-packages query is in flight: on a cold cache
+   *  that is false for a moment even though the chat already says an experience owns the run, and the
+   *  built-in HUD would flash before the surface replaces it. Once the query settles this follows the
+   *  surface, so a game whose package was uninstalled gets the built-in chrome back instead of losing
+   *  both. Mounting the capability element stays on `experienceSurfaceActive` — that one needs the
+   *  package to actually be there. */
   const experienceOwnsGame =
     experienceSurfaceActive || (gameExperienceId !== null && installedCapabilityPackagesPending);
   const { data: agentConfigs } = useAgentConfigs(storyboardAgentActive);
@@ -11516,7 +11519,9 @@ function GameSurfaceComponent({
                     tacticalCombatActive ? "top-14" : topOverlayOffsetClass,
                     replayActive && "hidden",
                     // The package draws its own header and party bar, so the built-in ones would collide.
-                    experienceSurfaceActive && "hidden",
+                    // Gated on ownership rather than the mount, so they do not flash while the package
+                    // is still being resolved.
+                    experienceOwnsGame && "hidden",
                   )}
                 >
                   {/* Mobile: map icon button that opens modal */}
@@ -11690,7 +11695,7 @@ function GameSurfaceComponent({
                   // Mobile widget slot — rendered inside GameNarration to sit above the narration box
                   const mobileWidgetSlot =
                     !combatUiActive &&
-                    !experienceSurfaceActive &&
+                    !experienceOwnsGame &&
                     hudWidgets.length > 0 &&
                     !(compactHudWidgets && choicesVisible) ? (
                       <div
@@ -11711,7 +11716,7 @@ function GameSurfaceComponent({
                   // win would unmount the anchor its menu is portaled into.
                   const choicesSlot =
                     activeChoices && narrationDone && !activeExperienceChrome?.providesChoices ? (
-                      compactHudWidgets && !combatUiActive && !experienceSurfaceActive && hudWidgets.length > 0 ? (
+                      compactHudWidgets && !combatUiActive && !experienceOwnsGame && hudWidgets.length > 0 ? (
                         <div
                           data-component="GameSurface.MobileChoiceStage"
                           className={cn(
@@ -12267,8 +12272,8 @@ function GameSurfaceComponent({
               )}
 
               {/* HUD Widgets - Left & Right, tops aligned */}
-              {/* Hidden while the package owns the surface — it draws its own HUD. */}
-              {!replayActive && !combatUiActive && !experienceSurfaceActive && hudWidgets.length > 0 && !compactHudWidgets && (
+              {/* Hidden while the package owns the game — it draws its own HUD. */}
+              {!replayActive && !combatUiActive && !experienceOwnsGame && hudWidgets.length > 0 && !compactHudWidgets && (
                 <>
                   {/* Desktop: full widget cards */}
                   <div className="pointer-events-none absolute inset-x-3 bottom-24 z-30 hidden items-end justify-between md:flex">
