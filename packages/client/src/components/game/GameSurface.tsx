@@ -3404,9 +3404,12 @@ function GameSurfaceComponent({
   /** Seam setter: replaces the pushed portrait map, or clears it when the map is empty or null. */
   const setExperienceSpeakerAvatars = useCallback(
     (value: { speakerAvatars: ReadonlyMap<string, { url: string }>; playerAvatarUrl?: string } | null) => {
-      // Read through: the map comes from the package, so a malformed push should clear the seam rather
-      // than throw inside the host.
-      setExperienceAvatars(value && (value.speakerAvatars?.size ?? 0) > 0 ? value : null);
+      // Read through, since the value comes from the package: a malformed push clears the seam rather
+      // than throwing inside the host. A player avatar on its own is a valid push — an experience may
+      // have nothing to say about its speakers and still want the player's own dialogue to carry a face.
+      const hasSpeakers = (value?.speakerAvatars?.size ?? 0) > 0;
+      const hasPlayerAvatar = typeof value?.playerAvatarUrl === "string" && value.playerAvatarUrl.trim() !== "";
+      setExperienceAvatars(hasSpeakers || hasPlayerAvatar ? value : null);
     },
     [],
   );
