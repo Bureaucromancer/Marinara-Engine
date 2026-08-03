@@ -58,19 +58,22 @@ export function NewGameExperienceChooser({
   // The same helper GameSurface mounts by, so this list can never offer something that wouldn't render.
   const experiences = useMemo(() => selectGameExperiencePackages(installed), [installed]);
   const activeExperience = experiences.find((e) => e.id === activeId) ?? null;
+  // Resolved, not remembered: the package can be uninstalled while this panel is open, and a stale id
+  // would mount a surface that no longer exists.
+  const selectedId = activeExperience?.id ?? null;
   // Freezes every control that could tear down the run mid-launch: flipping the experience off here
   // would create a game under one mode and set it up as another. The wizard's `isLoading` equivalent.
   const launching = createGame.isPending || gameSetup.isPending;
 
   // Escape closes the package's setup, matching the backdrop click and the wizard this panel replaces.
   useEffect(() => {
-    if (!activeId || launching) return;
+    if (!selectedId || launching) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onCancelSetup();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeId, launching, onCancelSetup]);
+  }, [selectedId, launching, onCancelSetup]);
 
   // The package prepares the config; the host creates the game and runs the opening, since it owns
   // navigation and the query cache. The experience must supply the connection — guessing one here would
@@ -92,7 +95,7 @@ export function NewGameExperienceChooser({
       // Stamps which experience owns this game; /game/create copies it to the chat metadata.
       const res = await createGame.mutateAsync({
         name: gameName,
-        setupConfig: { ...cfg, gameExperienceId: activeId } as unknown,
+        setupConfig: { ...cfg, gameExperienceId: selectedId } as unknown,
         preferences: "",
         chatId: activeChatId,
         connectionId,
@@ -113,15 +116,16 @@ export function NewGameExperienceChooser({
         // launch did fail, and the package has to unwind its own setup either way.
         onSetupError(error);
         throw error;
+      } finally {
+        // In a `finally`: the package may have written these before it called us, so a failed opening
+        // still leaves records nothing on this side knows about. `.all`, since lists cache per category.
+        queryClient.invalidateQueries({ queryKey: characterKeys.personas });
+        queryClient.invalidateQueries({ queryKey: lorebookKeys.all });
       }
-      // A setup may have written host resources straight to storage, which nothing on this side knows
-      // about. `lorebookKeys.all` rather than `.list()`: the lists are also cached per category.
-      queryClient.invalidateQueries({ queryKey: characterKeys.personas });
-      queryClient.invalidateQueries({ queryKey: lorebookKeys.all });
       // An experience that keeps its own state needs the chat id to seed itself.
       return chatId;
     },
-    [activeChatId, activeId, createGame, gameSetup, onSetupError, queryClient],
+    [activeChatId, selectedId, createGame, gameSetup, onSetupError, queryClient],
   );
 
   const experiencesSlot = (
@@ -205,7 +209,7 @@ export function NewGameExperienceChooser({
     </div>
   );
 
-  if (!activeId) return <>{renderClassicWizard(experiencesSlot)}</>;
+  if (!selectedId) return <>{renderClassicWizard(experiencesSlot)}</>;
 
   // Activated → the package draws the wizard body inside the same shell the built-in one uses, with the
   // block kept above it so the player can switch back.
@@ -247,7 +251,7 @@ export function NewGameExperienceChooser({
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             <div className="mb-4">{experiencesSlot}</div>
             <CapabilityElement
-              packageId={activeId}
+              packageId={selectedId}
               view="setup"
               capabilityProps={{
                 chatId: activeChatId,
