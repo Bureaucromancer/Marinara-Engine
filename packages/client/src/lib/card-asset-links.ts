@@ -94,7 +94,11 @@ export function resolveSelfCardAssets(
   return text.replace(SELF_GALLERY_REF_RE, (_match, rawFilename: string) => {
     const filename = decodeRefFilename(rawFilename);
     const speakerOwns = galleryIndex.byCharacter.get(characterId)?.has(filename);
-    if (!speakerOwns) {
+    // Fall back to another owner only once the speaker's own gallery has
+    // actually loaded (it has an entry in the index): an unresolved query is
+    // unknown ownership, not confirmed non-ownership, and treating them the
+    // same would flash another character's same-named image until it resolves.
+    if (!speakerOwns && galleryIndex.byCharacter.has(characterId)) {
       const owner = galleryIndex.order.find((id) => id !== characterId && galleryIndex.byCharacter.get(id)?.has(filename));
       if (owner) return `${prefixFor(owner)}${rawFilename}`;
     }
