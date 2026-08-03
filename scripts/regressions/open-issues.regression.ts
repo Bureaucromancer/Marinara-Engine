@@ -5186,6 +5186,61 @@ try {
   );
 }
 
+// Issues #4532 and #4533 — every runtime World Maps host must preserve the
+// target chat mode, while Chat Settings uses feature copy instead of repeating
+// package-installation guidance in an already-reached activation surface.
+{
+  const chatInputSource = readFileSync(
+    join(REPOSITORY_ROOT, "packages/client/src/components/chat/ChatInput.tsx"),
+    "utf8",
+  );
+  assert.match(
+    chatInputSource,
+    /packageId="hierarchical-maps"[\s\S]{0,180}view="runtime"[\s\S]{0,180}chatId: activeChatId,[\s\S]{0,80}chatMode: mode,/u,
+    "Roleplay World Maps runtime controls must preserve the active chat mode",
+  );
+
+  const gameInputSource = readFileSync(
+    join(REPOSITORY_ROOT, "packages/client/src/components/game/GameInput.tsx"),
+    "utf8",
+  );
+  assert.match(
+    gameInputSource,
+    /packageId="hierarchical-maps"[\s\S]{0,180}view="runtime"[\s\S]{0,180}chatId: draftKey,[\s\S]{0,80}chatMode: "game",/u,
+    "Game World Maps runtime controls must identify their supported chat mode",
+  );
+
+  const gameMapSource = readFileSync(
+    join(REPOSITORY_ROOT, "packages/client/src/components/game/GameMap.tsx"),
+    "utf8",
+  );
+  assert.equal(
+    gameMapSource.match(/chatMode: "game",/gu)?.length,
+    2,
+    "Desktop and mobile Game World Maps hosts must both identify their supported chat mode",
+  );
+
+  const chatSettingsSource = readFileSync(
+    join(REPOSITORY_ROOT, "packages/client/src/components/chat/ChatSettingsDrawer.tsx"),
+    "utf8",
+  );
+  assert.match(
+    chatSettingsSource,
+    /const worldMapsSettingsDescription = localizeUi\("ui\.chat\.chatsettingsdrawer\.worldMapsFeatureSummary"\);/u,
+    "Chat Settings must source the World Maps feature summary from localization",
+  );
+  assert.match(
+    chatSettingsSource,
+    /agent\.id === "hierarchical-maps"[\s\S]{0,500}description=\{worldMapsSettingsDescription\}/u,
+    "Game Chat Settings must omit package-installation guidance from the expanded World Maps card",
+  );
+  assert.match(
+    chatSettingsSource,
+    /agent\.id === "hierarchical-maps"[\s\S]{0,120}\? worldMapsSettingsDescription[\s\S]{0,80}: agent\.description/u,
+    "Roleplay Chat Settings must omit package-installation guidance from the active World Maps card",
+  );
+}
+
 // Issue #4002 — Character Tavern stores card JSON in zTXt (zlib-compressed)
 // PNG chunks; every card-parsing path must read them, and export must strip
 // stale ones so re-exported cards cannot carry outdated compressed data.

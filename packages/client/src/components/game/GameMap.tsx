@@ -780,6 +780,7 @@ export function GameMapPanel({
             view="world-map"
             capabilityProps={{
               chatId,
+              chatMode: "game",
               disabled,
               pendingTransition: pendingSpatialTransition,
               onOpenEditor: openFullMapEditor,
@@ -1098,6 +1099,7 @@ export function MobileMapButton({
                   view="world-map"
                   capabilityProps={{
                     chatId,
+                    chatMode: "game",
                     disabled,
                     compact: true,
                     onOpenEditor: openFullMapEditor,
