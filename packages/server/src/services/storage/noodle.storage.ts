@@ -1752,9 +1752,17 @@ export function createNoodleStorage(db: DB) {
               count += 1;
             }
           } else if (item.state === "published") {
+            // The linked post is gone. Re-preparing is only right while the slot is still in the
+            // future; a row whose publishAt has passed would be republished by the very next poll,
+            // so a user who deletes an automatic post would watch it come back. Discard those.
+            const slotStillAhead = Date.parse(item.publishAt) > at.getTime();
             await tx
               .update(noodlerPreparedPosts)
-              .set({ state: "prepared", publishedPostId: null, updatedAt: at.toISOString() })
+              .set(
+                slotStillAhead
+                  ? { state: "prepared", publishedPostId: null, updatedAt: at.toISOString() }
+                  : { state: "discarded", updatedAt: at.toISOString() },
+              )
               .where(eq(noodlerPreparedPosts.id, item.id));
             count += 1;
           }

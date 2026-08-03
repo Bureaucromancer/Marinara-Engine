@@ -145,7 +145,7 @@ export function ProfileInitial({
     <span
       className={cn(
         "flex shrink-0 items-center justify-center rounded-full bg-[var(--noodle-accent)]/15 font-black text-[var(--noodle-accent)]",
-        large ? "h-16 w-16 text-xl" : "h-11 w-11",
+        large ? "h-24 w-24 text-3xl" : "h-11 w-11",
       )}
     >
       {Array.from(profile.displayName)[0]?.toUpperCase() || <UserRound size={20} />}
@@ -655,7 +655,7 @@ export function NoodleShell({
             <button
               type="button"
               onClick={onOpenMobileHomeDestination}
-              aria-label={localizeUi("ui.noodle.noodleshell.noodleValue1", { value1: homeLabel.toLowerCase() })}
+              aria-label={localizeUi("ui.noodle.noodleshell.noodleValue1", { value1: homeLabel })}
               aria-current={homeActive ? "page" : undefined}
               className="relative flex items-center justify-center transition-colors hover:bg-[var(--accent)]"
             >
@@ -704,7 +704,7 @@ export function NoodleShell({
                 )}
               </button>
             )}
-            {noodlerActive && onOpenProfile && (
+            {onOpenProfile && (
               <button
                 type="button"
                 onClick={onOpenProfile}

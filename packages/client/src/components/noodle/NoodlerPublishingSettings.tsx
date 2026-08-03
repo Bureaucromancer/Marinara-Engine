@@ -47,7 +47,7 @@ export function NoodlerPublishingSettings({ active, onOpenCreator }: NoodlerPubl
           <input
             type="checkbox"
             checked={settings?.autoPostingScheduleEnabled ?? true}
-            disabled={updateSettings.isPending}
+            disabled={updateSettings.isPending || !settings}
             onChange={(event) => updateSettings.mutate({ autoPostingScheduleEnabled: event.target.checked })}
             className="h-5 w-5 accent-[var(--noodle-accent)]"
           />

@@ -496,6 +496,14 @@ export async function noodleRoutes(app: FastifyInstance) {
       if (result.status === "connection_not_found") {
         return reply.code(404).send({ error: "Noodle generation connection not found" });
       }
+      if (result.status === "exhausted") {
+        return reply.code(429).send({ error: "This creator has no automatic replies left today." });
+      }
+      if (result.status === "ineligible") {
+        return reply.code(404).send({ error: "That NoodleR reply can no longer receive a creator reply." });
+      }
+      // `duplicate` carries the existing interaction and is a success: the reply the caller
+      // wanted is already there.
       return result;
     } catch (error) {
       logger.error(error, "[noodler-reply] Creator reply generation failed");
@@ -822,11 +830,22 @@ export async function noodleRoutes(app: FastifyInstance) {
     // Operational failures (provider/storage) are reported apart from expected exclusions
     // so a provider outage cannot look like a batch of harmless skips.
     const failed: string[] = [];
+    // The account row and its scheduler settings are two writes. A retry that finds the row
+    // already there must still apply the settings, or a creator whose first attempt failed
+    // between the two is reported as created while never receiving its auto-posting config.
+    const applyAutoPosting = (accountId: string) =>
+      noodle.patchAccountSettings(accountId, { subtree: "scheduler", patch: { autoPosting } });
     for (const noodleAccountId of noodleAccountIds) {
       const existing = await noodle.getNoodlerAccountForNoodleAccount(noodleAccountId);
       if (existing) {
         if (executionId && existing.settings.profile.noodlerWizardExecutionId === executionId) {
-          created.push(existing.id);
+          try {
+            await applyAutoPosting(existing.id);
+            created.push(existing.id);
+          } catch (error) {
+            logger.error(error, "[noodler] Bulk replay could not apply auto-posting for %s", noodleAccountId);
+            failed.push(noodleAccountId);
+          }
         } else {
           skipped.push(noodleAccountId);
         }
@@ -855,15 +874,13 @@ export async function noodleRoutes(app: FastifyInstance) {
           skipped.push(noodleAccountId);
           continue;
         }
-        await noodle.patchAccountSettings(account.id, {
-          subtree: "scheduler",
-          patch: { autoPosting },
-        });
+        await applyAutoPosting(account.id);
         created.push(account.id);
       } catch (error) {
         if (isFileUniqueConstraintError(error, "noodle_accounts", ["noodleAccountId"])) {
           const replayed = await noodle.getNoodlerAccountForNoodleAccount(noodleAccountId);
           if (executionId && replayed?.settings.profile.noodlerWizardExecutionId === executionId) {
+            await applyAutoPosting(replayed.id);
             created.push(replayed.id);
           } else {
             skipped.push(noodleAccountId);
@@ -1035,7 +1052,7 @@ export async function noodleRoutes(app: FastifyInstance) {
   });
 
   // Manual test trigger: runs one automatic-style post immediately, the same way the
-  // scheduler does (subscriber access, no guide), without waiting for the next cadence
+  // scheduler does (locked access, no guide), without waiting for the next cadence
   // schedule or requiring auto-posting to be enabled.
   app.post("/noodler/accounts/:id/auto-post/run-now", async (req, reply) => {
     const settings = await noodle.getSettings();

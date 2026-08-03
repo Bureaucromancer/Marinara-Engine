@@ -49,7 +49,15 @@ export function NoodlerAgeGate({ personaName, onComplete, onSkip, onDismiss, isP
   // Both animations wait for the explainer to be dismissed: the charge gag is the payoff, and
   // running it behind a screen the user is still reading spends it on nobody.
   useEffect(() => {
-    if (reducedMotion || !explained) return;
+    // The media query is live, so reduced motion can turn on after mount. Seeding the state was
+    // not enough: returning early here would tear down the interval before it ever set `charged`,
+    // leaving Enter disabled forever. Land the card in its finished state instead.
+    if (reducedMotion) {
+      setTyped(CARD_NUMBER.length);
+      setCharged(true);
+      return;
+    }
+    if (!explained) return;
     const interval = setInterval(() => {
       setTyped((n) => {
         if (n >= CARD_NUMBER.length) {
@@ -76,13 +84,20 @@ export function NoodlerAgeGate({ personaName, onComplete, onSkip, onDismiss, isP
 
   const shownNumber = CARD_NUMBER.slice(0, typed).padEnd(CARD_NUMBER.length, "•");
 
+  // Enter is a one-way door: a second click during the 900ms confetti beat would complete the
+  // gate twice, and an unmount in that window would fire it after the component is gone.
+  const entered = useRef(false);
+  const enterTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (enterTimer.current) clearTimeout(enterTimer.current); }, []);
   const enter = () => {
+    if (entered.current) return;
+    entered.current = true;
     setConfetti(true);
     if (reducedMotion) {
       onComplete();
       return;
     }
-    setTimeout(onComplete, 900);
+    enterTimer.current = setTimeout(onComplete, 900);
   };
 
   if (!explained) {

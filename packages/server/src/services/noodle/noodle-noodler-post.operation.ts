@@ -130,8 +130,11 @@ export async function refreshTargetedNoodlerCreatorsNow(
   const settings = await noodle.getSettings();
   if (!settings.enableNoodler) return { status: "disabled" };
 
+  // One creator named twice is one refresh, not two: the per-account lock already serializes the
+  // work, but without this the response reports that creator twice.
+  const targetAccountIds = [...new Set(accountIds)];
   const settled = await settleAgentJobsWithConcurrencyLimit(
-    accountIds,
+    targetAccountIds,
     MAX_CONCURRENT_MANUAL_REFRESH,
     async (accountId): Promise<NoodlerRefreshNowOutcome> => {
       const result = await generateAndApplyNoodlerPost(db, {
@@ -146,8 +149,8 @@ export async function refreshTargetedNoodlerCreatorsNow(
   );
   const outcomes = settled.map((entry, index): NoodlerRefreshNowOutcome => {
     if (entry.status === "fulfilled") return entry.value;
-    logger.error(entry.reason, "[noodler] Targeted refresh failed for creator %s", accountIds[index]!);
-    return { accountId: accountIds[index]!, status: "error" };
+    logger.error(entry.reason, "[noodler] Targeted refresh failed for creator %s", targetAccountIds[index]!);
+    return { accountId: targetAccountIds[index]!, status: "error" };
   });
   return { status: "ok", outcomes };
 }
@@ -183,7 +186,14 @@ export async function createNoodlerPost(
         ? await persistNoodlerPostWithUploadedMedia(input.targetAccountId, postId, media, persist)
         : await persist();
     if (!post) return { status: "noodler_account_not_found" } as const;
-    await noodle.discardPreparedPostsAfterManualPost(input.targetAccountId, post.createdAt);
+    // The post is already persisted. Failing the request over cleanup would report a successful
+    // create as an error and invite a retry that posts twice; a stale prepared post is the
+    // cheaper problem, and the next reconciliation pass drops it anyway.
+    try {
+      await noodle.discardPreparedPostsAfterManualPost(input.targetAccountId, post.createdAt);
+    } catch (error) {
+      logger.warn(error, "[noodler] Failed to discard prepared posts after a manual post for %s", input.targetAccountId);
+    }
     return { status: "created", post } as const;
   });
   return locked.acquired ? locked.value : { status: "busy" };

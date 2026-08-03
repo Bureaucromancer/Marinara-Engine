@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type {
   NoodleIdentityDisclosure,
+  NoodlerOnboardingCompletion,
   NoodlerRefreshNowOutcome,
   NoodlerPostView,
   NoodlerStageProfile,
@@ -39,8 +40,11 @@ type Step = 1 | 2 | 3 | 4 | 5;
 type Intro = 0 | 1 | 2 | 3 | null;
 type SetupLane = "easy" | "customize" | null;
 const LAST_INTRO = 3;
-type CompletionKind = "declined" | "generated" | "partial" | "failed" | "zero";
+type CompletionKind = NoodlerOnboardingCompletion;
 type ActivityChoice = "manual" | "occasional" | "lively" | "veryActive";
+
+const clampPostsPerDay = (raw: string) =>
+  Math.max(1, Math.min(NOODLER_POSTS_PER_DAY_MAX, Math.round(Number(raw)) || 1));
 
 const DISCLOSURES: NoodleIdentityDisclosure[] = ["open", "hinted", "secret"];
 
@@ -100,6 +104,7 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
   const [activityChoice, setActivityChoice] = useState<ActivityChoice>("lively");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectionInitialized, setSelectionInitialized] = useState(false);
+  const [settingsSeeded, setSettingsSeeded] = useState(false);
   const [disclosure, setDisclosure] = useState<NoodleIdentityDisclosure>("hinted");
   const [exceptions, setExceptions] = useState<Record<string, NoodleIdentityDisclosure>>({});
   const [autoPostingEnabled, setAutoPostingEnabled] = useState(true);
@@ -144,6 +149,7 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
     setActivityChoice("lively");
     setSelected(new Set());
     setSelectionInitialized(false);
+    setSettingsSeeded(false);
     setDisclosure("hinted");
     setExceptions({});
     setAutoPostingEnabled(true);
@@ -157,10 +163,11 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
   }, [open, selectionOnly]);
 
   useEffect(() => {
-    if (!open || !data?.settings) return;
+    if (!open || settingsSeeded || !data?.settings) return;
     setPostsPerDay(data.settings.postsPerDay);
     setNightQuiet(data.settings.noodlerNightQuiet);
-  }, [data?.settings, open]);
+    setSettingsSeeded(true);
+  }, [data?.settings, open, settingsSeeded]);
 
   const { fetchNextPage, hasNextPage, isFetching } = eligible;
   useEffect(() => {
@@ -211,10 +218,15 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
     setStep(5);
   };
   const runGeneration = async (ids: string[], createFailures = creationFailures) => {
-    const result = await refreshTargeted.mutateAsync({ accountIds: ids, executionId });
     const retriedIds = new Set(ids);
-    const merged = [...outcomes.filter((outcome) => !retriedIds.has(outcome.accountId)), ...result.outcomes];
-    finalizeOutcomes(merged, createFailures);
+    const kept = outcomes.filter((outcome) => !retriedIds.has(outcome.accountId));
+    try {
+      const result = await refreshTargeted.mutateAsync({ accountIds: ids, executionId });
+      finalizeOutcomes([...kept, ...result.outcomes], createFailures);
+    } catch {
+      // The profiles still exist; only generation fell over, so they stay retryable.
+      finalizeOutcomes([...kept, ...ids.map((accountId) => ({ accountId, status: "error" as const }))], createFailures);
+    }
   };
   // Settings are recoverable from the settings panel, so a failure here must not block the
   // rest of the flow — but it must also never be the reason onboarding counts as done.
@@ -845,7 +857,7 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
                         max={NOODLER_POSTS_PER_DAY_MAX}
                         value={postsPerDay}
                         onChange={(event) =>
-                          setPostsPerDay(Math.max(1, Math.min(NOODLER_POSTS_PER_DAY_MAX, Number(event.target.value) || 1)))
+                          setPostsPerDay(clampPostsPerDay(event.target.value))
                         }
                         className="mt-2 h-11 w-28 rounded-md border border-[var(--border)] bg-[var(--background)] px-3"
                       />
@@ -954,9 +966,7 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
                             max={NOODLER_POSTS_PER_DAY_MAX}
                             value={postsPerDay}
                             onChange={(event) =>
-                              setPostsPerDay(
-                                Math.max(1, Math.min(NOODLER_POSTS_PER_DAY_MAX, Number(event.target.value) || 1)),
-                              )
+                              setPostsPerDay(clampPostsPerDay(event.target.value))
                             }
                             aria-label={t("ui.noodle.noodlerwizard.postsPerDay")}
                             className="h-9 w-16 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 text-center text-sm text-[var(--foreground)]"

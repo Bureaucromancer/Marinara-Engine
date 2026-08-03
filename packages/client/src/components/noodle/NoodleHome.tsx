@@ -732,10 +732,16 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
     navigation.mode === "settings" ? (navigation.tab ?? "noodle") : "noodle";
   const settingsTab: SocialSettingsTab =
     requestedSettingsTab === "noodler" && !settings?.enableNoodler ? "noodle" : requestedSettingsTab;
-  const settingsSection: SocialSettingsSection =
-    navigation.mode === "settings"
-      ? (navigation.section ?? (settingsTab === "noodle" ? "general" : "general"))
-      : "general";
+  // The tab can fall back to `noodle` when NoodleR is disabled while a persisted section like
+  // `creators` survives from the noodler tab. That section has no chip here, so nothing renders
+  // selected and the settings body comes up empty — clamp the section to the resolved tab.
+  const requestedSettingsSection: SocialSettingsSection =
+    navigation.mode === "settings" ? (navigation.section ?? "general") : "general";
+  const settingsSection: SocialSettingsSection = SOCIAL_SETTINGS_SECTIONS[settingsTab].some(
+    (section) => section.id === requestedSettingsSection,
+  )
+    ? requestedSettingsSection
+    : "general";
   const noodlerSettingsActive = navigation.mode === "settings" && settingsTab === "noodler";
   const viewedProfileAccountId =
     navigation.mode === "public" && navigation.view === "profile" ? navigation.accountId : null;

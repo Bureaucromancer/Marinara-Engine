@@ -532,6 +532,9 @@ export function useNoodlerReserveStatus(enabled = true) {
     queryKey: noodleKeys.noodlerReserveStatus(),
     queryFn: () => api.get<NoodlerReserveStatus>("/noodle/noodler/auto-post/status"),
     enabled,
+    // The scheduler prepares posts on its own timer, so nothing here invalidates this key when
+    // the counts change. Same 30s cadence the creator list already uses.
+    refetchInterval: 30_000,
   });
 }
 

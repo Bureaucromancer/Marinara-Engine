@@ -864,6 +864,7 @@ assert.equal(
 // of that same attempt on another connection, so the hook must not run a second time.
 resetConnectionAdmissionForTests();
 let claimCount = 0;
+let fellBackToSecondConnection = false;
 const claimingMode: ConnectionAdmissionMode = {
   kind: "background",
   beforeAttempt: () => {
@@ -877,11 +878,21 @@ const doubleClaimProvider = withConnectionFallbackProvider({
   fallbackConnection,
   fallbackBaseUrl: "https://fallback.example",
   category: "main",
-  onFallback: async () => undefined,
+  onFallback: async () => {
+    fellBackToSecondConnection = true;
+  },
   admissionMode: claimingMode,
 });
 await collectProviderOutput(doubleClaimProvider, { model: "claim-model" }).catch(() => undefined);
 assert.equal(claimCount, 1, "falling back must not book a second background claim");
+// `claimCount === 1` also holds when the fallback is never wired and the primary simply throws,
+// so pin the retry path itself. The fallback here points at an unreachable host, so its own
+// request failing is expected — reaching it at all is what this proves.
+assert.equal(
+  fellBackToSecondConnection,
+  true,
+  "the claim assertion is only meaningful if the fallback connection was actually reached",
+);
 
 // One logical attempt spans the primary and its fallback, so its outcome must be reported once,
 // after the chain settles — a successful fallback is a completed attempt, not a failed one.

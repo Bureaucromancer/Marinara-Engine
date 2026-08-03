@@ -62,14 +62,21 @@ export async function prepareNextNoodlerReservePost(
   }
   if (eligibleAccounts.length === 0) return "ineligible";
 
-  const lastActivity = new Map<string, number>();
-  for (const account of eligibleAccounts) {
-    const posts = await noodle.listNoodlerPostsByAccount(account.id, 1);
-    const preparedTimes = validPrepared
-      .filter((item) => item.creatorAccountId === account.id)
-      .map((item) => Date.parse(item.publishAt));
-    lastActivity.set(account.id, Math.max(Date.parse(posts[0]?.createdAt ?? "0"), ...preparedTimes, 0));
-  }
+  // `Date.parse("0")` is not zero — V8 reads it as the year 2000 — so an account that has never
+  // posted must contribute a real 0 rather than a parsed sentinel. The reads are independent, so
+  // fan them out instead of walking the creator list one round trip at a time.
+  const lastActivity = new Map(
+    await Promise.all(
+      eligibleAccounts.map(async (account): Promise<[string, number]> => {
+        const posts = await noodle.listNoodlerPostsByAccount(account.id, 1);
+        const preparedTimes = validPrepared
+          .filter((item) => item.creatorAccountId === account.id)
+          .map((item) => Date.parse(item.publishAt));
+        const lastPostedAt = posts[0] ? Date.parse(posts[0].createdAt) : 0;
+        return [account.id, Math.max(lastPostedAt, ...preparedTimes, 0)];
+      }),
+    ),
+  );
   const account = [...eligibleAccounts].sort(
     (a, b) => (lastActivity.get(a.id) ?? 0) - (lastActivity.get(b.id) ?? 0) || a.id.localeCompare(b.id),
   )[0]!;
@@ -149,17 +156,25 @@ export async function prepareNextNoodlerReservePost(
         unlinkNoodlerMedia(typeof mediaPath === "string" ? mediaPath : null);
         return "missed" as const;
       }
-      await noodle.createNoodlerPreparedPost({
-        creatorAccountId: account.id,
-        generatedAt: completedAt.toISOString(),
-        publishAt,
-        payload,
-        policyFingerprint: noodlerReservePolicyFingerprint(
-          account,
-          settings,
-          account.noodleAccountId ? (await noodle.getAccountById(account.noodleAccountId))?.updatedAt : null,
-        ),
-      });
+      try {
+        await noodle.createNoodlerPreparedPost({
+          creatorAccountId: account.id,
+          generatedAt: completedAt.toISOString(),
+          publishAt,
+          payload,
+          policyFingerprint: noodlerReservePolicyFingerprint(
+            account,
+            settings,
+            account.noodleAccountId ? (await noodle.getAccountById(account.noodleAccountId))?.updatedAt : null,
+          ),
+        });
+      } catch (persistError) {
+        // The image was already promoted out of staging, so nothing else will ever reference it
+        // if the row does not land. Same cleanup the missed-window path above performs.
+        const mediaPath = payload.metadata.noodlerMediaPath;
+        unlinkNoodlerMedia(typeof mediaPath === "string" ? mediaPath : null);
+        throw persistError;
+      }
       return "prepared" as const;
     } catch (error) {
       if (error instanceof BackgroundConnectionBusyError) return "busy" as const;
