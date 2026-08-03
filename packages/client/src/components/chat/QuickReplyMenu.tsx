@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -30,6 +31,7 @@ interface QuickReplyMenuProps {
 
 export function QuickReplyMenu({ actions, disabled = false }: QuickReplyMenuProps) {
   const { t: localizeUi } = useUiTranslation();
+  const menuId = useId();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -57,7 +59,12 @@ export function QuickReplyMenu({ actions, disabled = false }: QuickReplyMenuProp
         window.innerWidth - viewportPadding - menuRect.width,
       ),
     );
-    const top = Math.max(viewportPadding, triggerRect.top - gap - menuRect.height);
+    const preferredTop = triggerRect.top - gap - menuRect.height;
+    const maxTop = window.innerHeight - viewportPadding - menuRect.height;
+    const top =
+      preferredTop >= viewportPadding
+        ? preferredTop
+        : Math.max(viewportPadding, Math.min(triggerRect.bottom + gap, maxTop));
 
     setMenuPosition((current) =>
       current.ready && current.top === top && current.left === left ? current : { top, left, ready: true },
@@ -107,11 +114,21 @@ export function QuickReplyMenu({ actions, disabled = false }: QuickReplyMenuProp
   useLayoutEffect(() => {
     if (!open) return;
     updateMenuPosition();
-    window.addEventListener("resize", updateMenuPosition);
-    window.addEventListener("scroll", updateMenuPosition, true);
+    let frame = 0;
+    const scrollListenerOptions = { capture: true, passive: true } as const;
+    const scheduleUpdate = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        updateMenuPosition();
+      });
+    };
+    window.addEventListener("resize", scheduleUpdate);
+    window.addEventListener("scroll", scheduleUpdate, scrollListenerOptions);
     return () => {
-      window.removeEventListener("resize", updateMenuPosition);
-      window.removeEventListener("scroll", updateMenuPosition, true);
+      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener("resize", scheduleUpdate);
+      window.removeEventListener("scroll", scheduleUpdate, scrollListenerOptions);
     };
   }, [open, updateMenuPosition, visibleActions.length]);
 
@@ -215,6 +232,7 @@ export function QuickReplyMenu({ actions, disabled = false }: QuickReplyMenuProp
         aria-label={localizeUi("settings.quickReplies.label")}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
         className={cn(
           "flex h-11 w-11 items-center justify-center rounded-full transition-all duration-200 sm:h-8 sm:w-8",
           open
@@ -242,6 +260,7 @@ export function QuickReplyMenu({ actions, disabled = false }: QuickReplyMenuProp
             >
               <motion.div
                 key="quick-replies-rail"
+                id={menuId}
                 role="menu"
                 aria-label={localizeUi("settings.quickReplies.label")}
                 aria-orientation="vertical"
