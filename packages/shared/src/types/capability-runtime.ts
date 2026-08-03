@@ -63,11 +63,66 @@ export interface CapabilityLorebookEntrySelection {
   excludedSourceAgentIds?: string[];
 }
 
+// [capability writes] Inputs for the resource WRITE surface (used by game-mode setup: seed the player persona +
+// its lorebook). Thin, storage-agnostic shapes — the server impl maps them to engine storage.
+export interface CapabilityPersonaCreateInput {
+  name: string;
+  description: string;
+  avatarPath?: string;
+  comment?: string;
+  appearance?: string;
+  tags?: string;
+}
+export interface CapabilityPersonaUpdateInput {
+  description?: string;
+  comment?: string;
+  appearance?: string;
+  tags?: string;
+}
+/** Lorebook categories the host understands. Spelled out here rather than left as a free string so a
+ *  wrong value is a compile error in the package instead of a silent rejection at write time. */
+export type CapabilityLorebookCategory = "uncategorized" | "world" | "character" | "npc" | "spellbook";
+
+export interface CapabilityLorebookCreateInput {
+  name: string;
+  description?: string;
+  category?: CapabilityLorebookCategory;
+  scanDepth?: number;
+  tokenBudget?: number;
+  personaId?: string;
+  enabled?: boolean;
+}
+export interface CapabilityLorebookUpdateInput {
+  scanDepth?: number;
+  tokenBudget?: number;
+}
+export interface CapabilityLorebookEntryInput {
+  /** Required: an entry with no name cannot be stored, so accepting one here only defers the failure. */
+  name: string;
+  content?: string;
+  keys?: string[];
+  [key: string]: unknown;
+}
+
 export interface CapabilityResourceHost {
   listCharacters(characterIds?: string[]): Promise<CapabilityCharacterRecord[]>;
   listPersonas(personaIds?: string[]): Promise<CapabilityPersonaRecord[]>;
   listLorebooks(lorebookIds?: string[]): Promise<CapabilityLorebookRecord[]>;
   listEligibleLorebookEntries(selection: CapabilityLorebookEntrySelection): Promise<CapabilityLorebookEntryRecord[]>;
+  // [capability writes] WRITE surface — used by a package's game-mode setup to find-or-create the
+  // player persona and its lorebook. Passthroughs to engine storage in capability-resources.service.ts.
+  //
+  // OPTIONAL on purpose. The engine's own host implements all six, so a package always gets them here;
+  // declaring them required would make adding them a breaking change for any other implementation of this
+  // published interface, and would force a host that only wants to expose reads to stub six throwers.
+  // A package should feature-detect (`typeof resources.createPersona === "function"`) exactly the way it
+  // already does for `registerPromptContext`.
+  createPersona?(input: CapabilityPersonaCreateInput): Promise<CapabilityPersonaRecord>;
+  updatePersona?(personaId: string, updates: CapabilityPersonaUpdateInput): Promise<void>;
+  createLorebook?(input: CapabilityLorebookCreateInput): Promise<CapabilityLorebookRecord>;
+  updateLorebook?(lorebookId: string, updates: CapabilityLorebookUpdateInput): Promise<void>;
+  bulkCreateLorebookEntries?(lorebookId: string, entries: CapabilityLorebookEntryInput[]): Promise<void>;
+  removeLorebookEntry?(entryId: string): Promise<void>;
 }
 
 export interface CapabilityLanguageModelMessage {

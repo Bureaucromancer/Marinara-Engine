@@ -198,6 +198,15 @@ export interface GameSetupConfig {
   /** Connection to use for the scene wrap-up turn (backgrounds, music, widgets, etc.).
    *  When omitted, falls back to sidecar (if available) or skips the wrap-up. */
   sceneConnectionId?: string;
+  /** Id of the installed capability package providing this game's EXPERIENCE — a self-contained game mode
+   *  that draws its own surface (HUD, menus, combat) over the shared narration. Chosen when the game is
+   *  CREATED and fixed for its lifetime: an experience owns the whole run, so it can't be switched on or
+   *  off mid-game the way a per-chat agent can. Omitted = the built-in Game mode, unchanged. */
+  gameExperienceId?: string;
+  /** Whatever the experience's own setup collected, stored verbatim and never interpreted by the host.
+   *  It rides along with the rest of the setup config, so the experience can always recover the options
+   *  the game was created with — even if a later call to seed its own state never happens. */
+  experienceConfig?: Record<string, unknown>;
   /** Enable installed agents and agent-driven Game Mode features for this game. */
   enableAgents?: boolean;
   /** Enable automatic sprite generation for characters using image model */

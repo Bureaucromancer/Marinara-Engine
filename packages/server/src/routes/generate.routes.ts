@@ -275,6 +275,7 @@ import {
 import { prepareConversationPromptHistory } from "./generate/conversation-history-runtime.js";
 import { resolveConversationPresenceRuntime } from "./generate/conversation-presence-runtime.js";
 import { resolveProfessorMariPromptContext } from "./generate/professor-mari-prompt-context.js";
+import { collectCapabilityPromptContext } from "../services/capability-packages/capability-prompt-context.service.js";
 import {
   appendToFirstSystemMessage,
   CONVERSATION_NO_REPEAT_INSTRUCTION,
@@ -2962,6 +2963,25 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           }
 
+          // Let installed packages contribute live context to this turn (the `prompt-context` permission).
+          // A package that owns state the player can see — a game surface, a tracker — appends it here so
+          // the model narrates in sync with it instead of guessing. Appended to the system message, same as
+          // the lorebook block above. Nothing registered (the normal case) ⇒ zero effect on the prompt.
+          const capabilityPromptContext = await collectCapabilityPromptContext({
+            chatId: input.chatId,
+            chatMeta,
+            mode: "game",
+          });
+          if (capabilityPromptContext.blocks.length > 0) {
+            const capabilityBlock = capabilityPromptContext.blocks.join("\n\n");
+            const sysMsg = finalMessages.find((m) => m.role === "system");
+            if (sysMsg) {
+              sysMsg.content += "\n\n" + capabilityBlock;
+            } else {
+              finalMessages.unshift({ role: "system" as const, content: capabilityBlock });
+            }
+          }
+
           // Game bypasses the preset assembler, so card-authored depth and
           // post-history instructions must be injected explicitly before the
           // final GM format reminder claims the generation tail.
@@ -3023,6 +3043,9 @@ export async function generateRoutes(app: FastifyInstance) {
               artStylePrompt: gmCtx.artStylePrompt,
               addressMode,
               playerDiceRollSubmitted,
+              // A package that brought its own inventory (declared via prompt-context) takes the built-in
+              // one out of the prompt, so the GM isn't told to drive a system the player can't see.
+              experienceProvidedSystems: capabilityPromptContext.provides,
               playerInventory: (() => {
                 try {
                   const inv = (chatMeta.gameInventory as Array<{ name: string; quantity: number }>) ?? [];

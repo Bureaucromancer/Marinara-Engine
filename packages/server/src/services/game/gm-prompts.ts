@@ -626,6 +626,9 @@ export function buildGmFormatReminder(
     addressMode?: "party" | "gm";
     /** Whether the current player turn already includes a resolved [dice: ...] roll. */
     playerDiceRollSubmitted?: boolean;
+    /** Built-in systems an installed experience replaces with its own (see capability prompt-context).
+     *  Undeclared systems stay built-in, so an ordinary game is unaffected. */
+    experienceProvidedSystems?: { inventory?: boolean };
   },
 ): string {
   const lines: string[] = [];
@@ -652,6 +655,9 @@ export function buildGmFormatReminder(
       return lines;
     });
   const hudWidgets = Array.isArray(ctx.hudWidgets) ? ctx.hudWidgets : [];
+  // An experience that tracks items itself owns the whole loop (its own UI, its own state), so asking the
+  // GM for [inventory:] here would only produce commands nothing consumes.
+  const experienceOwnsInventory = ctx.experienceProvidedSystems?.inventory === true;
   const playerInventory = Array.isArray(ctx.playerInventory)
     ? ctx.playerInventory.flatMap((item) => {
         const name = normalizePromptText(item?.name);
@@ -766,7 +772,11 @@ export function buildGmFormatReminder(
           `- [map_update: new_location="Location Name" connected_to="Previous Location Name" node_emoji="emoji"] - only when the party arrives at an entirely new location on the current node map.`,
         ]
       : []),
-    `- [inventory: action="add|remove" item="Item A, Item B" count="3"] - every real item gain or loss, keep names short and use count/quantity for stacked items.`,
+    ...(experienceOwnsInventory
+      ? []
+      : [
+          `- [inventory: action="add|remove" item="Item A, Item B" count="3"] - every real item gain or loss, keep names short and use count/quantity for stacked items.`,
+        ]),
     `- [Note: contents] or [Book: contents] - when a new readable note or book is acquired and should be tracked in the journal.`,
     `- [state: exploration|dialogue|combat|travel_rest] - only on actual mode transitions. If you're planning to use [state: combat], this one ALWAYS has to be at the end of the turn, as it initiates a new combat generation and UI.`,
     `- [reputation: npc="Name" action="helped"] - when an NPC's tracked stance changes because of what happened.`,
@@ -814,8 +824,9 @@ export function buildGmFormatReminder(
     );
   }
 
-  // Inventory context
-  if (playerInventory.length > 0) {
+  // Inventory context (skipped when an experience owns items — a legacy save could still carry a stale
+  // built-in list, and showing it would contradict the inventory the player actually has on screen).
+  if (!experienceOwnsInventory && playerInventory.length > 0) {
     lines.push(``, `PLAYER INVENTORY: ${buildCompactInventoryLine(playerInventory)}`);
   }
 

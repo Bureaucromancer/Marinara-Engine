@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────
 // Game: Setup Wizard (initial game setup modal)
 // ──────────────────────────────────────────────
-import { lazy, Suspense, useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent } from "react";
+import { lazy, Suspense, useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { toast } from "sonner";
@@ -100,6 +100,9 @@ function normalizeCapabilitySetupSelectionKind(
 }
 
 interface GameSetupWizardProps {
+  /** Optional block rendered in the first step, with the other pre-start choices (right after "reuse a
+   *  game setup"). The host uses it to offer installed game EXPERIENCES; absent when there are none. */
+  experiencesSlot?: ReactNode;
   onComplete: (
     config: GameSetupConfig,
     preferences: string,
@@ -428,6 +431,7 @@ function normalizeGameLanguage(language: string): string {
 }
 
 export function GameSetupWizard({
+  experiencesSlot,
   onComplete,
   onCancel,
   isLoading,
@@ -1257,6 +1261,11 @@ export function GameSetupWizard({
                 </p>
               )}
             </div>
+
+            {/* Slot for installed game EXPERIENCES (packages that replace the whole game mode). Sits with
+                the other "before you start" choices — reuse a setup, pick an experience — and is simply
+                absent when nothing provides one, leaving this step exactly as it was. */}
+            {experiencesSlot}
 
             <div>
               <label className={GAME_SETUP_FIELD_LABEL}>{localizeUi("ui.game.gamesetupwizard.gameName")}</label>

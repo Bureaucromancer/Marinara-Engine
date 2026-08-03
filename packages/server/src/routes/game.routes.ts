@@ -1684,6 +1684,10 @@ const gameSetupConfigSchema = z.object({
   gmCharacterId: z.string().nullable().optional(),
   partyCharacterIds: z.array(z.string()),
   personaId: z.string().nullable().optional(),
+  /** Installed package that provides this game's experience (its id; same charset the manifest allows). */
+  gameExperienceId: z.string().max(80).optional(),
+  /** Opaque config owned by that experience — persisted verbatim, never read by the host. */
+  experienceConfig: z.record(z.string(), z.unknown()).optional(),
   sceneConnectionId: z.string().optional(),
   enableAgents: z.boolean().optional(),
   enableSpriteGeneration: z.boolean().optional(),
@@ -6325,6 +6329,8 @@ export async function gameRoutes(app: FastifyInstance) {
       gameSystemPrompt,
       gameSpecialInstructions,
       gameSceneConnectionId: setupConfig.sceneConnectionId || null,
+      // The experience is chosen at creation and belongs to the game for its lifetime (see GameSetupConfig).
+      gameExperienceId: setupConfig.gameExperienceId || null,
       gameNpcs: [],
       enableAgents: setupConfig.enableAgents === true,
       activeAgentIds: setupActiveAgentIds,
