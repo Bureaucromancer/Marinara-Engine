@@ -8598,6 +8598,7 @@ export async function generateRoutes(app: FastifyInstance) {
                           : null,
                         requestedNames: illCharacters.filter((name): name is string => typeof name === "string"),
                         promptText: [
+                          currentUserInputContent() ?? "",
                           imagePrompt,
                           style,
                           typeof illData.reason === "string" ? illData.reason : "",
@@ -8605,6 +8606,7 @@ export async function generateRoutes(app: FastifyInstance) {
                         ].join("\n"),
                         fallbackToChatCharacters: false,
                         includeReferenceImages: useAvatarRefs,
+                        includePersonaWhenMentionedInPrompt: false,
                         maxReferences: spatialLocationReferenceImage ? 5 : 6,
                       });
                       if (includeCharacterAppearance && referenceResolution.appearanceBlock) {

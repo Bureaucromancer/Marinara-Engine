@@ -237,11 +237,11 @@ async function generateSelfie(
         avatarPath: character.avatarPath,
         appearance: character.appearance,
       })),
-      persona: args.persona,
+      persona: null,
       requestedNames: [args.charName],
       promptText: [args.charName, args.command.context ?? "", imagePrompt].join("\n"),
       fallbackToChatCharacters: false,
-      maxReferences: 1,
+      maxReferences: 6,
     });
     if (selfieIncludeCharacterAppearance && referenceResolution.appearanceBlock) {
       finalSelfiePrompt += `\n\n${referenceResolution.appearanceBlock}`;

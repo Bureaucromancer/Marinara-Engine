@@ -2257,6 +2257,39 @@ const roleplaySurfaceSource = readFileSync(
   new URL("../../packages/client/src/components/chat/ChatRoleplaySurface.tsx", import.meta.url),
   "utf8",
 );
+const chatMessageSource = readFileSync(
+  new URL("../../packages/client/src/components/chat/ChatMessage.tsx", import.meta.url),
+  "utf8",
+);
+const narratorUiStoreSource = readFileSync(
+  new URL("../../packages/client/src/stores/ui.store.ts", import.meta.url),
+  "utf8",
+);
+assert.match(
+  roleplaySurfaceSource,
+  /const inactiveIds = new Set\(readStringArray\(chatMeta\.inactiveCharacterIds\)\);[\s\S]{0,180}return activeIds\.length > 0 \? activeIds : chatCharIds;/u,
+  "Merged Narrator avatars must exclude inactive Roleplay characters",
+);
+assert.equal(
+  roleplaySurfaceSource.match(/mergedGroupCharacterIds=\{activeChatCharacterIds\}/gu)?.length,
+  3,
+  "Historical, regenerating, and streaming Narrator messages must share the active avatar list",
+);
+assert.match(
+  chatMessageSource,
+  /const cycleMergedNarratorAvatars = !isRoleplay \|\| roleplayNarratorAvatarCycling;/u,
+  "Narrator avatar cycling must remain unchanged outside Roleplay and follow the Roleplay preference",
+);
+assert.match(
+  chatMessageSource,
+  /cycleMergedNarratorAvatars \? "absolute inset-0 w-full" : "relative w-0 min-w-0 flex-1"/u,
+  "Disabling Narrator cycling must place active avatars together",
+);
+assert.match(
+  narratorUiStoreSource,
+  /roleplayNarratorAvatarCycling:\s*true/u,
+  "Narrator avatar cycling must remain enabled by default",
+);
 const themesRouteSource = readFileSync(
   new URL("../../packages/server/src/routes/themes.routes.ts", import.meta.url),
   "utf8",
@@ -2821,6 +2854,11 @@ assert.match(
   /logDebugOverride\([\s\S]*\[debug\/commands\/selfie\] prompt-builder system/u,
 );
 assert.match(
+  conversationSelfieRuntimeSource,
+  /resolveIllustratorCharacterReferences\(\{[\s\S]{0,800}persona: null,[\s\S]{0,800}maxReferences: 6/u,
+  "Conversation group selfies must keep all depicted character references without attaching the photographer persona",
+);
+assert.match(
   globalStyles,
   /\[data-marinara-accent-animation\] :where\(\.mari-editor-shell, select\) \{[\s\S]*--primary: var\(--marinara-app-accent-static\);[\s\S]*--marinara-chat-chrome-accent: var\(--marinara-app-accent-static\);[\s\S]*\}/u,
 );
@@ -3217,6 +3255,16 @@ assert.match(
   retryAgentsPromptReviewSource,
   /const resultAgent = resolvedAgents\.find[\s\S]{0,360}resultAgent \?\? \(result\.agentType === "illustrator" \? fallbackIllustratorAgent : undefined\)/u,
   "Image Prompt retries must retain custom agent settings without borrowing Illustrator configuration",
+);
+assert.match(
+  conversationGenerationSource,
+  /promptText:\s*\[\s*currentUserInputContent\(\) \?\? ""[\s\S]{0,500}includePersonaWhenMentionedInPrompt: false/u,
+  "Roleplay illustrations must resolve depicted characters from the latest user request without attaching an off-camera persona",
+);
+assert.match(
+  retryAgentsPromptReviewSource,
+  /promptText:\s*\[[\s\S]{0,180}recentMessages[\s\S]{0,500}includePersonaWhenMentionedInPrompt: false/u,
+  "Retried Roleplay illustrations must preserve latest-user character reference detection",
 );
 const uiStoreSource = readFileSync(new URL("../../packages/client/src/stores/ui.store.ts", import.meta.url), "utf8");
 const settingsSyncSource = readFileSync(
@@ -4126,8 +4174,33 @@ assert.doesNotMatch(
 );
 assert.match(
   summaryPopoverSource,
-  /<button(?:(?!>)[\s\S])*onClick=\{handleEditVisiblePrompt\}(?:(?!>)[\s\S])*disabled=\{!globalPromptSettingsReady \|\| promptSettingsSaveLocked\}(?:(?!>)[\s\S])*aria-expanded=/u,
-  "The Summary Prompt Edit action must expose disclosure semantics for its editor",
+  /onClick=\{\(\) => void handleToggleVisiblePromptEditor\(\)\}[\s\S]{0,500}aria-expanded=\{visiblePromptEditorOpen\}/u,
+  "The Summary Prompt Edit/Done action must expose disclosure semantics for its editor",
+);
+assert.match(
+  summaryPopoverSource,
+  /visiblePromptEditorOpen[\s\S]{0,300}ui\.chat\.summarypopover\.done[\s\S]{0,100}ui\.noodle\.noodlepostcard\.edit/u,
+  "The Summary Prompt editor must replace Edit with a Done action while open",
+);
+assert.match(
+  summaryPopoverSource,
+  /setTemplateSelectOpen\(false\);\s*setTemplateEditorOpen\(false\);/u,
+  "Done must close the Chat Summary prompt editor",
+);
+assert.match(
+  summaryPopoverSource,
+  /const saved = await commitCombinePromptDraft\(\);\s*if \(saved\) setCombinePromptEditorOpen\(false\);/u,
+  "Done must save and close the Combine prompt editor",
+);
+assert.equal(
+  summaryPopoverSource.match(/className="h-48 space-y-[12] overflow-y-auto pr-0\.5"/gu)?.length,
+  2,
+  "Chat Summary and Combine prompt views must reserve the same vertical space",
+);
+assert.match(
+  summaryPopoverSource,
+  /rows=\{5\}[\s\S]{0,500}className="h-28 w-full resize-none/u,
+  "The Combine prompt editor must stay compact enough to match the Chat Summary view",
 );
 const promptSettingsPersistSource = summaryPopoverSource.slice(
   summaryPopoverSource.indexOf("const persistPromptTemplates"),

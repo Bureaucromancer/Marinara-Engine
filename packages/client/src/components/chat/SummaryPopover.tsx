@@ -1060,6 +1060,21 @@ export function SummaryPopover({
     if (!templateEditorOpen) handleEditActivePrompt();
   }, [combinePromptEditorOpen, handleEditActivePrompt, summaryPromptView, templateEditorOpen]);
 
+  const visiblePromptEditorOpen = summaryPromptView === "combine" ? combinePromptEditorOpen : templateEditorOpen;
+  const handleToggleVisiblePromptEditor = useCallback(async () => {
+    if (!visiblePromptEditorOpen) {
+      handleEditVisiblePrompt();
+      return;
+    }
+    if (summaryPromptView === "combine") {
+      const saved = await commitCombinePromptDraft();
+      if (saved) setCombinePromptEditorOpen(false);
+      return;
+    }
+    setTemplateSelectOpen(false);
+    setTemplateEditorOpen(false);
+  }, [commitCombinePromptDraft, handleEditVisiblePrompt, summaryPromptView, visiblePromptEditorOpen]);
+
   const handleSavePromptTemplate = useCallback(async () => {
     if (!hasTemplateDraft) return;
     const trimmedName = templateNameDraft.trim().slice(0, 80);
@@ -1366,17 +1381,19 @@ export function SummaryPopover({
                   </div>
                   <button
                     type="button"
-                    onClick={handleEditVisiblePrompt}
-                    disabled={!globalPromptSettingsReady || promptSettingsSaveLocked}
-                    aria-expanded={summaryPromptView === "combine" ? combinePromptEditorOpen : templateEditorOpen}
+                    onClick={() => void handleToggleVisiblePromptEditor()}
+                    disabled={!globalPromptSettingsReady || (promptSettingsSaveLocked && !visiblePromptEditorOpen)}
+                    aria-expanded={visiblePromptEditorOpen}
                     className={cn(
                       "shrink-0 rounded-md px-2 py-1 text-xs transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-50",
-                      (summaryPromptView === "combine" ? combinePromptEditorOpen : templateEditorOpen)
+                      visiblePromptEditorOpen
                         ? "bg-[var(--accent)] text-[var(--foreground)] ring-1 ring-[var(--border)]"
                         : "text-[var(--muted-foreground)]",
                     )}
                   >
-                    {localizeUi("ui.noodle.noodlepostcard.edit")}
+                    {visiblePromptEditorOpen
+                      ? localizeUi("ui.chat.summarypopover.done")
+                      : localizeUi("ui.noodle.noodlepostcard.edit")}
                   </button>
                 </div>
 
@@ -1416,7 +1433,7 @@ export function SummaryPopover({
                 </div>
 
                 {summaryPromptView === "summary" ? (
-                  <>
+                  <div className="h-48 space-y-2 overflow-y-auto pr-0.5">
                 <div className="grid grid-cols-1 gap-1">
                   <div className="relative min-w-0">
                     <button
@@ -1470,7 +1487,7 @@ export function SummaryPopover({
                   </div>
                 </div>
 
-                <div className="max-h-28 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--background)]/25 px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
+                <div className="h-36 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--background)]/25 px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
                   {activeSummaryPrompt}
                 </div>
 
@@ -1575,9 +1592,9 @@ export function SummaryPopover({
                     )}
                   </div>
                 )}
-                  </>
+                  </div>
                 ) : (
-                <div className="space-y-1">
+                <div className="h-48 space-y-1 overflow-y-auto pr-0.5">
                   <span className="text-[0.625rem] font-semibold text-[var(--muted-foreground)]">
                     {localizeUi("ui.chat.summarypopover.combinePrompt")}
                   </span>
@@ -1590,13 +1607,13 @@ export function SummaryPopover({
                       onChange={(event) => setCombinePromptDraft(event.target.value)}
                       onBlur={() => void handleCombinePromptBlur()}
                       maxLength={CHAT_SUMMARY_PROMPT_MAX_LENGTH}
-                      rows={8}
+                      rows={5}
                       disabled={!globalPromptSettingsReady || promptSettingsSaveLocked}
                       aria-label={localizeUi("ui.chat.summarypopover.combinePrompt")}
-                      className="max-h-48 w-full resize-y rounded-md bg-[var(--card)] px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="h-28 w-full resize-none rounded-md bg-[var(--card)] px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50"
                     />
                   ) : (
-                    <div className="max-h-36 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--background)]/25 px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
+                    <div className="h-28 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--background)]/25 px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
                       {combinePromptDraft}
                     </div>
                   )}
