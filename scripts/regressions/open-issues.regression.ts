@@ -56,6 +56,7 @@ import {
   resolveTrackerPanelDesktopWidth,
 } from "../../packages/client/src/lib/tracker-panel-layout.js";
 import { getApiErrorMessage } from "../../packages/client/src/lib/api-client.js";
+import { scrollProfessorMariTranscriptToBottom } from "../../packages/client/src/lib/professor-mari-transcript-scroll.js";
 import { parseCustomParametersDraft } from "../../packages/client/src/lib/generation-custom-parameters.js";
 import { parseGenerationParameterDraft } from "../../packages/client/src/lib/generation-parameter-draft.js";
 import {
@@ -2225,6 +2226,28 @@ const professorMariHomeSource = readFileSync(
 assert.match(professorMariHomeSource, /chatHistorySelectionMode/u);
 assert.match(professorMariHomeSource, /toggleProfessorChatSelection/u);
 assert.match(professorMariHomeSource, /handleBulkDeleteProfessorChats/u);
+const professorMariTranscript = { scrollHeight: 720, scrollTop: 0 };
+scrollProfessorMariTranscriptToBottom(professorMariTranscript);
+assert.equal(
+  professorMariTranscript.scrollTop,
+  professorMariTranscript.scrollHeight,
+  "Professor Mari transcript scrolling must align a mounted pane with its newest message",
+);
+assert.match(
+  professorMariHomeSource,
+  /ref=\{setTranscriptScrollNode\}[\s\S]{0,100}data-component="HomeProfessorMariChat\.Transcript"/u,
+  "Professor Mari transcript panes must trigger scrolling from their mounted ref",
+);
+assert.match(
+  professorMariHomeSource,
+  /messageLoadAbortRef\.current !== controller[\s\S]{0,80}activeChatIdRef\.current !== id/u,
+  "Professor Mari message loads must discard stale requests and inactive chat results",
+);
+assert.match(
+  professorMariHomeSource,
+  /message\.role === "user"[\s\S]{0,180}<TranscriptRow[\s\S]{0,100}border-y border-\[var\(--border\)\]\/60/u,
+  "Professor Mari user messages must retain their theme-aware horizontal separators",
+);
 assert.match(
   professorMariHomeSource,
   /Promise\.allSettled\([\s\S]*?api\.delete\(`\/chats\/internal\/professor-mari\/chats\/\$\{id\}`\)/u,
@@ -2233,6 +2256,64 @@ assert.match(
 const roleplaySurfaceSource = readFileSync(
   new URL("../../packages/client/src/components/chat/ChatRoleplaySurface.tsx", import.meta.url),
   "utf8",
+);
+const chatMessageSource = readFileSync(
+  new URL("../../packages/client/src/components/chat/ChatMessage.tsx", import.meta.url),
+  "utf8",
+);
+const narratorUiStoreSource = readFileSync(
+  new URL("../../packages/client/src/stores/ui.store.ts", import.meta.url),
+  "utf8",
+);
+assert.match(
+  roleplaySurfaceSource,
+  /const inactiveIds = new Set\(readStringArray\(chatMeta\.inactiveCharacterIds\)\);[\s\S]{0,180}return activeIds\.length > 0 \? activeIds : chatCharIds;/u,
+  "Merged Narrator avatars must exclude inactive Roleplay characters",
+);
+assert.equal(
+  roleplaySurfaceSource.match(/mergedGroupCharacterIds=\{activeChatCharacterIds\}/gu)?.length,
+  3,
+  "Historical, regenerating, and streaming Narrator messages must share the active avatar list",
+);
+assert.match(
+  chatMessageSource,
+  /const cycleMergedNarratorAvatars = !isRoleplay \|\| roleplayNarratorAvatarCycling;/u,
+  "Narrator avatar cycling must remain unchanged outside Roleplay and follow the Roleplay preference",
+);
+assert.match(
+  chatMessageSource,
+  /\[cycleMergedNarratorAvatars, isMergedGroup, mergedCycleKey, mergedAvatars\.length, mergedNameColors\.length\]/u,
+  "Narrator cycling must reset when active character IDs change without changing count",
+);
+assert.match(
+  chatMessageSource,
+  /const applyMergedCycleIndex = \(index: number\) => \{[\s\S]{0,1200}applyMergedCycleIndex\(0\);/u,
+  "Narrator cycling must immediately apply its reset index to avatar and name opacity",
+);
+assert.match(
+  chatMessageSource,
+  /const mergedNameColors = useMemo\(\(\) => mergedAvatars\.map\(\(avatar\) => avatar\.nameColor\)/u,
+  "Merged Narrator avatar and name-color indexes must come from the same renderable character list",
+);
+assert.match(
+  chatMessageSource,
+  /mergedNameColors\.length === 0 \? \([\s\S]{0,180}<NameColorText color=\{msgNameColor\}>\{localizeUi\("ui\.chat\.chatmessage\.narrator"\)\}/u,
+  "Merged messages must retain a Narrator label when no active character avatar resolves",
+);
+assert.match(
+  chatMessageSource,
+  /useCompactRectangleAvatar \|\| !cycleMergedNarratorAvatars[\s\S]{0,180}rectangleSafeCropStyle/u,
+  "Static compact Narrator avatars must not receive positioned crop dimensions that break their flex layout",
+);
+assert.match(
+  chatMessageSource,
+  /cycleMergedNarratorAvatars \? "absolute inset-0 w-full" : "relative w-0 min-w-0 flex-1"/u,
+  "Disabling Narrator cycling must place active avatars together",
+);
+assert.match(
+  narratorUiStoreSource,
+  /roleplayNarratorAvatarCycling:\s*true/u,
+  "Narrator avatar cycling must remain enabled by default",
 );
 const themesRouteSource = readFileSync(
   new URL("../../packages/server/src/routes/themes.routes.ts", import.meta.url),
@@ -2603,6 +2684,10 @@ const conversationSelfieRuntimeSource = readFileSync(
   new URL("../../packages/server/src/services/generation/conversation-selfie-command-runtime.ts", import.meta.url),
   "utf8",
 );
+const illustratorReferencesSource = readFileSync(
+  new URL("../../packages/server/src/services/image/illustrator-references.ts", import.meta.url),
+  "utf8",
+);
 assert.match(appSource, /--marinara-app-accent-static-gradient/u);
 assert.match(appSource, /swipeDirections=\{\["left", "right", "top"\]\}/u);
 assert.doesNotMatch(agentEditorSource, /fetch\(["']\/api\/game-assets\/pick-local-music-folder/u);
@@ -2796,6 +2881,21 @@ assert.match(
 assert.match(
   conversationSelfieRuntimeSource,
   /logDebugOverride\([\s\S]*\[debug\/commands\/selfie\] prompt-builder system/u,
+);
+assert.match(
+  conversationSelfieRuntimeSource,
+  /resolveIllustratorCharacterReferences\(\{[\s\S]{0,800}persona: null,[\s\S]{0,800}maxReferences: 6/u,
+  "Conversation group selfies must keep all depicted character references without attaching the photographer persona",
+);
+assert.match(
+  conversationSelfieRuntimeSource,
+  /selfieResolvedCharacterIds = Array\.from\([\s\S]{0,300}referenceResolution\.characterIds[\s\S]{0,4500}characterIds: selfieResolvedCharacterIds/u,
+  "Conversation group selfies must be saved to every depicted character gallery",
+);
+assert.match(
+  illustratorReferencesSource,
+  /characterIds: orderedSelectedSources\.map\(\(source\) => source\.id\)/u,
+  "Gallery character IDs must retain every depicted character beyond the provider reference-image cap",
 );
 assert.match(
   globalStyles,
@@ -3194,6 +3294,16 @@ assert.match(
   retryAgentsPromptReviewSource,
   /const resultAgent = resolvedAgents\.find[\s\S]{0,360}resultAgent \?\? \(result\.agentType === "illustrator" \? fallbackIllustratorAgent : undefined\)/u,
   "Image Prompt retries must retain custom agent settings without borrowing Illustrator configuration",
+);
+assert.match(
+  conversationGenerationSource,
+  /promptText:\s*\[\s*currentUserInputContent\(\) \?\? ""[\s\S]{0,500}includePersonaWhenMentionedInPrompt: false/u,
+  "Roleplay illustrations must resolve depicted characters from the latest user request without attaching an off-camera persona",
+);
+assert.match(
+  retryAgentsPromptReviewSource,
+  /promptText:\s*\[[\s\S]{0,180}recentMessages[\s\S]{0,500}includePersonaWhenMentionedInPrompt: false/u,
+  "Retried Roleplay illustrations must preserve latest-user character reference detection",
 );
 const uiStoreSource = readFileSync(new URL("../../packages/client/src/stores/ui.store.ts", import.meta.url), "utf8");
 const settingsSyncSource = readFileSync(
@@ -4103,8 +4213,63 @@ assert.doesNotMatch(
 );
 assert.match(
   summaryPopoverSource,
-  /<button(?:(?!>)[\s\S])*onClick=\{handleEditVisiblePrompt\}(?:(?!>)[\s\S])*disabled=\{!globalPromptSettingsReady \|\| promptSettingsSaveLocked\}(?:(?!>)[\s\S])*aria-expanded=/u,
-  "The Summary Prompt Edit action must expose disclosure semantics for its editor",
+  /onClick=\{\(\) => void handleToggleVisiblePromptEditor\(\)\}[\s\S]{0,500}aria-expanded=\{visiblePromptEditorOpen\}/u,
+  "The Summary Prompt Edit/Done action must expose disclosure semantics for its editor",
+);
+assert.match(
+  summaryPopoverSource,
+  /visiblePromptEditorOpen[\s\S]{0,300}ui\.chat\.summarypopover\.done[\s\S]{0,100}ui\.noodle\.noodlepostcard\.edit/u,
+  "The Summary Prompt editor must replace Edit with a Done action while open",
+);
+assert.match(
+  summaryPopoverSource,
+  /setTemplateSelectOpen\(false\);\s*setTemplateEditorOpen\(false\);/u,
+  "Done must close the Chat Summary prompt editor",
+);
+assert.match(
+  summaryPopoverSource,
+  /if \(!visiblePromptEditorOpen\) \{\s*setTemplateSelectOpen\(false\);\s*handleEditVisiblePrompt\(\);/u,
+  "Opening the Summary Prompt editor must close its template selector",
+);
+assert.match(
+  summaryPopoverSource,
+  /const saved = await commitCombinePromptDraft\(\);\s*if \(saved\) setCombinePromptEditorOpen\(false\);/u,
+  "Done must save and close the Combine prompt editor",
+);
+assert.match(
+  summaryPopoverSource,
+  /if \(promptSettingsSaveLockedRef\.current\) \{\s*await promptSettingsSaveQueueRef\.current;[\s\S]{0,350}combinePromptDraftRef\.current/u,
+  "Combine prompt saves must wait for active settings writes and then retry the latest draft",
+);
+assert.match(
+  summaryPopoverSource,
+  /queryClient\.getQueryData<ChatSummaryPromptSettings/u,
+  "Queued Combine saves must use the latest prompt settings from the query cache",
+);
+assert.match(
+  summaryPopoverSource,
+  /const currentSettings = readCurrentPromptSettings\(\);\s*const promise = persistPromptTemplates\(currentSettings\.templates, currentSettings\.activeTemplateId, nextPrompt\);/u,
+  "Combine prompt persistence must apply the latest cached templates and active selection",
+);
+assert.doesNotMatch(
+  summaryPopoverSource,
+  /promptTemplatesRef|activePromptTemplateIdRef/u,
+  "Summary prompt saves must not replay mirrored template state from an earlier render",
+);
+assert.match(
+  summaryPopoverSource,
+  /if \(await commitCombinePromptDraft\(\)\) onClose\(\);/u,
+  "The Summary popover must close only after its Combine draft is safely persisted",
+);
+assert.equal(
+  summaryPopoverSource.match(/className="h-48 space-y-[12] overflow-y-auto pr-0\.5"/gu)?.length,
+  2,
+  "Chat Summary and Combine prompt views must reserve the same vertical space",
+);
+assert.match(
+  summaryPopoverSource,
+  /rows=\{5\}[\s\S]{0,500}className="h-28 w-full resize-none/u,
+  "The Combine prompt editor must stay compact enough to match the Chat Summary view",
 );
 const promptSettingsPersistSource = summaryPopoverSource.slice(
   summaryPopoverSource.indexOf("const persistPromptTemplates"),
@@ -5008,6 +5173,16 @@ try {
     settingsPanelSource.match(/w-\[3\.75rem\] grid-cols-\[minmax\(0,1fr\)_auto\]/gu)?.length,
     2,
     "Conversation Call generated and custom clip duration controls must share the compact width",
+  );
+  assert.match(
+    settingsPanelSource,
+    /id="quick-replies-actions-drawer"[\s\S]{0,180}grid min-w-0 max-w-full[\s\S]{0,80}overflow-hidden/u,
+    "Quick reply actions must shrink within narrow settings panels",
+  );
+  assert.match(
+    settingsPanelSource,
+    /CustomQuickRepliesManager[\s\S]{0,900}mt-1 min-w-0 max-w-full overflow-hidden/u,
+    "Custom quick replies must contain their fields and destructive controls at narrow widths",
   );
 }
 

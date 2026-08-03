@@ -23,9 +23,11 @@ import {
   useUpdateSummaryEntry,
 } from "../../hooks/use-chats";
 import {
+  chatSummaryPromptKeys,
   useChatSummaryPromptSettings,
   useUpdateChatSummaryPromptSettings,
 } from "../../hooks/use-chat-summary-prompts";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRollingBackfillStore } from "../../stores/backfill.store";
 import {
   Check,
@@ -66,6 +68,7 @@ import {
   estimateChatSummaryTokens,
   normalizeChatSummaryEntries,
   type ChatSummaryEntry,
+  type ChatSummaryPromptSettings,
   type ChatSummaryPromptTemplate,
 } from "@marinara-engine/shared";
 import { showConfirmDialog } from "../../lib/app-dialogs";
@@ -360,6 +363,7 @@ export function SummaryPopover({
   const automaticIntervalFocused = useRef(false);
   const summaryMaxTokensFocused = useRef(false);
   const combinePromptFocused = useRef(false);
+  const combinePromptDraftRef = useRef(DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT);
   const combinePromptSaveRef = useRef<{ prompt: string; promise: Promise<boolean> } | null>(null);
   const promptSettingsSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const promptSettingsSaveLockedRef = useRef(false);
@@ -368,6 +372,7 @@ export function SummaryPopover({
   const updateMeta = useUpdateChatMetadata();
   const globalPromptSettings = useChatSummaryPromptSettings();
   const updateGlobalPromptSettings = useUpdateChatSummaryPromptSettings();
+  const queryClient = useQueryClient();
   const { data: connectionsData } = useConnections();
   const updateSummaryEntry = useUpdateSummaryEntry();
   const deleteSummaryEntry = useDeleteSummaryEntry();
@@ -486,9 +491,27 @@ export function SummaryPopover({
   const activeSummaryPrompt = isLongTermMemoryPromptSelected
     ? DEFAULT_LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT
     : activePromptTemplate?.prompt ?? DEFAULT_CHAT_SUMMARY_PROMPT;
+  const readCurrentPromptSettings = useCallback(() => {
+    const cached = queryClient.getQueryData<ChatSummaryPromptSettings & { hasPersistedSettings?: boolean }>(
+      chatSummaryPromptKeys.settings,
+    );
+    if (cached?.hasPersistedSettings) {
+      return {
+        templates: cached.templates,
+        activeTemplateId: cached.activeTemplateId?.trim() || null,
+      };
+    }
+    return {
+      templates: cleanedPromptTemplates,
+      activeTemplateId: normalizedActivePromptTemplateId,
+    };
+  }, [cleanedPromptTemplates, normalizedActivePromptTemplateId, queryClient]);
 
   useEffect(() => {
-    if (!combinePromptFocused.current) setCombinePromptDraft(globalCombinePrompt);
+    if (!combinePromptFocused.current) {
+      combinePromptDraftRef.current = globalCombinePrompt;
+      setCombinePromptDraft(globalCombinePrompt);
+    }
   }, [globalCombinePrompt]);
   const isEditingExistingTemplate = !!editingTemplateId;
   const hasTemplateDraft = templateNameDraft.trim().length > 0 && templatePromptDraft.trim().length > 0;
@@ -921,20 +944,26 @@ export function SummaryPopover({
 
   const commitCombinePromptDraft = useCallback(async (): Promise<boolean> => {
     combinePromptFocused.current = false;
-    const nextPrompt =
-      combinePromptDraft.trim().slice(0, CHAT_SUMMARY_PROMPT_MAX_LENGTH) ||
+    let nextPrompt =
+      combinePromptDraftRef.current.trim().slice(0, CHAT_SUMMARY_PROMPT_MAX_LENGTH) ||
       DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT;
+    const activeSave = combinePromptSaveRef.current;
+    if (activeSave?.prompt === nextPrompt) return activeSave.promise;
+    if (promptSettingsSaveLockedRef.current) {
+      await promptSettingsSaveQueueRef.current;
+      nextPrompt =
+        combinePromptDraftRef.current.trim().slice(0, CHAT_SUMMARY_PROMPT_MAX_LENGTH) ||
+        DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT;
+    }
+    combinePromptDraftRef.current = nextPrompt;
     setCombinePromptDraft(nextPrompt);
 
     const pendingSave = combinePromptSaveRef.current;
     if (pendingSave?.prompt === nextPrompt) return pendingSave.promise;
     if (!pendingSave && nextPrompt === globalCombinePrompt) return true;
 
-    const promise = persistPromptTemplates(
-      cleanedPromptTemplates,
-      normalizedActivePromptTemplateId,
-      nextPrompt,
-    );
+    const currentSettings = readCurrentPromptSettings();
+    const promise = persistPromptTemplates(currentSettings.templates, currentSettings.activeTemplateId, nextPrompt);
     combinePromptSaveRef.current = { prompt: nextPrompt, promise };
     try {
       return await promise;
@@ -944,11 +973,9 @@ export function SummaryPopover({
       }
     }
   }, [
-    cleanedPromptTemplates,
-    combinePromptDraft,
     globalCombinePrompt,
-    normalizedActivePromptTemplateId,
     persistPromptTemplates,
+    readCurrentPromptSettings,
   ]);
 
   const handleCombinePromptBlur = useCallback(async () => {
@@ -956,8 +983,7 @@ export function SummaryPopover({
   }, [commitCombinePromptDraft]);
 
   const handleClose = useCallback(async () => {
-    await commitCombinePromptDraft();
-    onClose();
+    if (await commitCombinePromptDraft()) onClose();
   }, [commitCombinePromptDraft, onClose]);
 
   // Close on outside interaction — defer by one frame so the synthesised
@@ -994,11 +1020,12 @@ export function SummaryPopover({
 
   const handleSelectPromptTemplate = useCallback(
     async (templateId: string | null) => {
-      const saved = await persistPromptTemplates(cleanedPromptTemplates, templateId);
+      const currentSettings = readCurrentPromptSettings();
+      const saved = await persistPromptTemplates(currentSettings.templates, templateId);
       if (!saved) return;
       setTemplateSelectOpen(false);
     },
-    [cleanedPromptTemplates, persistPromptTemplates],
+    [persistPromptTemplates, readCurrentPromptSettings],
   );
 
   const resetTemplateDraft = useCallback(() => {
@@ -1060,16 +1087,33 @@ export function SummaryPopover({
     if (!templateEditorOpen) handleEditActivePrompt();
   }, [combinePromptEditorOpen, handleEditActivePrompt, summaryPromptView, templateEditorOpen]);
 
+  const visiblePromptEditorOpen = summaryPromptView === "combine" ? combinePromptEditorOpen : templateEditorOpen;
+  const handleToggleVisiblePromptEditor = useCallback(async () => {
+    if (!visiblePromptEditorOpen) {
+      setTemplateSelectOpen(false);
+      handleEditVisiblePrompt();
+      return;
+    }
+    if (summaryPromptView === "combine") {
+      const saved = await commitCombinePromptDraft();
+      if (saved) setCombinePromptEditorOpen(false);
+      return;
+    }
+    setTemplateSelectOpen(false);
+    setTemplateEditorOpen(false);
+  }, [commitCombinePromptDraft, handleEditVisiblePrompt, summaryPromptView, visiblePromptEditorOpen]);
+
   const handleSavePromptTemplate = useCallback(async () => {
     if (!hasTemplateDraft) return;
     const trimmedName = templateNameDraft.trim().slice(0, 80);
     const trimmedPrompt = templatePromptDraft.trim();
+    const currentSettings = readCurrentPromptSettings();
     const nextTemplates = isEditingExistingTemplate
-      ? cleanedPromptTemplates.map((template) =>
+      ? currentSettings.templates.map((template) =>
           template.id === editingTemplateId ? { ...template, name: trimmedName, prompt: trimmedPrompt } : template,
         )
       : [
-          ...cleanedPromptTemplates,
+          ...currentSettings.templates,
           {
             id: generateClientId(),
             name: trimmedName,
@@ -1077,18 +1121,17 @@ export function SummaryPopover({
           },
         ];
     const nextActiveId = isEditingExistingTemplate
-      ? normalizedActivePromptTemplateId
+      ? currentSettings.activeTemplateId
       : nextTemplates[nextTemplates.length - 1]!.id;
     const saved = await persistPromptTemplates(nextTemplates, nextActiveId ?? null);
     if (!saved) return;
     resetTemplateDraft();
   }, [
-    normalizedActivePromptTemplateId,
-    cleanedPromptTemplates,
     editingTemplateId,
     hasTemplateDraft,
     isEditingExistingTemplate,
     persistPromptTemplates,
+    readCurrentPromptSettings,
     resetTemplateDraft,
     templateNameDraft,
     templatePromptDraft,
@@ -1108,10 +1151,11 @@ export function SummaryPopover({
         tone: "destructive",
       });
       if (!confirmed) return;
-      const nextTemplates = cleanedPromptTemplates.filter((template) => template.id !== templateId);
+      const currentSettings = readCurrentPromptSettings();
+      const nextTemplates = currentSettings.templates.filter((template) => template.id !== templateId);
       const saved = await persistPromptTemplates(
         nextTemplates,
-        normalizedActivePromptTemplateId === templateId ? null : normalizedActivePromptTemplateId,
+        currentSettings.activeTemplateId === templateId ? null : currentSettings.activeTemplateId,
       );
       if (!saved) return;
       if (editingTemplateId === templateId) resetTemplateDraft();
@@ -1120,8 +1164,9 @@ export function SummaryPopover({
       cleanedPromptTemplates,
       editingTemplateId,
       persistPromptTemplates,
+      readCurrentPromptSettings,
       resetTemplateDraft,
-      normalizedActivePromptTemplateId, localizeUi,
+      localizeUi,
     ],
   );
 
@@ -1366,17 +1411,19 @@ export function SummaryPopover({
                   </div>
                   <button
                     type="button"
-                    onClick={handleEditVisiblePrompt}
-                    disabled={!globalPromptSettingsReady || promptSettingsSaveLocked}
-                    aria-expanded={summaryPromptView === "combine" ? combinePromptEditorOpen : templateEditorOpen}
+                    onClick={() => void handleToggleVisiblePromptEditor()}
+                    disabled={!globalPromptSettingsReady || (promptSettingsSaveLocked && !visiblePromptEditorOpen)}
+                    aria-expanded={visiblePromptEditorOpen}
                     className={cn(
                       "shrink-0 rounded-md px-2 py-1 text-xs transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-50",
-                      (summaryPromptView === "combine" ? combinePromptEditorOpen : templateEditorOpen)
+                      visiblePromptEditorOpen
                         ? "bg-[var(--accent)] text-[var(--foreground)] ring-1 ring-[var(--border)]"
                         : "text-[var(--muted-foreground)]",
                     )}
                   >
-                    {localizeUi("ui.noodle.noodlepostcard.edit")}
+                    {visiblePromptEditorOpen
+                      ? localizeUi("ui.chat.summarypopover.done")
+                      : localizeUi("ui.noodle.noodlepostcard.edit")}
                   </button>
                 </div>
 
@@ -1416,7 +1463,7 @@ export function SummaryPopover({
                 </div>
 
                 {summaryPromptView === "summary" ? (
-                  <>
+                  <div className="h-48 space-y-2 overflow-y-auto pr-0.5">
                 <div className="grid grid-cols-1 gap-1">
                   <div className="relative min-w-0">
                     <button
@@ -1470,7 +1517,7 @@ export function SummaryPopover({
                   </div>
                 </div>
 
-                <div className="max-h-28 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--background)]/25 px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
+                <div className="h-36 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--background)]/25 px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
                   {activeSummaryPrompt}
                 </div>
 
@@ -1482,7 +1529,7 @@ export function SummaryPopover({
                         name={localizeUi("ui.chat.summarypopover.builtInDefault")}
                         detail={localizeUi("chat.summary.template.appDefault")}
                         disabled={promptSettingsSaveLocked}
-                        onSelect={() => void persistPromptTemplates(cleanedPromptTemplates, null)}
+                        onSelect={() => void handleSelectPromptTemplate(null)}
                         onCopy={() => handleDuplicatePromptTemplate(null, DEFAULT_CHAT_SUMMARY_PROMPT)}
                       />
                       {longTermMemorySummaryPromptAvailable && (
@@ -1491,9 +1538,7 @@ export function SummaryPopover({
                           name={localizeUi("chat.summary.template.longTermMemory")}
                           detail={localizeUi("chat.summary.template.appDefault")}
                           disabled={promptSettingsSaveLocked}
-                          onSelect={() =>
-                            void persistPromptTemplates(cleanedPromptTemplates, LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID)
-                          }
+                          onSelect={() => void handleSelectPromptTemplate(LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID)}
                           onCopy={() =>
                             handleDuplicatePromptTemplate(null, DEFAULT_LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT)
                           }
@@ -1508,7 +1553,7 @@ export function SummaryPopover({
                             count: Math.ceil(template.prompt.length / 4),
                           })}
                           disabled={promptSettingsSaveLocked}
-                          onSelect={() => void persistPromptTemplates(cleanedPromptTemplates, template.id)}
+                          onSelect={() => void handleSelectPromptTemplate(template.id)}
                           onCopy={() => handleDuplicatePromptTemplate(template)}
                           onEdit={() => handleEditPromptTemplate(template)}
                           onDelete={() => void handleDeletePromptTemplate(template.id)}
@@ -1575,9 +1620,9 @@ export function SummaryPopover({
                     )}
                   </div>
                 )}
-                  </>
+                  </div>
                 ) : (
-                <div className="space-y-1">
+                <div className="h-48 space-y-1 overflow-y-auto pr-0.5">
                   <span className="text-[0.625rem] font-semibold text-[var(--muted-foreground)]">
                     {localizeUi("ui.chat.summarypopover.combinePrompt")}
                   </span>
@@ -1587,16 +1632,19 @@ export function SummaryPopover({
                       onFocus={() => {
                         combinePromptFocused.current = true;
                       }}
-                      onChange={(event) => setCombinePromptDraft(event.target.value)}
+                      onChange={(event) => {
+                        combinePromptDraftRef.current = event.target.value;
+                        setCombinePromptDraft(event.target.value);
+                      }}
                       onBlur={() => void handleCombinePromptBlur()}
                       maxLength={CHAT_SUMMARY_PROMPT_MAX_LENGTH}
-                      rows={8}
+                      rows={5}
                       disabled={!globalPromptSettingsReady || promptSettingsSaveLocked}
                       aria-label={localizeUi("ui.chat.summarypopover.combinePrompt")}
-                      className="max-h-48 w-full resize-y rounded-md bg-[var(--card)] px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="h-28 w-full resize-none rounded-md bg-[var(--card)] px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--foreground)] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50"
                     />
                   ) : (
-                    <div className="max-h-36 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--background)]/25 px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
+                    <div className="h-28 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--background)]/25 px-2 py-1.5 font-mono text-[0.625rem] leading-relaxed text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
                       {combinePromptDraft}
                     </div>
                   )}

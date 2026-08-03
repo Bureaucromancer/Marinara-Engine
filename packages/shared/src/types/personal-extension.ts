@@ -25,24 +25,25 @@ export function normalizePersonalExtensionCapabilities(value: unknown): Personal
 export const PERSONAL_EXTENSION_CONTRIBUTION_KINDS = ["button", "menu-item", "panel"] as const;
 export type PersonalExtensionContributionKind = (typeof PERSONAL_EXTENSION_CONTRIBUTION_KINDS)[number];
 
-export const PERSONAL_EXTENSION_CONTRIBUTION_ICONS = [
-  "bot",
-  "book",
-  "database",
-  "gamepad",
-  "heart",
-  "image",
-  "message",
-  "music",
-  "puzzle",
+export const PERSONAL_EXTENSION_CONTRIBUTION_SURFACES = [
+  "top-bar",
+  "chats",
+  "bots",
+  "characters",
+  "personas",
+  "lorebooks",
+  "presets",
+  "connections",
+  "agents",
   "settings",
-  "sparkles",
-  "star",
-  "tool",
-  "wand",
-  "zap",
 ] as const;
-export type PersonalExtensionContributionIcon = (typeof PERSONAL_EXTENSION_CONTRIBUTION_ICONS)[number];
+export type PersonalExtensionContributionSurface = (typeof PERSONAL_EXTENSION_CONTRIBUTION_SURFACES)[number];
+
+export const PERSONAL_EXTENSION_CONTRIBUTION_POSITIONS = ["header", "before-content", "after-content"] as const;
+export type PersonalExtensionContributionPosition = (typeof PERSONAL_EXTENSION_CONTRIBUTION_POSITIONS)[number];
+
+/** Kebab-case Lucide icon name, resolved by the client icon catalog. */
+export type PersonalExtensionContributionIcon = string;
 
 export const PERSONAL_EXTENSION_UI_ELEMENT_KINDS = [
   "heading",
@@ -62,6 +63,7 @@ export const PERSONAL_EXTENSION_UI_LIMITS = {
   contributionsPerExtension: 24,
   panelElements: 60,
   idLength: 64,
+  iconLength: 64,
   labelLength: 80,
   descriptionLength: 240,
   textLength: 8_000,
@@ -106,6 +108,10 @@ export interface PersonalExtensionContributionDescriptor {
   label: string;
   description?: string;
   icon?: PersonalExtensionContributionIcon;
+  /** Button destination. Existing descriptors default to the top bar. */
+  surface?: PersonalExtensionContributionSurface;
+  /** Safe insertion point for side-panel buttons. */
+  position?: PersonalExtensionContributionPosition;
   elements?: PersonalExtensionUiElement[];
 }
 

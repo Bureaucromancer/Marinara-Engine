@@ -28,6 +28,7 @@ import { createNoodleStorage } from "../storage/noodle.storage.js";
 import { createPromptOverridesStorage } from "../storage/prompt-overrides.storage.js";
 import { loadPrompt, NOODLE_IMAGE_POST } from "../prompt-overrides/index.js";
 import { generateNoodleImageWithRetry } from "./noodle-image-retry.js";
+import type { ConnectionAdmissionMode } from "../generation/connection-admission.js";
 import { bootstrapVisibleNoodle, characterNameFromRow, getErrorMessage, parseRecord } from "./noodle-public-support.js";
 
 type ImageConnection = NonNullable<Awaited<ReturnType<ReturnType<typeof createConnectionsStorage>["getWithKey"]>>>;
@@ -124,6 +125,7 @@ export async function generateNoodlePostImage(input: {
   debugMode: boolean;
   previewOnly?: boolean;
   promptOverride?: { prompt: string; negativePrompt?: string };
+  admissionMode?: ConnectionAdmissionMode;
 }) {
   const imageSettings = await loadImageGenerationUserSettings(input.db);
   const imageDefaults = resolveConnectionImageDefaults(input.imageConnection);
@@ -256,6 +258,7 @@ export async function generateNoodlePostImage(input: {
         referenceImages,
         debugMode: input.debugMode,
         fallback: imageFallback,
+        admissionMode: input.admissionMode,
       }),
     (error, attempt, maxAttempts) => {
       logger.warn(

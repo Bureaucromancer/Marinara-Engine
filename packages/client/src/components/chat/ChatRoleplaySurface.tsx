@@ -298,6 +298,7 @@ function CrossfadeBackground({
 function StreamingIndicator({
   activeChatId,
   chatCharIds,
+  mergedGroupCharacterIds,
   characterMap,
   personaInfo,
   chatMode,
@@ -306,6 +307,7 @@ function StreamingIndicator({
 }: {
   activeChatId: string;
   chatCharIds: string[];
+  mergedGroupCharacterIds: string[];
   characterMap: CharacterMap;
   personaInfo?: PersonaInfo;
   chatMode: string;
@@ -342,6 +344,7 @@ function StreamingIndicator({
         chatMode={chatMode}
         groupChatMode={groupChatMode}
         chatCharacterIds={chatCharIds}
+        mergedGroupCharacterIds={mergedGroupCharacterIds}
         expressionAvatarResolver={expressionAvatarResolver}
       />
     </div>
@@ -1493,6 +1496,11 @@ export function ChatRoleplaySurface({
   }, [activeChatId, messages]);
 
   const visibleMessages = transcriptWindow.messages;
+  const activeChatCharacterIds = useMemo(() => {
+    const inactiveIds = new Set(readStringArray(chatMeta.inactiveCharacterIds));
+    const activeIds = chatCharIds.filter((id) => !inactiveIds.has(id));
+    return activeIds.length > 0 ? activeIds : chatCharIds;
+  }, [chatCharIds, chatMeta.inactiveCharacterIds]);
   const loadedMessageOffset = totalMessageCount - (messages?.length ?? 0);
   const summaryActiveAgentIds = Array.isArray(chatMeta.activeAgentIds)
     ? chatMeta.activeAgentIds.filter((agentId): agentId is string => typeof agentId === "string")
@@ -2078,6 +2086,7 @@ export function ChatRoleplaySurface({
                           isGrouped={isGrouped(sourceIndex)}
                           groupChatMode={groupChatMode}
                           chatCharacterIds={chatCharIds}
+                          mergedGroupCharacterIds={activeChatCharacterIds}
                           expressionAvatarResolver={expressionAvatarResolver}
                           multiSelectMode={multiSelectMode}
                           isSelected={selectedMessageIds.has(msg.id)}
@@ -2109,6 +2118,7 @@ export function ChatRoleplaySurface({
                           isGrouped={isGrouped(sourceIndex)}
                           groupChatMode={groupChatMode}
                           chatCharacterIds={chatCharIds}
+                          mergedGroupCharacterIds={activeChatCharacterIds}
                           expressionAvatarResolver={expressionAvatarResolver}
                           multiSelectMode={multiSelectMode}
                           isSelected={selectedMessageIds.has(msg.id)}
@@ -2135,6 +2145,7 @@ export function ChatRoleplaySurface({
                   <StreamingIndicator
                     activeChatId={activeChatId}
                     chatCharIds={chatCharIds}
+                    mergedGroupCharacterIds={activeChatCharacterIds}
                     characterMap={characterMap}
                     personaInfo={personaInfo}
                     chatMode={chatMode}
