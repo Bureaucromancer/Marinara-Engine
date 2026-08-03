@@ -3404,7 +3404,9 @@ function GameSurfaceComponent({
   /** Seam setter: replaces the pushed portrait map, or clears it when the map is empty or null. */
   const setExperienceSpeakerAvatars = useCallback(
     (value: { speakerAvatars: ReadonlyMap<string, { url: string }>; playerAvatarUrl?: string } | null) => {
-      setExperienceAvatars(value && value.speakerAvatars.size > 0 ? value : null);
+      // Read through: the map comes from the package, so a malformed push should clear the seam rather
+      // than throw inside the host.
+      setExperienceAvatars(value && (value.speakerAvatars?.size ?? 0) > 0 ? value : null);
     },
     [],
   );
@@ -10283,6 +10285,9 @@ function GameSurfaceComponent({
     return (
       <>
         <NewGameExperienceChooser
+          // Keyed by chat so the selection never outlives the game it was made for: switching to another
+          // chat that also needs setup starts from the built-in wizard instead of inheriting a choice.
+          key={activeChatId}
           activeChatId={activeChatId}
           onCancelSetup={dismissSetupWizard}
           onSetupError={handleJsonRepairError}
