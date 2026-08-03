@@ -119,6 +119,7 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
   const [createdIds, setCreatedIds] = useState<string[]>([]);
   const [creationFailures, setCreationFailures] = useState(0);
   const [settingsFailed, setSettingsFailed] = useState(false);
+  const [creationFailed, setCreationFailed] = useState(false);
   const [outcomes, setOutcomes] = useState<NoodlerRefreshNowOutcome[]>([]);
   const [completion, setCompletion] = useState<CompletionKind | null>(null);
   const [executionId, setExecutionId] = useState("");
@@ -163,6 +164,7 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
     setCreatedIds([]);
     setCreationFailures(0);
     setSettingsFailed(false);
+    setCreationFailed(false);
     setOutcomes([]);
     setCompletion(null);
     setExecutionId(generateClientId());
@@ -225,7 +227,7 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
             createFailures,
             outcomes: next,
           })
-        : "failed",
+        : "settingsFailed",
     );
     setStep(5);
   };
@@ -277,11 +279,15 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
         setCreationFailures(createFailureCount);
       }
     } catch {
-      // Nothing was created, so onboarding stays incomplete and the wizard remains reachable.
+      // The request may still have created profiles before the response was lost. The server
+      // replays the same executionId idempotently, so keep the run retryable in place rather
+      // than making the user reselect everything.
+      setCreationFailed(true);
       setCompletion("failed");
       setStep(5);
       return;
     }
+    setCreationFailed(false);
     // A failed settings write keeps onboarding incomplete, but the profiles already exist:
     // still write their first posts so the run is not stranded halfway.
     const settingsSaved = await saveSettings(selected.size === 0 ? "zero" : "completed");
@@ -296,7 +302,7 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
               createFailures: createFailureCount,
               outcomes: null,
             })
-          : "failed",
+          : "settingsFailed",
       );
       setStep(5);
       return;
@@ -1082,7 +1088,7 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
               >
                 {completion === "generated" ? (
                   <Check size={26} />
-                ) : completion === "partial" || completion === "failed" ? (
+                ) : completion === "partial" || completion === "failed" || completion === "settingsFailed" ? (
                   <RefreshCw size={24} />
                 ) : (
                   <Users size={24} />
@@ -1116,6 +1122,42 @@ export function NoodlerOnboardingWizard({ open, selectionOnly = false, onClose, 
                     </div>
                   ))}
                 </dl>
+              )}
+              {completion === "settingsFailed" && (
+                <button
+                  type="button"
+                  disabled={updateSettings.isPending}
+                  onClick={() => {
+                    void (async () => {
+                      if (!(await saveSettings(createdIds.length === 0 ? "zero" : "completed"))) return;
+                      setSettingsFailed(false);
+                      onComplete?.();
+                      setCompletion(
+                        resolveNoodlerOnboardingCompletion({
+                          selectedCount: selected.size,
+                          createdCount: createdIds.length,
+                          createFailures: creationFailures,
+                          outcomes: generateNow && createdIds.length > 0 ? outcomes : null,
+                        }),
+                      );
+                    })();
+                  }}
+                  className="mt-5 flex min-h-10 items-center gap-2 rounded-md border border-[var(--noodle-accent)]/40 px-4 text-sm font-bold text-[var(--noodle-accent)] disabled:opacity-50"
+                >
+                  <RefreshCw size={15} className={updateSettings.isPending ? "animate-spin" : ""} />
+                  {t("ui.noodle.noodlerwizard.retrySettings")}
+                </button>
+              )}
+              {creationFailed && (
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => void finish()}
+                  className="mt-5 flex min-h-10 items-center gap-2 rounded-md border border-[var(--noodle-accent)]/40 px-4 text-sm font-bold text-[var(--noodle-accent)] disabled:opacity-50"
+                >
+                  <RefreshCw size={15} className={pending ? "animate-spin" : ""} />
+                  {t("capabilities.actions.tryAgain")}
+                </button>
               )}
               {failedIds.length > 0 && (
                 <button

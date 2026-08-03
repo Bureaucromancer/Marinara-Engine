@@ -44,6 +44,24 @@ export type UpdateNoodlerPostResult =
   | { status: "noodler_post_not_found" };
 
 /**
+ * A foreground post invalidates the near-future reserve the same way a manual one does, or the
+ * creator posts now and again from reserve within the hour. The post is already persisted by the
+ * time this runs, so a cleanup failure is logged and swallowed: reporting it as a failed
+ * generation would invite a retry that creates a second post.
+ */
+async function invalidateNearFutureReserve(
+  noodle: ReturnType<typeof createNoodleStorage>,
+  accountId: string,
+  postedAt: string,
+): Promise<void> {
+  try {
+    await noodle.discardPreparedPostsAfterManualPost(accountId, postedAt);
+  } catch (error) {
+    logger.error(error, "[noodler] Could not invalidate the reserve after posting for %s", accountId);
+  }
+}
+
+/**
  * Reusable generated-post application seam for HTTP now and Slice 8 scheduling later.
  * Provider and persistence failures intentionally throw for the caller to handle.
  */
@@ -65,6 +83,9 @@ export async function generateAndApplyNoodlerPost(
     if (request.executionId) {
       const existing = await noodle.getNoodlerPostByWizardExecution(account.id, request.executionId);
       if (existing) {
+        // A replay returns the post the first attempt created; the reserve it displaced still
+        // has to be invalidated, because the first attempt may have died before doing so.
+        await invalidateNearFutureReserve(noodle, account.id, existing.createdAt);
         return { status: "generated", post: existing, imagePromptReview: null } as const;
       }
     }
@@ -73,9 +94,7 @@ export async function generateAndApplyNoodlerPost(
     const connection = await createConnectionsStorage(db).getWithKey(connectionId);
     if (!connection) return { status: "connection_not_found" } as const;
     const generated = await generateNoodlerPost(db, { account, request, connection, media, admissionMode });
-    // A foreground post invalidates the near-future reserve the same way a manual one does;
-    // without this the creator posts now and again from reserve within the hour.
-    await noodle.discardPreparedPostsAfterManualPost(account.id, generated.post.createdAt);
+    await invalidateNearFutureReserve(noodle, account.id, generated.post.createdAt);
     return {
       status: "generated",
       post: generated.post,
@@ -99,7 +118,13 @@ export async function refreshAllNoodlerCreatorsNow(db: DB): Promise<NoodlerRefre
   if (!settings.enableNoodler) return { status: "disabled" };
 
   const accounts = await noodle.listAutoPostEnabledAccounts();
-  const prioritized = [...accounts].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt) || a.id.localeCompare(b.id));
+  // Least-recently active creator first, so limited provider capacity goes to the quiet ones.
+  // Profile edits move `updatedAt` without being activity, so they must not reorder this.
+  const activity = await noodle.getNoodlerCreatorActivityTimes();
+  const activityOf = (accountId: string) => activity.get(accountId) ?? "";
+  const prioritized = [...accounts].sort(
+    (a, b) => activityOf(a.id).localeCompare(activityOf(b.id)) || a.id.localeCompare(b.id),
+  );
   const settled = await settleAgentJobsWithConcurrencyLimit(
     prioritized,
     MAX_CONCURRENT_MANUAL_REFRESH,

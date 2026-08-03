@@ -8,6 +8,8 @@ import {
 } from "../../packages/shared/src/index.js";
 import type { DB } from "../../packages/server/src/db/connection.js";
 import { createFileNativeDB } from "../../packages/server/src/db/file-backed-store.js";
+import { eq } from "../../packages/server/src/db/file-query.js";
+import { noodlerCreatorReplyClaims } from "../../packages/server/src/db/schema/noodle.js";
 import {
   NOODLER_UNTRUSTED_CONTENT_INSTRUCTION,
   type PublicIdentity,
@@ -191,6 +193,19 @@ try {
   assert.ok(orphanParent);
   const orphan = await noodle.claimNoodlerCreatorReply(stage.id, post.id, orphanParent.id, viewer.id, claimedAt, 10);
   assert.equal(orphan.status, "claimed");
+  // Exactly 24 hours: the claim is outside the budget window, so it must also be outside the
+  // pruning window. A mismatched boundary here leaves it counted by neither and blocking forever.
+  const atExpiry = new Date(Date.parse(claimedAt) + 24 * 60 * 60 * 1000).toISOString();
+  assert.equal(
+    (await noodle.claimNoodlerCreatorReply(stage.id, post.id, orphanParent.id, viewer.id, atExpiry, 10)).status,
+    "claimed",
+    "an orphan claim exactly at the expiry boundary must be released",
+  );
+  await noodle.releaseNoodlerCreatorReplyClaim(
+    ((await db.select().from(noodlerCreatorReplyClaims)).find(
+      (row) => row.parentInteractionId === orphanParent.id,
+    )?.id ?? ""),
+  );
   const afterExpiry = new Date(Date.parse(claimedAt) + 25 * 60 * 60 * 1000).toISOString();
   assert.equal(
     (await noodle.claimNoodlerCreatorReply(stage.id, post.id, orphanParent.id, viewer.id, afterExpiry, 10)).status,
@@ -198,25 +213,65 @@ try {
     "an expired orphan claim must not block its comment forever",
   );
 
-  // Deleting a comment takes its creator reply with it: the first comment on this post is the
-  // one already answered above, so its reply must not survive as an orphan.
-  const deleted = await noodle.deleteNoodlerInteraction(post.id, {
+  // Deleting the post takes the whole conversation with it, including the permanent claims that
+  // would otherwise keep consuming the installation-wide reply allowance. This is the deletion
+  // path NoodleR actually exposes: comments themselves have no delete route yet, and
+  // `deleteInteractionById` only reaches public-timeline posts.
+  const disposablePost = await noodle.createNoodlerPost({
+    authorAccountId: stage.id,
+    content: "Post that gets deleted",
+    access: "public",
+  });
+  assert.ok(disposablePost);
+  const disposableParent = await noodle.createNoodlerInteraction(disposablePost.id, {
     actorAccountId: viewer.id,
     type: "reply",
-    parentInteractionId: null,
+    content: "Comment on a doomed post",
   });
-  assert.equal(deleted?.id, parent.id);
-  const remaining = await noodle.listNoodlerInteractions([post.id]);
+  assert.ok(disposableParent);
+  const disposableClaim = await noodle.claimNoodlerCreatorReply(
+    stage.id,
+    disposablePost.id,
+    disposableParent.id,
+    viewer.id,
+    afterExpiry,
+    10,
+  );
+  assert.equal(disposableClaim.status, "claimed");
+  if (disposableClaim.status !== "claimed") throw new Error("expected claim");
+  assert.ok(await noodle.finalizeNoodlerCreatorReplyClaim(disposableClaim.claimId, "Doomed answer"));
+  assert.ok(await noodle.deleteNoodlerPost(disposablePost.id));
   assert.equal(
-    remaining.some((interaction) => interaction.id === generated.id),
+    (await db.select().from(noodlerCreatorReplyClaims)).some((row) => row.postId === disposablePost.id),
     false,
-    "deleting a comment must delete its creator reply",
+    "deleting a post must not leave its creator-reply claims behind",
   );
-  assert.equal(
-    (await noodle.claimNoodlerCreatorReply(stage.id, post.id, parent.id, viewer.id, afterExpiry, 10)).status,
-    "ineligible",
-    "the deleted comment's claim must be gone with it",
+  assert.equal((await noodle.listNoodlerInteractions([disposablePost.id])).length, 0);
+
+  // A crash can leave a reply whose claim never linked (or never landed). Finalizing again must
+  // adopt that reply rather than write a second one, and claiming must report it as duplicate.
+  const crashParent = await noodle.createNoodlerInteraction(post.id, {
+    actorAccountId: viewer.id,
+    type: "reply",
+    content: "Comment answered just before the crash",
+  });
+  assert.ok(crashParent);
+  const crashClaim = await noodle.claimNoodlerCreatorReply(stage.id, post.id, crashParent.id, viewer.id, afterExpiry, 10);
+  assert.equal(crashClaim.status, "claimed");
+  if (crashClaim.status !== "claimed") throw new Error("expected claim");
+  const firstReply = await noodle.finalizeNoodlerCreatorReplyClaim(crashClaim.claimId, "The only answer");
+  assert.ok(firstReply);
+  // Simulate the lost claim-link write: the reply row survived, the link on the claim did not.
+  await db
+    .update(noodlerCreatorReplyClaims)
+    .set({ replyInteractionId: null })
+    .where(eq(noodlerCreatorReplyClaims.id, crashClaim.claimId));
+  const readopted = await noodle.finalizeNoodlerCreatorReplyClaim(crashClaim.claimId, "A second answer");
+  assert.equal(readopted?.id, firstReply.id, "finalizing again must adopt the existing reply");
+  const replies = (await noodle.listNoodlerInteractions([post.id])).filter(
+    (interaction) => interaction.parentInteractionId === crashParent.id,
   );
+  assert.equal(replies.length, 1, "one creator reply per comment, even after a crash");
 
   const selfParent = await noodle.createNoodlerInteraction(post.id, {
     actorAccountId: source.id,

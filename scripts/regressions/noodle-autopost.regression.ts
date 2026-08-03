@@ -117,6 +117,21 @@ try {
   assert.equal(published?.createdAt, publishAt);
   assert.equal(JSON.parse(published?.metadata ?? "{}").noodlerPreparedPostId, preparedId);
 
+  // A slot published late — inside the grace window — is stamped when it actually published, not
+  // with its planned time, or it files behind everything the feed received during the delay.
+  const lateSlotAt = "2026-07-30T12:10:00.000Z";
+  const lateRunAt = new Date("2026-07-30T12:40:00.000Z");
+  await noodle.createNoodlerPreparedPost({
+    creatorAccountId: creator!.id,
+    generatedAt: releasedAt.toISOString(),
+    publishAt: lateSlotAt,
+    payload: { title: null, content: "Slightly late", access: "locked", imagePrompt: null, metadata: {} },
+    policyFingerprint: noodlerReservePolicyFingerprint(enabledCreator!, await noodle.getSettings(), publicAccount.updatedAt),
+  });
+  assert.equal(await noodle.publishDueNoodlerPreparedPosts(lateRunAt), 1);
+  const late = (await db.select().from(noodlePosts)).find((post) => post.content === "Slightly late");
+  assert.equal(late?.createdAt, lateRunAt.toISOString(), "a late publish is not backdated to its planned slot");
+
   // A slot the server slept through is retired, not published hours late with a backdated time.
   const elapsedId = await noodle.createNoodlerPreparedPost({
     creatorAccountId: creator!.id,
@@ -210,6 +225,50 @@ try {
   const remaining = await db.select().from(noodlerAutomaticAttempts);
   assert.equal(remaining.length, 1, "expired attempt claims must be pruned");
   assert.equal((await noodle.getNoodlerReserveStatus(pruneAt)).textAttemptsUsed, 1);
+
+  // Refresh ordering reads real posting activity, not account.updatedAt: editing a profile is
+  // not activity and must not push a creator to the back of the queue.
+  const activity = await noodle.getNoodlerCreatorActivityTimes();
+  const creatorPosts = (await db.select().from(noodlePosts)).filter((post) => post.authorAccountId === creator!.id);
+  assert.ok(creatorPosts.length > 0);
+  const newestPost = creatorPosts.reduce((latest, post) => (post.createdAt > latest ? post.createdAt : latest), "");
+  const newestPrepared = (await noodle.listNoodlerPreparedPosts())
+    .filter((item) => item.creatorAccountId === creator!.id && item.state !== "discarded")
+    .reduce((latest, item) => (item.publishAt > latest ? item.publishAt : latest), "");
+  assert.equal(
+    activity.get(creator!.id),
+    newestPost > newestPrepared ? newestPost : newestPrepared,
+    "creator activity is the newest published post or prepared slot",
+  );
+
+  // A row whose timestamps do not parse can never come due, so reconciliation retires it
+  // instead of leaving every later status read and publish pass tripping over it.
+  const poisonedId = await noodle.createNoodlerPreparedPost({
+    creatorAccountId: creator!.id,
+    generatedAt: releasedAt.toISOString(),
+    publishAt: "not-a-timestamp",
+    payload: { title: null, content: "Poisoned slot", access: "locked", imagePrompt: null, metadata: {} },
+    policyFingerprint: noodlerReservePolicyFingerprint(enabledCreator!, await noodle.getSettings(), publicAccount.updatedAt),
+  });
+  await noodle.reconcileNoodlerPreparedPosts(pruneAt);
+  assert.equal(
+    (await noodle.listNoodlerPreparedPosts()).find((item) => item.id === poisonedId)?.state,
+    "discarded",
+    "an unparseable reserve timestamp must not poison automatic posting",
+  );
+  assert.ok(await noodle.getNoodlerReserveStatus(pruneAt), "status stays readable with a poisoned row present");
+
+  // Terminal rows are read on every poll, so they are pruned once they are far past any
+  // recovery use. Recent ones stay.
+  const longAfter = new Date("2026-10-15T10:00:00.000Z");
+  const beforePrune = (await noodle.listNoodlerPreparedPosts()).length;
+  assert.ok(beforePrune > 0);
+  await noodle.reconcileNoodlerPreparedPosts(longAfter);
+  assert.equal(
+    (await noodle.listNoodlerPreparedPosts()).filter((item) => item.state !== "prepared").length,
+    0,
+    "aged terminal prepared rows must be pruned",
+  );
 
   await (db as unknown as { _fileStore: { close(): Promise<void> } })._fileStore.close();
 } finally {

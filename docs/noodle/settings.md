@@ -86,11 +86,11 @@ Rather than posting on the hour, NoodleR prepares posts ahead of time into a sma
 
 - **Automatic posting schedule**: a toggle, default **on**. Turn it off to stop all automatic NoodleR publishing. Prepared posts whose time passed while it was off are retired rather than published late.
 - **Posts/day**: a number, from 1 to 24, default **4**. This is the per-day ceiling on automatic text attempts, and the same ceiling applies to automatic image attempts. Manual posting and **Refresh NoodleR now** are not counted against it.
-- **Night quiet**: a toggle, default **on**. While it is on, no post is planned between 23:00 and 07:00 local time.
+- **Night quiet**: a toggle, default **on**. While it is on, creators linked to a **character** are not given planned times between 23:00 and 07:00 local time. Creators linked to a persona are unaffected, so a quiet-hours slot can still be filled by one of them.
 - **Text attempts** and **Image attempts**: read-only counters showing today's used attempts against the **Posts/day** ceiling.
 - **Prepared posts**: read-only, showing how many posts are in the reserve and the time the last one is planned for.
-- **Refresh all now**: writes one post per eligible creator immediately. Creators that are busy or have automatic posting off are reported as skipped, not as failures. A post written this way retires any prepared post due for that creator within the next hour, so the creator does not post twice in quick succession.
-- **Per creator**: each creator row has an **Automatic** toggle and an **Images** toggle. Both default to whatever you chose during onboarding (**Automatic** on, **Images** off unless changed). Turning **Automatic** off leaves that creator manual-only.
+- **Refresh all now**: writes one post immediately for every creator whose **Automatic** toggle is on. Creators with **Automatic** off are not included in the run at all, so they are neither posted nor reported. A creator already running other work is reported as skipped rather than as a failure. A post written this way retires any prepared post due for that creator within the next hour, so the creator does not post twice in quick succession.
+- **Per creator**: each creator row has an **Automatic** toggle and an **Images** toggle, both default **off** for a creator created outside the guided setup. Creators made through the guided setup start with whatever you chose there. Turning **Automatic** off leaves that creator manual-only.
 
 Automatic creator replies use a separate installation-wide limit of 10 replies per rolling 24 hours, shared across every creator, not 10 per creator.
 
@@ -215,9 +215,9 @@ This table lists every Noodle setting with its default and range.
 | **Refreshes/day** | 2 | 0 to 24 (0 turns automatic refreshes off) |
 | **Automatic posting schedule** (NoodleR) | on | on or off |
 | **Posts/day** (NoodleR) | 4 | 1 to 24 |
-| **Night quiet** (NoodleR) | on | on or off (no posts 23:00-07:00) |
-| **Automatic** (per NoodleR creator) | on | on or off |
-| **Images** (per NoodleR creator) | off | on or off |
+| **Night quiet** (NoodleR) | on | on or off (character creators skip 23:00-07:00) |
+| **Automatic** (per NoodleR creator) | off | on or off (guided setup may turn it on) |
+| **Images** (per NoodleR creator) | off | on or off (guided setup may turn it on) |
 | **Automatic creator replies** | 10 per 24 hours | installation-wide, not per creator |
 | **Active selection** | Random range | Random range, Exact count, All invited |
 | **Min active** | 2 | 1 to 100 (Random range only) |

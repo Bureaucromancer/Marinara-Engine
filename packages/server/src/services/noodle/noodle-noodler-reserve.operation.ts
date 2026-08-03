@@ -6,7 +6,6 @@ import { generateNoodlerPostImage } from "./noodle-noodler-images.service.js";
 import { tryNoodlerAccountOperation } from "./noodle-noodler-account-operation-lock.js";
 import { createCharactersStorage } from "../storage/characters.storage.js";
 import { createPromptOverridesStorage } from "../storage/prompt-overrides.storage.js";
-import { unlinkNoodlerMedia } from "./noodle-noodler-media.js";
 import {
   BackgroundConnectionBusyError,
   ConnectionAttemptRejectedError,
@@ -106,6 +105,7 @@ export async function prepareNextNoodlerReservePost(
           noodlerPostGuide: `Write a standalone post appropriate for publication at ${publishAt}. Do not refer to events after the current moment.`,
         },
       });
+      let stagedMedia: { promote: () => void; compensate: () => void } | null = null;
       if (account.settings.scheduler.autoPosting?.imagesEnabled && payload.imagePrompt) {
         const imageConnection = settings.imageGenerationConnectionId
           ? await createConnectionsStorage(db).getWithKey(settings.imageGenerationConnectionId)
@@ -136,7 +136,10 @@ export async function prepareNextNoodlerReservePost(
                 },
               },
             });
-            image.stagedMedia?.promote();
+            // Promotion is deferred until the prepared row is durably committed below: a file
+            // promoted first is owned by nothing if the row never lands, and staged files are
+            // swept on restart.
+            stagedMedia = image.stagedMedia ?? null;
             payload = { ...payload, metadata: { ...payload.metadata, ...image.metadata } };
           } catch (error) {
             if (
@@ -152,8 +155,7 @@ export async function prepareNextNoodlerReservePost(
       }
       const completedAt = new Date();
       if (completedAt.getTime() >= Date.parse(publishAt)) {
-        const mediaPath = payload.metadata.noodlerMediaPath;
-        unlinkNoodlerMedia(typeof mediaPath === "string" ? mediaPath : null);
+        stagedMedia?.compensate();
         return "missed" as const;
       }
       try {
@@ -169,12 +171,13 @@ export async function prepareNextNoodlerReservePost(
           ),
         });
       } catch (persistError) {
-        // The image was already promoted out of staging, so nothing else will ever reference it
-        // if the row does not land. Same cleanup the missed-window path above performs.
-        const mediaPath = payload.metadata.noodlerMediaPath;
-        unlinkNoodlerMedia(typeof mediaPath === "string" ? mediaPath : null);
+        // The row never landed, so the staged image belongs to nothing: drop it before rethrowing.
+        stagedMedia?.compensate();
         throw persistError;
       }
+      // The row is durable now, so the file it references can take its final name. A crash
+      // between the two leaves a row whose media is missing, which reconciliation clears.
+      stagedMedia?.promote();
       return "prepared" as const;
     } catch (error) {
       if (error instanceof BackgroundConnectionBusyError) return "busy" as const;

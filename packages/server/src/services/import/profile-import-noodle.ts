@@ -6,6 +6,7 @@ import {
   noodleInteractions,
   noodlePostUnlocks,
 } from "../../db/schema/noodle.js";
+import { remapNoodlerReservePolicyFingerprint } from "../storage/noodle.storage.js";
 import { newId } from "../../utils/id-generator.js";
 import { ProfileImportRequestError } from "./profile-import-errors.js";
 
@@ -157,6 +158,11 @@ function remapSnapshotRows(snapshot: Snapshot, accountMap: ReadonlyMap<string, s
         // Reserve rows and reply claims point at the creator account; left unremapped they dangle
         // or attach to whichever creator happens to hold the source ID after the collision rename.
         row.creatorAccountId = accountMap.get(String(row.creatorAccountId)) ?? row.creatorAccountId;
+        // The prepared row's policy fingerprint embeds the linked source account ID too, and a
+        // stale one makes reconciliation discard the restored reserve on the next poll.
+        if (tableName === "noodler_prepared_posts") {
+          row.policyFingerprint = remapNoodlerReservePolicyFingerprint(row.policyFingerprint, accountMap);
+        }
       }
       return row;
     });

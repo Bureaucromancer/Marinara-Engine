@@ -154,11 +154,17 @@ export function NoodlerPublishingSettings({ active, onOpenCreator }: NoodlerPubl
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-semibold">{profile.displayName}</span>
                 <span className="block truncate text-xs text-[var(--muted-foreground)]">
-                  {nextByAccount.get(profile.id)
-                    ? t("ui.noodle.noodlerschedulemanagermodal.nextValue1", {
-                        value1: new Date(nextByAccount.get(profile.id)!).toLocaleString(),
-                      })
-                    : t("ui.noodle.noodlerschedulemanagermodal.noPreparedPost")}
+                  {/* "No prepared post" is a fact about the reserve, so it waits for the reserve
+                      status to load rather than speaking for a query that never answered. */}
+                  {!status
+                    ? statusQuery.isError
+                      ? t("ui.noodle.noodlerschedulemanagermodal.couldNotLoadStatus")
+                      : t("ui.noodle.noodlerschedulemanagermodal.loadingStatus")
+                    : nextByAccount.get(profile.id)
+                      ? t("ui.noodle.noodlerschedulemanagermodal.nextValue1", {
+                          value1: new Date(nextByAccount.get(profile.id)!).toLocaleString(),
+                        })
+                      : t("ui.noodle.noodlerschedulemanagermodal.noPreparedPost")}
                 </span>
               </span>
             </button>

@@ -78,6 +78,18 @@ try {
         noodle_interactions: [{ id: "interaction-1", actorAccountId: "source-account" }],
         noodle_activity_digests: [{ id: "digest-1", accountIds: JSON.stringify(["source-account"]) }],
         noodle_refresh_runs: [{ id: "run-1", activeAccountIds: JSON.stringify(["source-account"]) }],
+        noodler_prepared_posts: [
+          {
+            id: "prepared-1",
+            creatorAccountId: "source-account",
+            // The fingerprint embeds the linked source ID, so it has to be remapped with the
+            // row or reconciliation discards the restored reserve on the very next poll.
+            policyFingerprint: JSON.stringify({ sourceId: "source-account", stageProfileUpdatedAt: "x" }),
+          },
+        ],
+        noodler_creator_reply_claims: [
+          { id: "claim-1", creatorAccountId: "source-account", parentInteractionId: "interaction-1" },
+        ],
         messages: unrelatedMessages,
       },
     },
@@ -96,6 +108,12 @@ try {
   assert.equal(planned.tables.noodle_interactions?.[0]?.actorAccountId, "destination-account");
   assert.equal(planned.tables.noodle_activity_digests?.[0]?.accountIds, '["destination-account"]');
   assert.equal(planned.tables.noodle_refresh_runs?.[0]?.activeAccountIds, '["destination-account"]');
+  assert.equal(planned.tables.noodler_prepared_posts?.[0]?.creatorAccountId, "destination-account");
+  assert.deepEqual(JSON.parse(String(planned.tables.noodler_prepared_posts?.[0]?.policyFingerprint)), {
+    sourceId: "destination-account",
+    stageProfileUpdatedAt: "x",
+  });
+  assert.equal(planned.tables.noodler_creator_reply_claims?.[0]?.creatorAccountId, "destination-account");
   assert.equal(planned.tables.messages, unrelatedMessages);
   assert.equal(warnings.length, 0);
 

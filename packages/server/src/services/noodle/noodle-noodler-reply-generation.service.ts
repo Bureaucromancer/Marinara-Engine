@@ -22,6 +22,7 @@ import { createNoodleStorage } from "../storage/noodle.storage.js";
 import { formatNoodleMessagesForLog } from "./noodle-generation-log.js";
 import {
   NOODLER_UNTRUSTED_CONTENT_INSTRUCTION,
+  noodlerIdentityInstruction,
   protectNoodlerGeneratedIdentity,
   resolveNoodlerPublicIdentity,
   type PublicIdentity,
@@ -29,16 +30,6 @@ import {
 import { noodleResponseFormat } from "./noodle-response-format.js";
 
 type GenerationConnection = NonNullable<Awaited<ReturnType<ReturnType<typeof createConnectionsStorage>["getWithKey"]>>>;
-
-function disclosureInstruction(mode: NoodleIdentityDisclosure, identity: PublicIdentity | null): string {
-  if (mode === "open" && identity) {
-    return `Disclosure is open. The linked public identity ${identity.displayName} (@${identity.handle}) may be named.`;
-  }
-  if (mode === "hinted") {
-    return "Disclosure is hinted. General allusions to another public persona are allowed, but never use its exact name or handle.";
-  }
-  return "Disclosure is secret. Do not mention, imply, or identify any linked public persona.";
-}
 
 export function buildNoodlerCreatorReplyMessages(input: {
   creator: NoodleAccount;
@@ -56,7 +47,7 @@ export function buildNoodlerCreatorReplyMessages(input: {
     "Write only as the supplied creator's stage persona. Address the viewer's comment naturally and do not write for the viewer.",
     NOODLER_UNTRUSTED_CONTENT_INSTRUCTION,
     input.generationGuidance.trim(),
-    disclosureInstruction(input.disclosureMode, input.publicIdentity),
+    noodlerIdentityInstruction(input.disclosureMode, input.publicIdentity),
     'Return exactly one JSON object with one string field named "content".',
     "Return JSON only. No prose outside the JSON object.",
   ]

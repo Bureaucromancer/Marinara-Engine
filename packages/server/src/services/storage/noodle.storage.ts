@@ -1,6 +1,7 @@
 // ──────────────────────────────────────────────
 // Storage: Noodle Fake Social Media
 // ──────────────────────────────────────────────
+import { existsSync } from "node:fs";
 import { and, desc, eq, gt, inArray, isNull, lt } from "../../db/file-query.js";
 import {
   createNoodlePoll,
@@ -54,7 +55,7 @@ import type { DB } from "../../db/connection.js";
 import { isFileUniqueConstraintError } from "../../db/file-schema.js";
 import { logger } from "../../lib/logger.js";
 import { canViewNoodlerPost, isNoodlerHiddenFromViewer } from "../noodle/noodler-access.js";
-import { noodlerPostMediaUrl, unlinkNoodlerMedia } from "../noodle/noodle-noodler-media.js";
+import { noodlerPostMediaUrl, resolveNoodlerMediaAbsolutePath, unlinkNoodlerMedia } from "../noodle/noodle-noodler-media.js";
 import {
   noodleAccounts,
   noodleAccountSubscriptions,
@@ -92,6 +93,8 @@ const MANUAL_POST_INVALIDATION_MS = 60 * 60 * 1000;
  * whole missed run at once, so an elapsed slot is retired instead.
  */
 const ELAPSED_PREPARED_SLOT_MS = 60 * 60 * 1000;
+/** How long published/discarded prepared rows are kept for crash recovery before pruning. */
+const TERMINAL_PREPARED_POST_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 export type NoodlerPreparedPostPayload = {
   title: string | null;
@@ -141,6 +144,30 @@ export function noodlerReservePolicyFingerprint(
     mediaPolicy,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   });
+}
+
+/**
+ * Rewrite the linked-source ID inside a stored reserve fingerprint. Profile import can rename a
+ * colliding account, and the fingerprint carries that ID, so without this every restored prepared
+ * post fails its own policy check on the next reconcile and is discarded. Lives here because this
+ * module owns the fingerprint format.
+ */
+export function remapNoodlerReservePolicyFingerprint(
+  fingerprint: unknown,
+  accountMap: ReadonlyMap<string, string>,
+): unknown {
+  if (typeof fingerprint !== "string") return fingerprint;
+  try {
+    const parsed = JSON.parse(fingerprint) as { sourceId?: unknown };
+    if (typeof parsed?.sourceId !== "string") return fingerprint;
+    const remapped = accountMap.get(parsed.sourceId);
+    if (!remapped || remapped === parsed.sourceId) return fingerprint;
+    // Re-serialized from the parsed object, so key order (and therefore the comparison) is
+    // preserved exactly as the original writer produced it.
+    return JSON.stringify({ ...parsed, sourceId: remapped });
+  } catch {
+    return fingerprint;
+  }
 }
 
 type AccountRow = typeof noodleAccounts.$inferSelect;
@@ -1030,14 +1057,16 @@ export function createNoodleStorage(db: DB) {
         const expired = rows.filter(
           (row) => row.state === "prepared" && Date.parse(row.publishAt) <= Date.parse(timestamp),
         );
-        for (const row of expired) {
-          unlinkNoodlerMedia(String(parseRecord(parseRecord(row.payload).metadata).noodlerMediaPath ?? "") || null);
-        }
         if (expired.length > 0) {
-          await db
-            .update(noodlerPreparedPosts)
-            .set({ state: "discarded", updatedAt: timestamp })
-            .where(inArray(noodlerPreparedPosts.id, expired.map((row) => row.id)));
+          await db.transaction(async (tx) =>
+            tx
+              .update(noodlerPreparedPosts)
+              .set({ state: "discarded", updatedAt: timestamp })
+              .where(inArray(noodlerPreparedPosts.id, expired.map((row) => row.id))),
+          );
+          for (const row of expired) {
+            unlinkNoodlerMedia(String(parseRecord(parseRecord(row.payload).metadata).noodlerMediaPath ?? "") || null);
+          }
         }
       }
       return this.getSettings();
@@ -1517,19 +1546,47 @@ export function createNoodleStorage(db: DB) {
       return rows.map(mapAccount).filter((account) => account.settings.scheduler.autoPosting?.enabled === true);
     },
 
+    /**
+     * Latest real posting activity per creator: the newest published post or prepared slot.
+     * Account `updatedAt` moves on profile edits, which is not activity, so scheduling order
+     * must come from this instead.
+     */
+    async getNoodlerCreatorActivityTimes(): Promise<Map<string, string>> {
+      const [posts, prepared] = await Promise.all([
+        db.select().from(noodlePosts),
+        db.select().from(noodlerPreparedPosts),
+      ]);
+      const latest = new Map<string, string>();
+      const observe = (accountId: string, at: string) => {
+        const current = latest.get(accountId);
+        if (!current || at > current) latest.set(accountId, at);
+      };
+      for (const post of posts) observe(post.authorAccountId, post.createdAt);
+      for (const item of prepared) {
+        if (item.state !== "discarded") observe(item.creatorAccountId, item.publishAt);
+      }
+      return latest;
+    },
+
     async ensureNoodlerReserveState(at = new Date()): Promise<{
       lastObservedBudgetTime: string;
       preparationNotBefore: string;
     }> {
       return db.transaction(async (tx) => {
         const existing = (await tx.select().from(noodlerReserveState).where(eq(noodlerReserveState.id, NOODLER_RESERVE_STATE_ID)))[0];
-        const observedMs = Math.max(at.getTime(), existing ? Date.parse(existing.lastObservedBudgetTime) : 0);
+        // Imported or hand-edited state can carry timestamps that do not parse. NaN would
+        // propagate into every budget and hold comparison, so an unreadable value resets to now.
+        const parsed = existing ? Date.parse(existing.lastObservedBudgetTime) : 0;
+        const observedMs = Math.max(at.getTime(), Number.isNaN(parsed) ? 0 : parsed);
         if (existing) {
           const observed = new Date(observedMs).toISOString();
-          if (observed !== existing.lastObservedBudgetTime) {
-            await tx.update(noodlerReserveState).set({ lastObservedBudgetTime: observed, updatedAt: at.toISOString() }).where(eq(noodlerReserveState.id, NOODLER_RESERVE_STATE_ID));
+          const preparationNotBefore = Number.isNaN(Date.parse(existing.preparationNotBefore))
+            ? new Date(observedMs + ROLLING_DAY_MS).toISOString()
+            : existing.preparationNotBefore;
+          if (observed !== existing.lastObservedBudgetTime || preparationNotBefore !== existing.preparationNotBefore) {
+            await tx.update(noodlerReserveState).set({ lastObservedBudgetTime: observed, preparationNotBefore, updatedAt: at.toISOString() }).where(eq(noodlerReserveState.id, NOODLER_RESERVE_STATE_ID));
           }
-          return { lastObservedBudgetTime: observed, preparationNotBefore: existing.preparationNotBefore };
+          return { lastObservedBudgetTime: observed, preparationNotBefore };
         }
         const timestamp = at.toISOString();
         const preparationNotBefore = new Date(at.getTime() + ROLLING_DAY_MS).toISOString();
@@ -1602,7 +1659,10 @@ export function createNoodleStorage(db: DB) {
       policyFingerprint: string;
     }): Promise<string> {
       const id = newId();
-      await db.insert(noodlerPreparedPosts).values({
+      // In a transaction so the row lands durably on commit (noodler_prepared_posts is a
+      // durable-on-commit table): a direct insert rides the batched flush, and a crash inside
+      // that window loses the row while its promoted media file stays on disk.
+      await db.transaction(async (tx) => tx.insert(noodlerPreparedPosts).values({
         id,
         creatorAccountId: input.creatorAccountId,
         generatedAt: input.generatedAt,
@@ -1615,7 +1675,7 @@ export function createNoodleStorage(db: DB) {
         imageClaimToken: null,
         imageClaimLeaseUntil: null,
         updatedAt: input.generatedAt,
-      });
+      }));
       return id;
     },
 
@@ -1631,6 +1691,7 @@ export function createNoodleStorage(db: DB) {
       imageState: NoodlerPreparedImageState;
       imageClaimToken: string | null;
       imageClaimLeaseUntil: string | null;
+      updatedAt: string;
     }>> {
       const rows = await db.select().from(noodlerPreparedPosts).orderBy(noodlerPreparedPosts.publishAt);
       return rows.map((row) => ({
@@ -1643,10 +1704,17 @@ export function createNoodleStorage(db: DB) {
       }));
     },
 
+    /**
+     * Unlinking media before the discard is durable can leave a still-publishable row whose
+     * image bytes are gone, so the state is committed first and the file removed afterwards.
+     * A crash between the two leaks a file, which `sweepOrphanedNoodlerMedia` reclaims.
+     */
     async discardNoodlerPreparedPost(id: string, at = new Date()): Promise<void> {
       const current = (await db.select().from(noodlerPreparedPosts).where(eq(noodlerPreparedPosts.id, id)))[0];
+      await db.transaction(async (tx) =>
+        tx.update(noodlerPreparedPosts).set({ state: "discarded", updatedAt: at.toISOString() }).where(eq(noodlerPreparedPosts.id, id)),
+      );
       if (current) unlinkNoodlerMedia(String(parseRecord(parseRecord(current.payload).metadata).noodlerMediaPath ?? "") || null);
-      await db.update(noodlerPreparedPosts).set({ state: "discarded", updatedAt: at.toISOString() }).where(eq(noodlerPreparedPosts.id, id));
     },
 
     async discardPreparedPostsAfterManualPost(creatorAccountId: string, manualCreatedAt: string): Promise<number> {
@@ -1657,10 +1725,12 @@ export function createNoodleStorage(db: DB) {
         .filter((row) => row.state === "prepared" && Date.parse(row.publishAt) > start && Date.parse(row.publishAt) <= end)
         .map((row) => row.id);
       if (ids.length > 0) {
+        await db.transaction(async (tx) =>
+          tx.update(noodlerPreparedPosts).set({ state: "discarded", updatedAt: now() }).where(inArray(noodlerPreparedPosts.id, ids)),
+        );
         for (const row of rows.filter((candidate) => ids.includes(candidate.id))) {
           unlinkNoodlerMedia(String(parseRecord(parseRecord(row.payload).metadata).noodlerMediaPath ?? "") || null);
         }
-        await db.update(noodlerPreparedPosts).set({ state: "discarded", updatedAt: now() }).where(inArray(noodlerPreparedPosts.id, ids));
       }
       return ids.length;
     },
@@ -1682,14 +1752,17 @@ export function createNoodleStorage(db: DB) {
         }
       }
       let published = 0;
+      const discardedMediaPaths: Array<string | null> = [];
       for (const item of due) {
         const didPublish = await db.transaction(async (tx) => {
           const current = (await tx.select().from(noodlerPreparedPosts).where(eq(noodlerPreparedPosts.id, item.id)))[0];
           if (!current || current.state !== "prepared" || Date.parse(current.publishAt) > at.getTime()) return false;
           const existingPost = publishedPreparedIds.get(current.id);
           if (!existingPost && Date.parse(current.publishAt) < at.getTime() - ELAPSED_PREPARED_SLOT_MS) {
-            unlinkNoodlerMedia(String(parseRecord(parseRecord(current.payload).metadata).noodlerMediaPath ?? "") || null);
             await tx.update(noodlerPreparedPosts).set({ state: "discarded", updatedAt: at.toISOString() }).where(eq(noodlerPreparedPosts.id, current.id));
+            // Unlinked only after the discard commits, so a crash here leaks a file rather than
+            // leaving a publishable row whose image is already gone.
+            discardedMediaPaths.push(String(parseRecord(parseRecord(current.payload).metadata).noodlerMediaPath ?? "") || null);
             return false;
           }
           if (existingPost) {
@@ -1736,7 +1809,10 @@ export function createNoodleStorage(db: DB) {
             access: payload.access === "public" ? "public" : "locked",
             metadata: JSON.stringify({ ...parseRecord(payload.metadata), noodlerPreparedPostId: current.id }),
             authorSnapshot: JSON.stringify(snapshotForAccount(account)),
-            createdAt: current.publishAt,
+            // A late publish is stamped with the moment it actually happened. Using publishAt
+            // would file the post behind whatever the feed received during the delay.
+            createdAt:
+              Date.parse(current.publishAt) < at.getTime() ? at.toISOString() : current.publishAt,
             updatedAt: at.toISOString(),
           });
           await tx
@@ -1754,6 +1830,7 @@ export function createNoodleStorage(db: DB) {
         });
         if (didPublish) published += 1;
       }
+      for (const path of discardedMediaPaths) unlinkNoodlerMedia(path);
       return published;
     },
 
@@ -1814,6 +1891,10 @@ export function createNoodleStorage(db: DB) {
           const account = accounts.get(item.creatorAccountId);
           const source = account?.noodleAccountId ? accounts.get(account.noodleAccountId) : null;
           return (
+            // A row whose timestamps do not parse can never become due and would otherwise make
+            // every status read and publish pass fail until someone edited storage by hand.
+            Number.isNaN(Date.parse(item.publishAt)) ||
+            Number.isNaN(Date.parse(item.generatedAt)) ||
             !account ||
             !source ||
             !account.settings.scheduler.autoPosting?.enabled ||
@@ -1829,10 +1910,47 @@ export function createNoodleStorage(db: DB) {
       const excessIds = validFuture.slice(settings.postsPerDay).map((item) => item.id);
       const discarded = [...new Set([...invalidIds, ...excessIds])];
       if (discarded.length > 0) {
+        await db.transaction(async (tx) =>
+          tx.update(noodlerPreparedPosts).set({ state: "discarded", updatedAt: at.toISOString() }).where(inArray(noodlerPreparedPosts.id, discarded)),
+        );
         for (const item of prepared.filter((candidate) => discarded.includes(candidate.id))) {
           unlinkNoodlerMedia(String(parseRecord(item.payload.metadata).noodlerMediaPath ?? "") || null);
         }
-        await db.update(noodlerPreparedPosts).set({ state: "discarded", updatedAt: at.toISOString() }).where(inArray(noodlerPreparedPosts.id, discarded));
+      }
+      // A crash between the durable row write and the media promotion leaves a row pointing at a
+      // file that is not there; publishing it would give the post a 404 image route. Drop the
+      // reference instead, so the post publishes as text.
+      for (const item of items) {
+        if (item.state !== "prepared" || discarded.includes(item.id)) continue;
+        const mediaPath = item.payload.metadata.noodlerMediaPath;
+        if (typeof mediaPath !== "string" || !mediaPath) continue;
+        const absolute = resolveNoodlerMediaAbsolutePath(mediaPath);
+        if (absolute && existsSync(absolute)) continue;
+        const { noodlerMediaPath: _missing, ...metadata } = item.payload.metadata;
+        await db.transaction(async (tx) =>
+          tx
+            .update(noodlerPreparedPosts)
+            .set({
+              payload: JSON.stringify({ ...item.payload, metadata }),
+              imageState: "closed",
+              updatedAt: at.toISOString(),
+            })
+            .where(eq(noodlerPreparedPosts.id, item.id)),
+        );
+      }
+      // Published and discarded rows only exist for crash recovery, and this table is read whole
+      // on every poll, so aged terminal rows are dropped instead of accumulating forever.
+      const pruneBefore = at.getTime() - TERMINAL_PREPARED_POST_RETENTION_MS;
+      const prunable = items
+        .filter(
+          (item) =>
+            item.state !== "prepared" &&
+            !discarded.includes(item.id) &&
+            !(Date.parse(item.updatedAt) > pruneBefore),
+        )
+        .map((item) => item.id);
+      if (prunable.length > 0) {
+        await db.delete(noodlerPreparedPosts).where(inArray(noodlerPreparedPosts.id, prunable));
       }
       return repaired + discarded.length;
     },
@@ -2453,8 +2571,15 @@ export function createNoodleStorage(db: DB) {
         }
       }
       const deletedRows = rows.filter((row) => deletedIds.has(row.id));
+      // The guard is "every actor in this subtree is an account this installation owns". A
+      // creator reply is authored by a NoodleR stage account, so leaving those out made a
+      // comment undeletable as soon as its creator answered it.
       const noodleAccountIds = new Set((await this.listAccounts()).map((account) => account.id));
-      if (deletedRows.some((row) => !noodleAccountIds.has(row.actorAccountId))) return [];
+      const knownAccountIds = new Set([
+        ...noodleAccountIds,
+        ...(await this.listNoodlerAccounts()).map((account) => account.id),
+      ]);
+      if (deletedRows.some((row) => !knownAccountIds.has(row.actorAccountId))) return [];
       const relatedDigests = await db
         .select()
         .from(noodleActivityDigests)
@@ -2470,6 +2595,15 @@ export function createNoodleStorage(db: DB) {
         await tx
           .delete(noodleActivityDigests)
           .where(inArray(noodleActivityDigests.sourceInteractionId, [...deletedIds]));
+        // This is the route comment deletion actually takes, and the subtree it removes can
+        // contain both a comment that owns a creator-reply claim and the reply that claim
+        // points at. Either one left behind keeps consuming the rolling allowance forever.
+        await tx
+          .delete(noodlerCreatorReplyClaims)
+          .where(inArray(noodlerCreatorReplyClaims.parentInteractionId, [...deletedIds]));
+        await tx
+          .delete(noodlerCreatorReplyClaims)
+          .where(inArray(noodlerCreatorReplyClaims.replyInteractionId, [...deletedIds]));
         await tx.delete(noodleInteractions).where(inArray(noodleInteractions.id, [...deletedIds]));
       });
       return deletedRows.map(mapInteraction);
@@ -2602,8 +2736,11 @@ export function createNoodleStorage(db: DB) {
         // Prune only expired claims that never produced a reply. A claim that did is the
         // permanent "this comment already has a creator reply" key and must outlive the
         // budget window; an orphan one gates nothing once it leaves it.
+        // Budget membership is `claimedAt > cutoff`, so anything not greater is outside the
+        // window: pruning must use the exact complement or a claim sitting on the boundary is
+        // neither counted nor released, and blocks its comment forever.
         const expiredOrphans = (await tx.select().from(noodlerCreatorReplyClaims)).filter(
-          (row) => !row.replyInteractionId && row.claimedAt < cutoff,
+          (row) => !row.replyInteractionId && !(row.claimedAt > cutoff),
         );
         if (expiredOrphans.length > 0) {
           await tx.delete(noodlerCreatorReplyClaims).where(
@@ -2631,6 +2768,31 @@ export function createNoodleStorage(db: DB) {
             ? await tx.select().from(noodleInteractions).where(eq(noodleInteractions.id, existing.replyInteractionId))
             : [];
           return { status: "duplicate", interaction: replyRows[0] ? mapInteraction(replyRows[0]) : null };
+        }
+        // The reply can also outlive its claim if a crash lost the claim write. Reconcile against
+        // the replies themselves so the comment cannot collect a second creator reply.
+        const strandedReply = (
+          await tx
+            .select()
+            .from(noodleInteractions)
+            .where(
+              and(
+                eq(noodleInteractions.parentInteractionId, parentInteractionId),
+                eq(noodleInteractions.actorAccountId, creatorAccountId),
+                eq(noodleInteractions.type, "reply"),
+              ),
+            )
+        )[0];
+        if (strandedReply) {
+          await tx.insert(noodlerCreatorReplyClaims).values({
+            id: newId(),
+            postId: post.id,
+            parentInteractionId,
+            creatorAccountId,
+            replyInteractionId: strandedReply.id,
+            claimedAt: at,
+          });
+          return { status: "duplicate", interaction: mapInteraction(strandedReply) };
         }
 
         const recentClaims = await tx
@@ -2745,6 +2907,28 @@ export function createNoodleStorage(db: DB) {
           })
         ) {
           return null;
+        }
+        // Crash recovery: the reply row and the claim link are separate durable writes, so a
+        // crash between them leaves a reply whose claim is still unlinked. Adopt that reply
+        // instead of writing a second one — one reply per parent comment per creator.
+        const orphanedReply = (
+          await tx
+            .select()
+            .from(noodleInteractions)
+            .where(
+              and(
+                eq(noodleInteractions.parentInteractionId, parentRow.id),
+                eq(noodleInteractions.actorAccountId, creatorRow.id),
+                eq(noodleInteractions.type, "reply"),
+              ),
+            )
+        )[0];
+        if (orphanedReply) {
+          await tx
+            .update(noodlerCreatorReplyClaims)
+            .set({ replyInteractionId: orphanedReply.id })
+            .where(eq(noodlerCreatorReplyClaims.id, claimId));
+          return mapInteraction(orphanedReply);
         }
         const replyId = newId();
         await tx.insert(noodleInteractions).values({

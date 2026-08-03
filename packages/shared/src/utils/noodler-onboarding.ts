@@ -1,4 +1,15 @@
-export type NoodlerOnboardingCompletion = "declined" | "generated" | "partial" | "failed" | "zero";
+/**
+ * `settingsFailed` is reported by the wizard rather than derived here: the creators and their
+ * posts may have succeeded completely while only the settings write failed, which is a different
+ * problem from a creator that could not post and needs its own recovery.
+ */
+export type NoodlerOnboardingCompletion =
+  | "declined"
+  | "generated"
+  | "partial"
+  | "failed"
+  | "settingsFailed"
+  | "zero";
 
 /**
  * Which closing screen the onboarding wizard lands on. Profile creation and first-post generation

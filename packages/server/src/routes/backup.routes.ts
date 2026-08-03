@@ -47,6 +47,7 @@ import {
 } from "../services/import/profile-import-assets.js";
 import { ProfileImportRequestError } from "../services/import/profile-import-errors.js";
 import { planProfileNoodleImport, type ProfileNoodleImportWarning } from "../services/import/profile-import-noodle.js";
+import { withNoodleAutoPostPaused } from "../services/noodle/noodle-autopost-scheduler.service.js";
 import { computePersonalExtensionHash } from "../services/extensions/personal-extension-hash.js";
 import { personalServerExtensionRuntime } from "../services/extensions/personal-server-extension-runtime.js";
 import {
@@ -712,11 +713,14 @@ async function buildProfileStorageSnapshot(
   app: FastifyInstance,
   options: ProfileStorageSnapshotOptions = {},
 ): Promise<ProfileStorageSnapshot> {
-  return {
+  // Tables and assets are two separate reads. The NoodleR reserve writes both in one pass, so
+  // without holding it still the archive can contain a row whose media bytes are missing, or
+  // media no surviving row owns.
+  return withNoodleAutoPostPaused(async () => ({
     version: 1,
     tables: await buildProfileTableSnapshot(app),
     files: await collectProfileAssetFiles(getDataDir(), options),
-  };
+  }));
 }
 
 function isProfileStorageSnapshot(value: unknown): value is ProfileStorageSnapshot {
@@ -1202,7 +1206,10 @@ async function buildProfileArchiveSources(
 async function writeNativeProfileZip(app: FastifyInstance, outputPath: string) {
   const workingDir = await mkdtemp(join(tmpdir(), "marinara-profile-tables-"));
   try {
-    const sources = await buildProfileArchiveSources(app, "", workingDir, true);
+    // Same row/asset consistency requirement as the JSON snapshot above.
+    const sources = await withNoodleAutoPostPaused(() =>
+      buildProfileArchiveSources(app, "", workingDir, true),
+    );
     await writeStoredZipArchive(outputPath, sources);
   } finally {
     await rm(workingDir, { recursive: true, force: true }).catch(() => {});
@@ -2201,7 +2208,9 @@ async function writeFullBackupArchive(
   workingDir: string,
 ) {
   const dataDir = getDataDir();
-  const sources = await buildProfileArchiveSources(app, backupName, workingDir, false);
+  const sources = await withNoodleAutoPostPaused(() =>
+    buildProfileArchiveSources(app, backupName, workingDir, false),
+  );
   sources.push({
     entryName: `${backupName}/RESTORE.txt`,
     data: Buffer.from(buildBackupRestoreNotes(), "utf8"),
