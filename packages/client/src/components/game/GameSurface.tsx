@@ -2975,6 +2975,10 @@ function GameSurfaceComponent({
     recentSpotifyTrackHistoryRef.current = normalizeRecentSpotifyTrackHistory(chatMeta.gameRecentSpotifyTracks);
     setPartyDialogue([]);
     setPartyChatMessageId(null);
+    // Choices belong to the turn that offered them, and nothing else clears them on a scope change, so
+    // they survived into the next game — answerable there, against a GM that never asked.
+    setActiveChoices(null);
+    setActiveQte(null);
     setQueuedQte(null);
     setQueuedEncounter(null);
     setQueuedCombatGeneration(null);
