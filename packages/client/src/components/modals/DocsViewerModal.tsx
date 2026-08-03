@@ -8,6 +8,7 @@ import { cn } from "../../lib/utils";
 import { renderMarkdownBlocks, applyInlineMarkdown } from "../../lib/markdown";
 import { useDocContent, useDocsIndex, useDocsSearch, type DocSummary } from "../../hooks/use-docs";
 import { useTranslation as useUiTranslation } from "react-i18next";
+import { docsLanguageDirection } from "@marinara-engine/shared";
 
 /**
  * Sidebar category headers, keyed by the ACTIVE DOCS LANGUAGE (not the UI
@@ -254,11 +255,20 @@ function dirLabel(dir: string, docsLanguage: string) {
   );
 }
 
-function formatUpdatedAt(iso: string): string {
+function formatUpdatedAt(iso: string, locale: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  // The UI locale, not the browser locale: the surrounding sentence is
+  // rendered in the UI language, and the two must agree on digits/format.
+  return date.toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric" });
 }
+
+/**
+ * Letter-spacing is safe for alphabets whose glyphs stand alone; it visibly
+ * severs Arabic cursive joining and misfits CJK/Indic labels. Latin, Greek,
+ * and Cyrillic (plus digits/punctuation) keep the tracked small-caps look.
+ */
+const TRACKING_SAFE_LABEL_RE = /^[\u0020-\u024F\u0370-\u03FF\u0400-\u04FF\u1E00-\u1EFF\u2010-\u2027\s]*$/;
 
 /** Resolve a link target relative to the doc it appears in (e.g. "../FAQ.md" from "installation/windows.md"). */
 function resolveDocPath(currentPath: string, target: string): string {
@@ -393,7 +403,7 @@ export function DocsViewerModal({
   onClose: () => void;
   initialDoc?: string | null;
 }) {
-  const { t: localizeUi } = useUiTranslation();
+  const { t: localizeUi, i18n: uiI18n } = useUiTranslation();
   const savedPlaceRef = useRef(readSavedPlace());
   const [selected, setSelectedState] = useState<string | null>(initialDoc ?? savedPlaceRef.current.doc);
   const [searchQuery, setSearchQuery] = useState("");
@@ -633,6 +643,10 @@ export function DocsViewerModal({
   // Active docs language; "en" until the index loads. A doc whose served
   // language differs from it is an English fallback and gets an "EN" badge.
   const docsLanguage = index?.language ?? "en";
+  const uiLocale = uiI18n.resolvedLanguage ?? uiI18n.language;
+  // Tracked small-caps headers are all-or-nothing per pack: gating per label
+  // would mix tracked English and untracked native headers in one sidebar.
+  const sidebarHeaderTracked = groups.every((group) => TRACKING_SAFE_LABEL_RE.test(dirLabel(group.dir, docsLanguage)));
   const englishBadge = (
     <span
       className="shrink-0 rounded-full border border-[var(--border)]/60 bg-black/5 px-1.5 py-0.5 text-[0.5625rem] font-medium text-[var(--muted-foreground)]/80 dark:bg-white/6"
@@ -653,6 +667,7 @@ export function DocsViewerModal({
             <Search size="0.875rem" className="shrink-0 text-[var(--muted-foreground)]" />
             <input
               type="search"
+              dir="auto"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder={localizeUi("ui.modals.docsviewermodal.searchAllGuides")}
@@ -671,7 +686,7 @@ export function DocsViewerModal({
             ) : null}
           </div>
 
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pe-1">
             {indexLoading ? (
               <p className="px-1 py-2 text-xs text-[var(--muted-foreground)]">{localizeUi("ui.modals.docsviewermodal.loadingGuides")}</p>
             ) : indexError || !index ? (
@@ -689,7 +704,7 @@ export function DocsViewerModal({
                       type="button"
                       onClick={() => selectDoc(result.path, highlightTerm)}
                       className={cn(
-                        "flex w-full flex-col gap-1 rounded-lg border px-2.5 py-2 text-left transition-colors",
+                        "flex w-full flex-col gap-1 rounded-lg border px-2.5 py-2 text-start transition-colors",
                         selected === result.path
                           ? "border-[var(--primary)]/40 bg-[var(--accent)]"
                           : "border-transparent hover:border-[var(--border)] hover:bg-[var(--accent)]/60",
@@ -697,7 +712,7 @@ export function DocsViewerModal({
                     >
                       <span className="flex items-center gap-2">
                         <FileText size="0.875rem" className="shrink-0 text-[var(--muted-foreground)]" />
-                        <span className="min-w-0 flex-1 truncate text-xs font-medium text-[var(--foreground)]">
+                        <span dir="auto" className="min-w-0 flex-1 truncate text-xs font-medium text-[var(--foreground)]">
                           {highlightTermNodes(result.title, highlightTerm)}
                         </span>
                         {docsLanguage !== "en" && result.language === "en" ? englishBadge : null}
@@ -708,7 +723,8 @@ export function DocsViewerModal({
                       {result.snippets.map((snippet) => (
                         <span
                           key={`${result.path}-${snippet.line}`}
-                          className="block truncate pl-6 text-[0.625rem] leading-snug text-[var(--muted-foreground)]/80"
+                          dir="auto"
+                          className="block truncate ps-6 text-[0.625rem] leading-snug text-[var(--muted-foreground)]/80"
                         >
                           {highlightTermNodes(snippet.text, highlightTerm)}
                         </span>
@@ -722,7 +738,13 @@ export function DocsViewerModal({
             ) : (
               groups.map((group) => (
                 <div key={group.dir || "root"}>
-                  <p className="px-1 pb-1 text-[0.625rem] font-medium uppercase tracking-[0.16em] text-[var(--muted-foreground)]/70">
+                  <p
+                    dir="auto"
+                    className={cn(
+                      "px-1 pb-1 text-[0.625rem] font-medium text-[var(--muted-foreground)]/70",
+                      sidebarHeaderTracked && "uppercase tracking-[0.16em]",
+                    )}
+                  >
                     {dirLabel(group.dir, docsLanguage)}
                   </p>
                   <div className="space-y-1">
@@ -731,9 +753,9 @@ export function DocsViewerModal({
                         key={entry.path}
                         type="button"
                         onClick={() => selectDoc(entry.path)}
-                        title={entry.updatedAt ?localizeUi("ui.modals.docsviewermodal.lastUpdatedValue1", { value1: formatUpdatedAt(entry.updatedAt) }) : undefined}
+                        title={entry.updatedAt ?localizeUi("ui.modals.docsviewermodal.lastUpdatedValue1", { value1: formatUpdatedAt(entry.updatedAt, uiLocale) }) : undefined}
                         className={cn(
-                          "flex w-full items-start gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors",
+                          "flex w-full items-start gap-2 rounded-lg border px-2.5 py-2 text-start transition-colors",
                           selected === entry.path
                             ? "border-[var(--primary)]/40 bg-[var(--accent)] text-[var(--foreground)]"
                             : "border-transparent text-[var(--muted-foreground)] hover:border-[var(--border)] hover:bg-[var(--accent)]/60 hover:text-[var(--foreground)]",
@@ -741,8 +763,8 @@ export function DocsViewerModal({
                       >
                         <FileText size="0.875rem" className="mt-0.5 shrink-0" />
                         <span className="min-w-0 flex-1">
-                          <span className="block break-words text-xs font-medium leading-snug">{entry.title}</span>
-                          <span className="block truncate text-[0.625rem] text-[var(--muted-foreground)]/70">
+                          <span dir="auto" className="block break-words text-xs font-medium leading-snug">{entry.title}</span>
+                          <span dir="ltr" className="block truncate text-[0.625rem] text-[var(--muted-foreground)]/70">
                             {entry.path}
                           </span>
                         </span>
@@ -757,7 +779,7 @@ export function DocsViewerModal({
           {index ? (
             <div className="mt-2 shrink-0 border-t border-[var(--border)]/60 pt-2">
               <p className="text-[0.625rem] text-[var(--muted-foreground)]/70">{localizeUi("ui.modals.docsviewermodal.alsoOnDiskAt")}</p>
-              <code className="block break-all text-[0.625rem] text-[var(--muted-foreground)]" title={index.root}>
+              <code dir="ltr" className="block break-all text-[0.625rem] text-[var(--muted-foreground)]" title={index.root}>
                 {index.root}
               </code>
             </div>
@@ -767,7 +789,7 @@ export function DocsViewerModal({
         {/* Reader */}
         <div
           className={cn(
-            "min-w-0 flex-1 flex-col sm:flex sm:border-l sm:border-[var(--border)]/60 sm:pl-3",
+            "min-w-0 flex-1 flex-col sm:flex sm:border-s sm:border-[var(--border)]/60 sm:ps-3",
             selected === null ? "hidden sm:flex" : "flex",
           )}
         >
@@ -790,8 +812,11 @@ export function DocsViewerModal({
                 >
                   <ArrowLeft size="0.875rem" />
                 </button>
-                <p className="min-w-0 truncate text-[0.625rem] text-[var(--muted-foreground)]/70">{localizeUi("ui.modals.docsviewermodal.docs")}{selected}
-                  {doc?.updatedAt ?localizeUi("ui.modals.docsviewermodal.lastUpdatedValue1_f97aff7", { value1: formatUpdatedAt(doc.updatedAt) }) : ""}
+                <p className="min-w-0 truncate text-[0.625rem] text-[var(--muted-foreground)]/70">
+                  {/* The path is an LTR isolate so an RTL UI locale cannot
+                      reorder it against the updated-at clause beside it. */}
+                  <span dir="ltr" className="[unicode-bidi:isolate]">{localizeUi("ui.modals.docsviewermodal.docs")}{selected}</span>
+                  <span>{doc?.updatedAt ?localizeUi("ui.modals.docsviewermodal.lastUpdatedValue1_f97aff7", { value1: formatUpdatedAt(doc.updatedAt, uiLocale) }) : ""}</span>
                 </p>
                 {doc && docsLanguage !== "en" && doc.language === "en" ? englishBadge : null}
               </div>
@@ -801,7 +826,7 @@ export function DocsViewerModal({
                 onScroll={(event) => {
                   if (selected) writeSavedPlace({ doc: selected, scrollTop: event.currentTarget.scrollTop });
                 }}
-                className="min-h-0 flex-1 overflow-y-auto pr-1"
+                className="min-h-0 flex-1 overflow-y-auto pe-1"
               >
                 {docLoading ? (
                   <p className="py-2 text-xs text-[var(--muted-foreground)]">{localizeUi("ui.panels.ttsconfigcard.loading")}</p>
@@ -813,11 +838,14 @@ export function DocsViewerModal({
                     // (never reconciles) the subtree the highlight/copy effects
                     // mutate — see renderedKey above.
                     key={renderedKey}
+                    // Direction follows the SERVED doc, not the pack: an English
+                    // fallback file inside an RTL pack must stay LTR.
+                    dir={docsLanguageDirection(doc.language)}
                     // Code blocks wrap instead of scrolling horizontally: the shared
                     // .mari-md-codeblock rule is unlayered CSS (beats the utilities
                     // layer, hence the !), and the corner-anchored lang tag + Copy
                     // button would float over the text of a scrolled block.
-                    className="mari-message-content whitespace-pre-wrap break-words text-sm text-[var(--foreground)] [&_.mari-md-codeblock]:whitespace-pre-wrap! [&_.mari-md-codeblock]:[overflow-wrap:anywhere]! [&_.mari-md-codeblock]:pb-9!"
+                    className="mari-message-content docs-reader-content whitespace-pre-wrap break-words text-sm text-[var(--foreground)] [&_.mari-md-codeblock]:whitespace-pre-wrap! [&_.mari-md-codeblock]:[overflow-wrap:anywhere]! [&_.mari-md-codeblock]:pb-9!"
                     onClick={handleContentClick}
                   >
                     {rendered}
