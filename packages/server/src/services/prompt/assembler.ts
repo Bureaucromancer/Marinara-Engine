@@ -554,6 +554,14 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
     }
   }
 
+  const idMacroCardMarkerSections = [...orderedSections, ...depthSections].filter((section) => section.isIdMacroCards);
+  const referencedCharacterContent = referencedCharacterContextBlocks.join("\n");
+  if (referencedCharacterContent) {
+    for (const section of idMacroCardMarkerSections) {
+      section.messages = [{ role: section.role, content: referencedCharacterContent, contextKind: "prompt" }];
+    }
+  }
+
   // ── Phase 2: Group wrapping ──
   // Build ordered messages, wrapping grouped sections
   const messages: ChatMLMessage[] = [];
@@ -596,10 +604,10 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
       }
     }
   }
-  if (referencedCharacterContextBlocks.length > 0) {
+  if (referencedCharacterContent && idMacroCardMarkerSections.length === 0) {
     messages.unshift({
       role: "system",
-      content: referencedCharacterContextBlocks.join("\n"),
+      content: referencedCharacterContent,
       contextKind: "prompt",
     });
   }
@@ -724,6 +732,8 @@ interface ResolvedSection {
   messages: ChatMLMessage[];
   depth: number;
   isChatHistory?: boolean;
+  /** Placement placeholder for dynamically discovered character-ID macro cards. */
+  isIdMacroCards?: boolean;
 }
 
 interface ResolveSectionCtx {
@@ -756,6 +766,16 @@ async function resolveSection(
   // Handle marker sections
   if (section.isMarker === "true" && section.markerConfig) {
     const markerConfig = JSON.parse(section.markerConfig) as MarkerConfig;
+    if (markerConfig.type === "id_macro_cards") {
+      return {
+        id: section.id,
+        groupId: section.groupId,
+        role,
+        messages: [],
+        depth: section.injectionDepth,
+        isIdMacroCards: true,
+      };
+    }
     const runtimeAgentType =
       markerConfig.type === "agent_data" && markerConfig.agentType ? markerConfig.agentType : null;
     const runtimeAgentData = runtimeAgentType !== null ? ctx.runtimeAgentData[runtimeAgentType] : undefined;

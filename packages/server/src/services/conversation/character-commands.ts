@@ -1469,7 +1469,7 @@ export function parseCharacterCommandsBySpeaker(
     if (key && !nameToId.has(key)) nameToId.set(key, character.id);
   }
 
-  // Segment the response by leading "Name: " line prefixes, mirroring the client's
+  // Segment the response by leading "Name:" line prefixes, mirroring the client's
   // parseNamePrefixFormat so server-side attribution matches the rendered split.
   // Segment the timestamp-stripped shape — the client strips leaked [HH:MM]
   // tokens before rendering, so a line like "[12:01] Alice: hey" is Alice's
@@ -1492,14 +1492,16 @@ export function parseCharacterCommandsBySpeaker(
     currentLines = [];
   };
   for (const line of attributionContent.split("\n")) {
-    const colonIdx = line.indexOf(": ");
+    const colonIdx = line.indexOf(":");
     if (colonIdx > 0) {
+      const rawText = line.slice(colonIdx + 1);
+      const sameLineText = rawText.endsWith("\r") ? rawText.slice(0, -1) : rawText;
       const mappedId = nameToId.get(normalizeTextForMatch(line.slice(0, colonIdx)));
-      if (mappedId) {
+      if (mappedId && (sameLineText.length === 0 || /^[\t ]/u.test(sameLineText))) {
         flush();
         inLeadingRegion = false;
         currentId = mappedId;
-        currentLines = [line.slice(colonIdx + 2)];
+        currentLines = [sameLineText.replace(/^[\t ]+/u, "")];
         continue;
       }
     }

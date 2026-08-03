@@ -7462,6 +7462,8 @@
   "ui.presets.sectionstab.group": "Group:",
   "ui.presets.sectionstab.groups": "Groups (",
   "ui.presets.sectionstab.groupsWrapAdjacentSectionsInASingleXmlMarkdown": "Groups wrap adjacent sections in a single XML/Markdown container. Assign sections to groups below.",
+  "ui.presets.sectionstab.idMacroCards": "ID Macro Cards",
+  "ui.presets.sectionstab.idMacroCardsDescription": "Inserts character cards referenced by exact 21-character ID macros. Without this marker, they use the default prompt position.",
   "ui.presets.sectionstab.macroWillBeReplacedWithTheLatestOutputFrom": "macro will be replaced with the latest output from the agent at assembly time. You can add additional instructions around it.",
   "ui.presets.sectionstab.marker": "MARKER",
   "ui.presets.sectionstab.markers": "Markers",

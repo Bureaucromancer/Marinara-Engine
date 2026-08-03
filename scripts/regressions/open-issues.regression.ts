@@ -92,7 +92,10 @@ import {
 import { isGitUpdateApplyAllowed } from "../../packages/server/src/services/updates/update-apply-policy.js";
 import { parseNoodleAvatarCrop } from "../../packages/server/src/services/storage/noodle.storage.js";
 import { sanitizeExampleDialoguePromptLeaf } from "../../packages/server/src/services/prompt/prompt-escaping.js";
-import { parseCharacterCommands } from "../../packages/server/src/services/conversation/character-commands.js";
+import {
+  parseCharacterCommands,
+  parseCharacterCommandsBySpeaker,
+} from "../../packages/server/src/services/conversation/character-commands.js";
 import {
   collapseDuplicateConversationSpeakerPrefixes,
   isRepeatedConversationResponse,
@@ -867,13 +870,17 @@ try {
       keys: ["cafe"],
     }),
   );
-  const assembleCharacterReferenceFixture = (chatId: string, content: string) =>
+  const assembleCharacterReferenceFixture = (chatId: string, content: string, includePlacementMarker = false) =>
     assemblePrompt({
       db,
       preset: {
         id: "character-reference-preset",
         name: "Character reference fixture",
-        sectionOrder: JSON.stringify(["lorebook", "history"]),
+        sectionOrder: JSON.stringify([
+          "lorebook",
+          ...(includePlacementMarker ? ["id-macro-cards"] : []),
+          "history",
+        ]),
         groupOrder: JSON.stringify([]),
         wrapFormat: "xml",
         parameters: JSON.stringify({}),
@@ -897,6 +904,26 @@ try {
           injectionOrder: 0,
           forbidOverrides: "false",
         },
+        ...(includePlacementMarker
+          ? [
+              {
+                id: "id-macro-cards",
+                presetId: "character-reference-preset",
+                identifier: "id_macro_cards",
+                name: "ID Macro Cards",
+                content: "",
+                role: "system",
+                enabled: "true",
+                isMarker: "true",
+                groupId: null,
+                markerConfig: JSON.stringify({ type: "id_macro_cards" }),
+                injectionPosition: "ordered",
+                injectionDepth: 0,
+                injectionOrder: 1,
+                forbidOverrides: "false",
+              },
+            ]
+          : []),
         {
           id: "history",
           presetId: "character-reference-preset",
@@ -932,6 +959,28 @@ try {
   assert.match(assembledReferenceText, /A trusted friend from the western district\./u);
   assert.match(assembledReferenceText, /REFERENCED_EXAMPLE_SHOULD_APPEAR/u);
   assert.doesNotMatch(assembledReferenceText, /REFERENCED_GREETING_MUST_STAY_OUT/u);
+  assert.ok(
+    assembledReferenceText.indexOf("<referenced_characters>") <
+      assembledReferenceText.indexOf("The cafe companion is Susie."),
+    "Presets without the placement marker must keep ID macro cards in the legacy leading position",
+  );
+
+  const placedReference = await assembleCharacterReferenceFixture(
+    "character-reference-marker-regression",
+    "I went to the cafe.",
+    true,
+  );
+  const placedReferenceText = placedReference.messages.map((message) => message.content).join("\n");
+  assert.ok(
+    placedReferenceText.indexOf("The cafe companion is Susie.") <
+      placedReferenceText.indexOf("<referenced_characters>"),
+    "The ID Macro Cards marker must own placement after lorebook-discovered references are resolved",
+  );
+  assert.equal(
+    placedReferenceText.match(/<referenced_characters>/gu)?.length,
+    1,
+    "The explicit marker must replace rather than duplicate the legacy fallback block",
+  );
 
   const cappedDirectReferences = [];
   for (let index = 0; index < MAX_REFERENCED_CHARACTERS; index += 1) {
@@ -2834,6 +2883,30 @@ assert.deepEqual(splitGroupedSegmentDisplayLines(inheritedGroupConversationSegme
   "so anyway",
   "i was thinking about that",
 ]);
+const newlineAfterSpeakerNameSegments = parseGroupedSpeakerSegments(
+  "Char1:\nso anyway\ni was thinking about that\nChar2:\r\nyeah?",
+  new Set(["char1", "char2"]),
+);
+assert.deepEqual(
+  newlineAfterSpeakerNameSegments?.map(({ speaker, lines }) => ({ speaker, lines })),
+  [
+    { speaker: "Char1", lines: ["so anyway\ni was thinking about that"] },
+    { speaker: "Char2", lines: ["yeah?"] },
+  ],
+  "Grouped Conversation parsing must tolerate a newline after a recognized speaker name",
+);
+assert.deepEqual(
+  parseCharacterCommandsBySpeaker(
+    "Char1:\nNothing to run.\nChar2:\r\n[selfie]",
+    [
+      { id: "char-1", name: "Char1" },
+      { id: "char-2", name: "Char2" },
+    ],
+    "char-1",
+  ).commandCharacterIds,
+  ["char-2"],
+  "Commands beneath a newline-delimited speaker label must retain the same character attribution as the UI bubble",
+);
 assert.deepEqual(
   splitGroupedSegmentDisplayLines({
     ...inheritedGroupConversationSegments![0]!,
