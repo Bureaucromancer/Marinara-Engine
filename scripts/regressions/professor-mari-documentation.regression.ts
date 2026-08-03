@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -14,7 +14,9 @@ const workspaceRoot = await mkdtemp(join(tmpdir(), "marinara-doc-tools-"));
 
 try {
   await mkdir(join(workspaceRoot, "docs", "connections"), { recursive: true });
+  await mkdir(join(workspaceRoot, "docs", "connections", "examples"), { recursive: true });
   await mkdir(join(workspaceRoot, "docs", "examples"), { recursive: true });
+  await mkdir(join(workspaceRoot, "outside-docs"), { recursive: true });
   await writeFile(join(workspaceRoot, "README.md"), "# Marinara Engine\n\nInstall the engine with pnpm.\n", "utf8");
   await writeFile(
     join(workspaceRoot, "docs", "connections", "proxy.md"),
@@ -41,16 +43,31 @@ try {
     "# Proxy timeout\n\nThis internal example must not be searched.",
     "utf8",
   );
+  await writeFile(
+    join(workspaceRoot, "docs", "connections", "examples", "nested-ignored.md"),
+    "# Proxy timeout\n\nThis nested internal example must not be searched.",
+    "utf8",
+  );
+  await writeFile(join(workspaceRoot, "outside-docs", "secret.md"), "# Internal secret\n", "utf8");
+  await symlink(
+    join(workspaceRoot, "outside-docs"),
+    join(workspaceRoot, "docs", "connections", "linked-outside"),
+    process.platform === "win32" ? "junction" : "dir",
+  );
+  await writeFile(join(workspaceRoot, "docs", "zz-oversized.md"), "x".repeat(1024 * 1024 + 1), "utf8");
 
-  const results = await searchCanonicalDocumentation(workspaceRoot, "proxy timeout", 3);
+  const searchResponse = await searchCanonicalDocumentation(workspaceRoot, "proxy timeout", 3);
+  const results = searchResponse.results;
+  assert.equal(searchResponse.truncated, true);
   assert.equal(results[0]?.path, "docs/connections/proxy.md");
   assert.equal(results[0]?.heading, "Proxy timeout");
   assert.match(results[0]?.excerpt ?? "", /local provider/u);
   assert.ok(results.every((result) => !result.path.includes("examples")));
 
-  const formattedSearch = formatDocumentationSearch("proxy timeout", results);
+  const formattedSearch = formatDocumentationSearch("proxy timeout", searchResponse);
   assert.match(formattedSearch, /Source: docs\/connections\/proxy\.md/u);
   assert.match(formattedSearch, /Heading: Proxy timeout/u);
+  assert.match(formattedSearch, /safe corpus limit/u);
 
   const section = await readCanonicalDocumentation(workspaceRoot, "docs/connections/proxy.md", "Proxy timeout", 1_000);
   assert.match(section.content, /Increase the proxy timeout/u);
@@ -59,12 +76,20 @@ try {
   assert.match(formatDocumentationRead(section), /Source: docs\/connections\/proxy\.md/u);
 
   const readmeResults = await searchCanonicalDocumentation(workspaceRoot, "install engine", 3);
-  assert.equal(readmeResults[0]?.path, "README.md");
+  assert.equal(readmeResults.results[0]?.path, "README.md");
 
   await assert.rejects(() => readCanonicalDocumentation(workspaceRoot, "../outside.md"), /must be README\.md/u);
   await assert.rejects(
     () => readCanonicalDocumentation(workspaceRoot, "docs/connections/proxy.md", "Missing heading"),
     /Heading not found/u,
+  );
+  await assert.rejects(
+    () => readCanonicalDocumentation(workspaceRoot, "docs/connections/examples/nested-ignored.md"),
+    /outside the canonical user documentation set/u,
+  );
+  await assert.rejects(
+    () => readCanonicalDocumentation(workspaceRoot, "docs/connections/linked-outside/secret.md"),
+    /escapes the canonical documentation boundary/u,
   );
 
   const jsonAction = parseAssistantWorkspaceAction(

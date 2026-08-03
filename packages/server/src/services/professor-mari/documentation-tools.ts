@@ -1,9 +1,13 @@
 import type { Dirent } from "node:fs";
-import { lstat, readdir, readFile } from "node:fs/promises";
+import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 
 const EXCLUDED_DOC_DIRS = new Set(["evidence", "pr-evidence", "screenshots", "examples", "i18n"]);
 const MAX_DOC_FILE_BYTES = 1024 * 1024;
+const MAX_DOC_CANDIDATES = 500;
+const MAX_DOC_DIRECTORIES = 250;
+const MAX_DOC_DEPTH = 8;
+const MAX_DOC_AGGREGATE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_SEARCH_LIMIT = 5;
 const MAX_SEARCH_LIMIT = 8;
 const DEFAULT_READ_CHARS = 8_000;
@@ -25,49 +29,94 @@ export interface DocumentationSearchResult {
   score: number;
 }
 
+export interface DocumentationSearchResponse {
+  results: DocumentationSearchResult[];
+  truncated: boolean;
+}
+
+interface DocumentationDiscovery {
+  files: string[];
+  totalBytes: number;
+  directories: number;
+  truncated: boolean;
+}
+
 function normalizeDocPath(workspaceRoot: string, absolutePath: string) {
   return relative(workspaceRoot, absolutePath).split(sep).join("/");
 }
 
-async function collectMarkdownFiles(dir: string, workspaceRoot: string): Promise<string[]> {
-  const files: string[] = [];
+async function addDocumentationCandidate(filePath: string, discovery: DocumentationDiscovery) {
+  if (discovery.files.length >= MAX_DOC_CANDIDATES) {
+    discovery.truncated = true;
+    return;
+  }
+  try {
+    const info = await lstat(filePath);
+    if (!info.isFile() || info.size > MAX_DOC_FILE_BYTES) {
+      if (info.isFile()) discovery.truncated = true;
+      return;
+    }
+    if (discovery.totalBytes + info.size > MAX_DOC_AGGREGATE_BYTES) {
+      discovery.truncated = true;
+      return;
+    }
+    discovery.files.push(filePath);
+    discovery.totalBytes += info.size;
+  } catch {
+    // A file can disappear during an update; omit it from this search.
+  }
+}
+
+async function collectMarkdownFiles(
+  dir: string,
+  workspaceRoot: string,
+  discovery: DocumentationDiscovery,
+  depth: number,
+): Promise<void> {
+  if (discovery.truncated) return;
+  if (depth > MAX_DOC_DEPTH || discovery.directories >= MAX_DOC_DIRECTORIES) {
+    discovery.truncated = true;
+    return;
+  }
+  discovery.directories += 1;
   let entries: Dirent[];
   try {
     entries = await readdir(dir, { withFileTypes: true });
   } catch {
-    return files;
+    return;
   }
 
-  for (const entry of entries) {
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (discovery.truncated) return;
     if (entry.isDirectory()) {
       if (EXCLUDED_DOC_DIRS.has(entry.name.toLowerCase())) continue;
-      files.push(...(await collectMarkdownFiles(join(dir, entry.name), workspaceRoot)));
+      await collectMarkdownFiles(join(dir, entry.name), workspaceRoot, discovery, depth + 1);
       continue;
     }
     if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".md")) continue;
     const absolutePath = join(dir, entry.name);
-    if (normalizeDocPath(workspaceRoot, absolutePath).startsWith("docs/")) files.push(absolutePath);
+    if (normalizeDocPath(workspaceRoot, absolutePath).startsWith("docs/")) {
+      await addDocumentationCandidate(absolutePath, discovery);
+    }
   }
-  return files;
 }
 
-async function canonicalDocumentationFiles(workspaceRoot: string): Promise<string[]> {
+async function canonicalDocumentationFiles(workspaceRoot: string): Promise<DocumentationDiscovery> {
   const root = resolve(workspaceRoot);
-  const files = await collectMarkdownFiles(join(root, "docs"), root);
-  const readme = join(root, "README.md");
-  try {
-    if ((await lstat(readme)).isFile()) files.unshift(readme);
-  } catch {
-    // Packaged or partial workspaces may omit the root README while retaining docs/.
-  }
-  return files;
+  const discovery: DocumentationDiscovery = { files: [], totalBytes: 0, directories: 0, truncated: false };
+  await addDocumentationCandidate(join(root, "README.md"), discovery);
+  await collectMarkdownFiles(join(root, "docs"), root, discovery, 0);
+  return discovery;
 }
 
-async function readBoundedMarkdown(filePath: string): Promise<string | null> {
+async function readBoundedMarkdown(filePath: string, maxBytes = MAX_DOC_FILE_BYTES): Promise<string | null> {
   try {
     const info = await lstat(filePath);
-    if (!info.isFile() || info.size > MAX_DOC_FILE_BYTES) return null;
-    return await readFile(filePath, "utf8");
+    const byteLimit = Math.min(MAX_DOC_FILE_BYTES, Math.max(0, maxBytes));
+    if (!info.isFile() || info.size > byteLimit) return null;
+    const content = await readFile(filePath);
+    if (content.byteLength > byteLimit) return null;
+    return content.toString("utf8");
   } catch {
     return null;
   }
@@ -181,17 +230,29 @@ export async function searchCanonicalDocumentation(
   workspaceRoot: string,
   query: string,
   requestedLimit = DEFAULT_SEARCH_LIMIT,
-): Promise<DocumentationSearchResult[]> {
+): Promise<DocumentationSearchResponse> {
   const normalizedQuery = query.trim().slice(0, 200);
   if (normalizedQuery.length < 2) throw new Error("docs_search query must be at least 2 characters");
   const phrase = normalizedQuery.toLocaleLowerCase();
   const terms = queryTerms(normalizedQuery);
   const limit = Math.max(1, Math.min(MAX_SEARCH_LIMIT, Math.trunc(requestedLimit) || DEFAULT_SEARCH_LIMIT));
+  const discovery = await canonicalDocumentationFiles(workspaceRoot);
   const results: DocumentationSearchResult[] = [];
+  let bytesRead = 0;
+  let truncated = discovery.truncated;
 
-  for (const filePath of await canonicalDocumentationFiles(workspaceRoot)) {
-    const content = await readBoundedMarkdown(filePath);
-    if (content === null) continue;
+  for (const filePath of discovery.files) {
+    const remainingBytes = MAX_DOC_AGGREGATE_BYTES - bytesRead;
+    if (remainingBytes <= 0) {
+      truncated = true;
+      break;
+    }
+    const content = await readBoundedMarkdown(filePath, remainingBytes);
+    if (content === null) {
+      truncated = true;
+      continue;
+    }
+    bytesRead += Buffer.byteLength(content, "utf8");
     const path = normalizeDocPath(resolve(workspaceRoot), filePath);
     for (const section of markdownSections(path, content)) {
       const score = sectionScore(section, phrase, terms);
@@ -206,12 +267,22 @@ export async function searchCanonicalDocumentation(
     }
   }
 
-  return results
-    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.startLine - b.startLine)
-    .slice(0, limit);
+  return {
+    results: results
+      .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.startLine - b.startLine)
+      .slice(0, limit),
+    truncated,
+  };
 }
 
-function resolveCanonicalDocPath(workspaceRoot: string, requestedPath: string) {
+function isPathWithin(parent: string, child: string) {
+  const normalizedParent = process.platform === "win32" ? parent.toLowerCase() : parent;
+  const normalizedChild = process.platform === "win32" ? child.toLowerCase() : child;
+  const prefix = normalizedParent.endsWith(sep) ? normalizedParent : `${normalizedParent}${sep}`;
+  return normalizedChild === normalizedParent || normalizedChild.startsWith(prefix);
+}
+
+async function resolveCanonicalDocPath(workspaceRoot: string, requestedPath: string) {
   const normalized = requestedPath.trim().replace(/^\.\//u, "").replace(/\\/gu, "/");
   if (normalized !== "README.md" && (!normalized.startsWith("docs/") || !normalized.toLowerCase().endsWith(".md"))) {
     throw new Error("docs_read path must be README.md or an English Markdown file under docs/");
@@ -220,10 +291,26 @@ function resolveCanonicalDocPath(workspaceRoot: string, requestedPath: string) {
   if (segments.some((segment) => !segment || segment === "." || segment === "..")) {
     throw new Error("docs_read path is invalid");
   }
-  if (segments[0] === "docs" && EXCLUDED_DOC_DIRS.has((segments[1] ?? "").toLowerCase())) {
+  if (segments.slice(1).some((segment) => EXCLUDED_DOC_DIRS.has(segment.toLowerCase()))) {
     throw new Error("docs_read path is outside the canonical user documentation set");
   }
-  return { normalized, absolute: resolve(workspaceRoot, ...segments) };
+  const workspace = await realpath(resolve(workspaceRoot));
+  const requested = resolve(workspace, ...segments);
+  const requestedInfo = await lstat(requested);
+  if (!requestedInfo.isFile()) throw new Error(`Documentation file not found: ${normalized}`);
+  const canonicalTarget = await realpath(requested);
+  if (normalized === "README.md") {
+    const canonicalReadme = await realpath(join(workspace, "README.md"));
+    if (canonicalTarget !== canonicalReadme || !isPathWithin(workspace, canonicalTarget)) {
+      throw new Error("docs_read README path escapes the canonical workspace boundary");
+    }
+  } else {
+    const canonicalDocsRoot = await realpath(join(workspace, "docs"));
+    if (!isPathWithin(workspace, canonicalDocsRoot) || !isPathWithin(canonicalDocsRoot, canonicalTarget)) {
+      throw new Error("docs_read path escapes the canonical documentation boundary");
+    }
+  }
+  return { normalized, absolute: canonicalTarget };
 }
 
 export async function readCanonicalDocumentation(
@@ -232,7 +319,7 @@ export async function readCanonicalDocumentation(
   requestedHeading?: string,
   requestedMaxChars = DEFAULT_READ_CHARS,
 ) {
-  const { normalized, absolute } = resolveCanonicalDocPath(workspaceRoot, requestedPath);
+  const { normalized, absolute } = await resolveCanonicalDocPath(workspaceRoot, requestedPath);
   const content = await readBoundedMarkdown(absolute);
   if (content === null) throw new Error(`Documentation file not found or too large: ${normalized}`);
   const heading = requestedHeading?.trim();
@@ -250,17 +337,21 @@ export async function readCanonicalDocumentation(
   };
 }
 
-export function formatDocumentationSearch(query: string, results: DocumentationSearchResult[]) {
+export function formatDocumentationSearch(query: string, response: DocumentationSearchResponse) {
+  const { results, truncated } = response;
   if (results.length === 0) {
-    return `No canonical documentation matches found for: ${query.trim()}`;
+    return `No canonical documentation matches found for: ${query.trim()}${truncated ? " (search stopped at the safe corpus limit)" : ""}`;
   }
   return [
     `Canonical documentation matches for: ${query.trim()}`,
+    truncated ? "Note: search stopped at the safe corpus limit; results may be incomplete." : "",
     ...results.map(
       (result, index) =>
         `${index + 1}. Source: ${result.path} — Heading: ${result.heading} — Line: ${result.startLine}\n${result.excerpt}`,
     ),
-  ].join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 export function formatDocumentationRead(result: Awaited<ReturnType<typeof readCanonicalDocumentation>>) {
