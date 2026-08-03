@@ -6819,7 +6819,15 @@ export async function generateRoutes(app: FastifyInstance) {
 
         const combinedResponse = allResponses.join("\n\n");
         const completedResponse = continuedMessageRewriteSource ?? combinedResponse;
-        const postActivationMessages = [...chatMessages, { role: "assistant", content: completedResponse }];
+        const continuedTargetIndex = input.continueMessageId
+          ? chatMessages.findIndex((message) => message.id === input.continueMessageId)
+          : -1;
+        const postActivationMessages =
+          continuedTargetIndex >= 0
+            ? chatMessages.map((message, index) =>
+                index === continuedTargetIndex ? { ...message, content: completedResponse } : message,
+              )
+            : [...chatMessages, { role: "assistant", content: completedResponse }];
         const inactivePostProcessingAgentIds = new Set<string>();
         for (const agent of resolvedAgents) {
           if (agent.phase !== "post_processing" || builtInAgentTypes.has(agent.type)) continue;
@@ -7039,14 +7047,14 @@ export async function generateRoutes(app: FastifyInstance) {
           }
         };
 
-        if (hasPostWork && combinedResponse && !abortController.signal.aborted) {
+        if (hasPostWork && completedResponse && !abortController.signal.aborted) {
           if (customAgentsWithLorebookTriggers.some((agent) => agent.phase === "post_processing")) {
             agentContext.triggeredLorebookEntriesByAgentId = await resolveTriggeredLorebookEntriesByAgentId([
               ...recentMsgs,
               {
                 id: latestAssistantMessageId || undefined,
                 role: "assistant",
-                content: combinedResponse,
+                content: completedResponse,
               },
             ]);
           }
@@ -7075,7 +7083,7 @@ export async function generateRoutes(app: FastifyInstance) {
 
           const postAgentContext: AgentContext = {
             ...agentContext,
-            mainResponse: combinedResponse,
+            mainResponse: completedResponse,
             preGenInjections: contextInjections,
             parallelResults,
           };
@@ -7119,7 +7127,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 availableSprites,
                 requiredExpressionTargetIds,
                 {
-                  defaultSourceText: combinedResponse,
+                  defaultSourceText: completedResponse,
                   sourceTextByCharacterId,
                 },
               );
@@ -7135,7 +7143,7 @@ export async function generateRoutes(app: FastifyInstance) {
 
           let postResults = hasPostProcessingAgents
             ? [
-                ...(await pipeline.postGenerate(combinedResponse, {
+                ...(await pipeline.postGenerate(completedResponse, {
                   preGenInjections: contextInjections,
                   parallelResults,
                 })),
@@ -7150,7 +7158,7 @@ export async function generateRoutes(app: FastifyInstance) {
             );
             const lorebookKeeperContext = historicalLorebookTarget
               ? buildHistoricalLorebookKeeperContext(agentContext, lorebookKeeperMessages, historicalLorebookTarget.id)
-              : { ...agentContext, mainResponse: combinedResponse };
+              : { ...agentContext, mainResponse: completedResponse };
             const processedMessageId = historicalLorebookTarget?.id ?? (lastSavedMsg as any)?.id ?? "";
 
             if (lorebookKeeperContext && processedMessageId) {
@@ -7206,7 +7214,7 @@ export async function generateRoutes(app: FastifyInstance) {
                     : null;
                 const phaseRetryContext: AgentContext =
                   agentCfg.phase === "post_processing"
-                    ? { ...agentContext, mainResponse: combinedResponse }
+                    ? { ...agentContext, mainResponse: completedResponse }
                     : agentContext;
                 const retryCtx: AgentContext = historicalLorebookTarget
                   ? (buildHistoricalLorebookKeeperContext(
@@ -7409,7 +7417,7 @@ export async function generateRoutes(app: FastifyInstance) {
                     availableSprites,
                     requiredExpressionTargetIds,
                     {
-                      defaultSourceText: combinedResponse,
+                      defaultSourceText: completedResponse,
                       sourceTextByCharacterId,
                     },
                   );
@@ -8407,7 +8415,7 @@ export async function generateRoutes(app: FastifyInstance) {
                       chatMetadata: freshMeta,
                       currentBackground: backgroundBeforeGeneration ?? currentBackground,
                       illustratorAgent: illustratorBackgroundAgent,
-                      assistantResponse: combinedResponse,
+                      assistantResponse: completedResponse,
                       decisionReason: backgroundDecisionReason,
                       gameState: latestGameState,
                       recentMessages: agentContext.recentMessages,
@@ -8593,7 +8601,7 @@ export async function generateRoutes(app: FastifyInstance) {
                           imagePrompt,
                           style,
                           typeof illData.reason === "string" ? illData.reason : "",
-                          combinedResponse,
+                          completedResponse,
                         ].join("\n"),
                         fallbackToChatCharacters: false,
                         includeReferenceImages: useAvatarRefs,

@@ -4002,8 +4002,13 @@ assert.match(
 );
 assert.match(
   summaryPopoverSource,
-  /promptSettingsSaveQueueRef\.current\.then\(async \(\) =>[\s\S]{0,700}updateGlobalPromptSettings\.mutateAsync[\s\S]{0,500}promptSettingsSaveQueueRef\.current = queuedSave\.then/u,
-  "Summary prompt and template writes must share one serialized save queue",
+  /if \(!globalPromptSettingsReady \|\| promptSettingsSaveLockedRef\.current\) return false;[\s\S]{0,120}promptSettingsSaveLockedRef\.current = true;[\s\S]{0,900}finally \{[\s\S]{0,120}promptSettingsSaveLockedRef\.current = false;/u,
+  "Summary prompt writes must lock before capturing a full settings snapshot",
+);
+assert.match(
+  summaryPopoverSource,
+  /<SummaryPromptSelectOption[\s\S]{0,260}disabled=\{promptSettingsSaveLocked\}[\s\S]{0,1300}<SummaryPromptTemplateRow[\s\S]{0,300}disabled=\{promptSettingsSaveLocked\}/u,
+  "Summary prompt selectors and template actions must remain disabled until a save completes",
 );
 assert.match(
   summaryPopoverSource,

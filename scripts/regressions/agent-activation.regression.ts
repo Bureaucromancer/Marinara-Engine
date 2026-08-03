@@ -32,13 +32,33 @@ assert.match(
 );
 assert.match(
   generateRouteSource,
-  /const completedResponse = continuedMessageRewriteSource \?\? combinedResponse;[\s\S]{0,180}const postActivationMessages = \[\.\.\.chatMessages, \{ role: "assistant", content: completedResponse \}\][\s\S]{0,600}matchCustomAgentActivation\(agent\.settings, postActivationMessages\)/u,
+  /const continuedTargetIndex = input\.continueMessageId[\s\S]{0,500}index === continuedTargetIndex \? \{ \.\.\.message, content: completedResponse \} : message[\s\S]{0,220}: \[\.\.\.chatMessages, \{ role: "assistant", content: completedResponse \}\][\s\S]{0,600}matchCustomAgentActivation\(agent\.settings, postActivationMessages\)/u,
   "Post-processing activation must include the completed assistant response",
 );
 assert.match(
   generateRouteSource,
-  /const activatedTextRewriteRunAgents = textRewriteRunAgents\.filter/u,
+  /const activatedTextRewriteRunAgents = textRewriteRunAgents\.filter\(\s*\(agent\) => !inactivePostProcessingAgentIds\.has\(agent\.id\),\s*\);/u,
   "Text-rewrite agents must honor the same completed-response activation check",
+);
+const postGenerationSource = generateRouteSource.slice(
+  generateRouteSource.indexOf("if (hasPostWork && completedResponse"),
+  generateRouteSource.indexOf("// ── Text rewrite/editing agents"),
+);
+assert.match(postGenerationSource, /content: completedResponse,/u, "Lorebook triggers must receive the completed response");
+assert.match(
+  postGenerationSource,
+  /const postAgentContext:[\s\S]{0,220}mainResponse: completedResponse/u,
+  "Post-agent context must receive the completed response",
+);
+assert.match(
+  postGenerationSource,
+  /pipeline\.postGenerate\(completedResponse/u,
+  "The post-generation pipeline must receive the completed response",
+);
+assert.match(
+  postGenerationSource,
+  /phaseRetryContext[\s\S]{0,240}mainResponse: completedResponse/u,
+  "Post-processing retries must receive the completed response",
 );
 assert.match(
   generateRouteSource,
