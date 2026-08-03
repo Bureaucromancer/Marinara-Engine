@@ -10285,9 +10285,6 @@ function GameSurfaceComponent({
     return (
       <>
         <NewGameExperienceChooser
-          // Keyed by chat so the selection never outlives the game it was made for: switching to another
-          // chat that also needs setup starts from the built-in wizard instead of inheriting a choice.
-          key={activeChatId}
           activeChatId={activeChatId}
           onCancelSetup={dismissSetupWizard}
           onSetupError={handleJsonRepairError}
