@@ -64,7 +64,10 @@ import {
   formatNoodleTimelineForPrompt,
   NOODLE_PERSONA_IDENTITY_INSTRUCTION,
 } from "../../packages/server/src/services/noodle/noodle-prompt.js";
-import { buildPartyRecruitCardPrompt } from "../../packages/server/src/services/game/gm-prompts.js";
+import {
+  buildGmFormatReminder,
+  buildPartyRecruitCardPrompt,
+} from "../../packages/server/src/services/game/gm-prompts.js";
 import {
   normalizeCyoaChoiceOutput,
   normalizeCyoaDialogueQuotes,
@@ -150,6 +153,16 @@ assert.match(regeneratedSheetPrompt, /<campaign_history>/u);
 assert.match(regeneratedSheetPrompt, /Write every natural-language string value in Polish/u);
 assert.match(regeneratedSheetPrompt, /Scenario: The flooded vault/u);
 assert.doesNotMatch(regeneratedSheetPrompt, /A new companion is joining the party/u);
+
+const canonicalPartyNameReminder = buildGmFormatReminder({
+  gameActiveState: "exploration",
+  sessionNumber: 1,
+  map: null,
+  partyNames: ["Mari"],
+  playerName: "Player",
+});
+assert.match(canonicalPartyNameReminder, /Party speaker labels must use the exact canonical names listed under PARTY/u);
+assert.match(canonicalPartyNameReminder, /You also play Mari\./u);
 
 const REGRESSION_AGENT_IDS = [
   "about-me-keeper",
@@ -612,6 +625,7 @@ import {
   appendNonLeadingSystemMessagesToLastUser,
   appendReadableAttachmentsToContent,
   applyTrackerCharacterCardIdentity,
+  canonicalizeGamePartySpeakerLabels,
   buildGenerationGuideInstruction,
   appendSeparateAgentInjectionMessage,
   collectLatestTrackerCharacterHistory,
@@ -8479,6 +8493,53 @@ Use HTML sparingly and diegetically. Do not replace normal prose/dialogue unless
       assert.equal(returningCharacters[0]?.characterId, "mira-card");
       assert.equal(returningCharacters[0]?.avatarPath, "/api/avatars/file/mira.png");
       assert.equal(matchedCards.has("mira-card"), true);
+
+      const canonicalPartyCharacters: Array<Record<string, unknown>> = [
+        {
+          name: 'Marisol "Mari"',
+          mood: "Concerned",
+          appearance: "Expanded-name appearance",
+        },
+        {
+          name: "Mari",
+          mood: "Focused",
+          appearance: "Canonical-name appearance",
+        },
+      ];
+      const canonicalPartyMatches = applyTrackerCharacterCardIdentity(canonicalPartyCharacters, [
+        {
+          id: "party-card",
+          name: "Mari",
+          avatarPath: "/api/avatars/file/party-card.png",
+        },
+      ]);
+      assert.equal(canonicalPartyMatches.has("party-card"), true);
+      assert.deepEqual(canonicalPartyCharacters, [
+        {
+          characterId: "party-card",
+          name: "Mari",
+          mood: "Focused",
+          appearance: "Canonical-name appearance",
+          avatarPath: "/api/avatars/file/party-card.png",
+          avatarCrop: null,
+        },
+      ]);
+
+      const unrelatedLongName: Array<Record<string, unknown>> = [{ name: "Mari Calder" }];
+      applyTrackerCharacterCardIdentity(unrelatedLongName, [{ id: "party-card", name: "Mari" }]);
+      assert.deepEqual(unrelatedLongName, [{ name: "Mari Calder" }]);
+
+      assert.equal(
+        canonicalizeGamePartySpeakerLabels(
+          '[Marisol "Mari"] [main] [happy]: "Ready."\n\nMarisol "Mari" crosses the room.',
+          ["Mari"],
+        ),
+        '[Mari] [main] [happy]: "Ready."\n\nMarisol "Mari" crosses the room.',
+      );
+      assert.equal(
+        canonicalizeGamePartySpeakerLabels('[Mari Calder] [main] [happy]: "Ready."', ["Mari"]),
+        '[Mari Calder] [main] [happy]: "Ready."',
+      );
 
       assert.equal(resolveCharacterCustomFieldName("  ", "Goal"), "Goal");
       assert.equal(makeUniqueCharacterCustomFieldName({ "New Field": "", "new   field 2": "" }), "New Field 3");

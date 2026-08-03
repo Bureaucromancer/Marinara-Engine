@@ -214,6 +214,7 @@ import {
   buildLockedPlayerStatsArrayPatch,
   buildLockedPersonaTrackerPatch,
   applyTrackerCharacterCardIdentity,
+  canonicalizeGamePartySpeakerLabels,
   collectLatestTrackerCharacterHistory,
   createLocalSidecarGenerationConnection,
   extractImageAttachmentDataUrls,
@@ -2864,6 +2865,7 @@ export async function generateRoutes(app: FastifyInstance) {
           injectSceneContextMessages({ messages: finalMessages, chatMetadata: chatMeta, charInfo, personaName });
         }
 
+        let canonicalGamePartyNames: string[] = [];
         if (chatMode === "game") {
           const selectedGamePrompt =
             resolvedPreset && presetId
@@ -2889,6 +2891,7 @@ export async function generateRoutes(app: FastifyInstance) {
               personaName,
               resolvePromptMacros,
             });
+          canonicalGamePartyNames = gmCtx.partyNames;
 
           // ── Lorebook injection for game mode ──
           if (!presetHandledLorebooks) {
@@ -5950,6 +5953,13 @@ export async function generateRoutes(app: FastifyInstance) {
               contentReplaced = true;
             }
           }
+          if (chatMode === "game") {
+            const canonicalResponse = canonicalizeGamePartySpeakerLabels(fullResponse, canonicalGamePartyNames);
+            if (canonicalResponse !== fullResponse) {
+              fullResponse = canonicalResponse;
+              contentReplaced = true;
+            }
+          }
           if (conversationCommandsEnabled && !input.impersonate) {
             const responseBeforeCommandParsing = fullResponse;
             // Merged group conversations carry multiple characters' turns in one
@@ -7642,6 +7652,7 @@ export async function generateRoutes(app: FastifyInstance) {
                   snapBeforeUpdate ??
                   trackerBaseGameStateSnapshot ??
                   (allowLatestGameStateFallback ? await gameStateStore.getLatest(input.chatId) : null);
+                const cardCharacterIds = applyTrackerCharacterCardIdentity(chars, charInfo);
                 const oldChars = parseJsonField<any[]>(previousCharacterSnapshot?.presentCharacters, []);
                 preserveTrackerCharacterUiFields(chars, oldChars);
                 preserveTrackerCharacterUiFields(chars, characterTrackerHistory);
@@ -7661,7 +7672,6 @@ export async function generateRoutes(app: FastifyInstance) {
                 // 2. Fall back to stored NPC avatars (per-chat generated/uploaded)
                 const NPC_AVATAR_DIR = join(DATA_DIR, "avatars", "npc");
                 const storedNpcAvatarByName = new Map<string, string>();
-                const cardCharacterIds = applyTrackerCharacterCardIdentity(chars, charInfo);
                 const gameNpcs = sanitizeGameNpcAvatarUrls((chatMeta.gameNpcs as GameNpc[]) ?? []);
                 if (gameNpcs !== chatMeta.gameNpcs) {
                   chatMeta.gameNpcs = gameNpcs;
