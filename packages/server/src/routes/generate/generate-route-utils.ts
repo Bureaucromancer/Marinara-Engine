@@ -1276,7 +1276,7 @@ type TrackerCharacterCardIdentity = {
   avatarCrop?: unknown;
 };
 
-function getExplicitTrackerNameAliases(value: unknown): string[] {
+function getExplicitNameAliases(value: unknown): string[] {
   if (typeof value !== "string") return [];
   const aliases = new Set<string>();
   const patterns = [
@@ -1295,6 +1295,45 @@ function getExplicitTrackerNameAliases(value: unknown): string[] {
   return [...aliases];
 }
 
+function buildUniqueCanonicalNames(names: readonly string[]): Map<string, string> {
+  const namesByKey = new Map<string, string>();
+  const duplicateKeys = new Set<string>();
+  for (const name of names) {
+    const trimmedName = name.trim();
+    const key = normalizeTextForMatch(trimmedName);
+    if (!key) continue;
+    if (namesByKey.has(key)) duplicateKeys.add(key);
+    else namesByKey.set(key, trimmedName);
+  }
+  for (const key of duplicateKeys) namesByKey.delete(key);
+  return namesByKey;
+}
+
+function resolveExplicitCanonicalName(value: unknown, namesByKey: Map<string, string>): string | null {
+  const exactName = namesByKey.get(normalizeTextForMatch(value));
+  if (exactName) return exactName;
+
+  const aliasMatches = getExplicitNameAliases(value)
+    .map((alias) => namesByKey.get(alias))
+    .filter((candidate): candidate is string => !!candidate);
+  const uniqueMatches = new Set(aliasMatches);
+  return uniqueMatches.size === 1 ? aliasMatches[0]! : null;
+}
+
+/** Canonicalize only structured Game Mode VN speaker labels, leaving prose and ambiguous aliases unchanged. */
+export function canonicalizeGamePartySpeakerLabels(content: string, canonicalNames: readonly string[]): string {
+  const namesByKey = buildUniqueCanonicalNames(canonicalNames);
+  if (!content || namesByKey.size === 0) return content;
+
+  return content.replace(
+    /^(\s*)\[([^\]\r\n]+)\](\s+\[(?:main|side|thought|whisper:[^\]\r\n]+)\]\s+\[[^\]\r\n]+\]\s*:)/gmu,
+    (line, indentation: string, speakerName: string, suffix: string) => {
+      const canonicalName = resolveExplicitCanonicalName(speakerName, namesByKey);
+      return canonicalName ? `${indentation}[${canonicalName}]${suffix}` : line;
+    },
+  );
+}
+
 export function applyTrackerCharacterCardIdentity(
   characters: Array<Record<string, unknown>>,
   cards: TrackerCharacterCardIdentity[],
@@ -1309,19 +1348,17 @@ export function applyTrackerCharacterCardIdentity(
     else cardsByName.set(name, card);
   }
   for (const name of duplicateNames) cardsByName.delete(name);
+  const canonicalCardNamesByKey = new Map([...cardsByName].map(([key, card]) => [key, card.name]));
 
   const matchedIds = new Set<string>();
   const canonicalCharacters: Array<Record<string, unknown>> = [];
   const canonicalIndexByCardId = new Map<string, number>();
   for (const character of characters) {
-    const cardByAlias = getExplicitTrackerNameAliases(character.name)
-      .map((alias) => cardsByName.get(alias))
-      .filter((candidate): candidate is TrackerCharacterCardIdentity => !!candidate);
-    const uniqueAliasCardIds = new Set(cardByAlias.map((candidate) => candidate.id));
+    const explicitCanonicalName = resolveExplicitCanonicalName(character.name, canonicalCardNamesByKey);
     const card =
       cardsById.get(trackerCharacterIdKey(character)) ??
       cardsByName.get(trackerCharacterNameKey(character)) ??
-      (uniqueAliasCardIds.size === 1 ? cardByAlias[0] : undefined);
+      (explicitCanonicalName ? cardsByName.get(normalizeTextForMatch(explicitCanonicalName)) : undefined);
     if (!card) {
       canonicalCharacters.push(character);
       continue;

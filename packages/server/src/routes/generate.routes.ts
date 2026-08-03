@@ -214,6 +214,7 @@ import {
   buildLockedPlayerStatsArrayPatch,
   buildLockedPersonaTrackerPatch,
   applyTrackerCharacterCardIdentity,
+  canonicalizeGamePartySpeakerLabels,
   collectLatestTrackerCharacterHistory,
   createLocalSidecarGenerationConnection,
   extractImageAttachmentDataUrls,
@@ -2864,6 +2865,7 @@ export async function generateRoutes(app: FastifyInstance) {
           injectSceneContextMessages({ messages: finalMessages, chatMetadata: chatMeta, charInfo, personaName });
         }
 
+        let canonicalGamePartyNames: string[] = [];
         if (chatMode === "game") {
           const selectedGamePrompt =
             resolvedPreset && presetId
@@ -2889,6 +2891,7 @@ export async function generateRoutes(app: FastifyInstance) {
               personaName,
               resolvePromptMacros,
             });
+          canonicalGamePartyNames = gmCtx.partyNames;
 
           // ── Lorebook injection for game mode ──
           if (!presetHandledLorebooks) {
@@ -5947,6 +5950,13 @@ export async function generateRoutes(app: FastifyInstance) {
               fullResponse = promotableThinking;
               fullThinking = "";
               providerThinking = "";
+              contentReplaced = true;
+            }
+          }
+          if (chatMode === "game") {
+            const canonicalResponse = canonicalizeGamePartySpeakerLabels(fullResponse, canonicalGamePartyNames);
+            if (canonicalResponse !== fullResponse) {
+              fullResponse = canonicalResponse;
               contentReplaced = true;
             }
           }

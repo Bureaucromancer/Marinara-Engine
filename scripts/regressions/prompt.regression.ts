@@ -625,6 +625,7 @@ import {
   appendNonLeadingSystemMessagesToLastUser,
   appendReadableAttachmentsToContent,
   applyTrackerCharacterCardIdentity,
+  canonicalizeGamePartySpeakerLabels,
   buildGenerationGuideInstruction,
   appendSeparateAgentInjectionMessage,
   collectLatestTrackerCharacterHistory,
@@ -8527,6 +8528,18 @@ Use HTML sparingly and diegetically. Do not replace normal prose/dialogue unless
       const unrelatedLongName: Array<Record<string, unknown>> = [{ name: "Mari Calder" }];
       applyTrackerCharacterCardIdentity(unrelatedLongName, [{ id: "party-card", name: "Mari" }]);
       assert.deepEqual(unrelatedLongName, [{ name: "Mari Calder" }]);
+
+      assert.equal(
+        canonicalizeGamePartySpeakerLabels(
+          '[Marisol "Mari"] [main] [happy]: "Ready."\n\nMarisol "Mari" crosses the room.',
+          ["Mari"],
+        ),
+        '[Mari] [main] [happy]: "Ready."\n\nMarisol "Mari" crosses the room.',
+      );
+      assert.equal(
+        canonicalizeGamePartySpeakerLabels('[Mari Calder] [main] [happy]: "Ready."', ["Mari"]),
+        '[Mari Calder] [main] [happy]: "Ready."',
+      );
 
       assert.equal(resolveCharacterCustomFieldName("  ", "Goal"), "Goal");
       assert.equal(makeUniqueCharacterCustomFieldName({ "New Field": "", "new   field 2": "" }), "New Field 3");
