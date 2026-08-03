@@ -41,6 +41,7 @@ import { ensureTimestampAfter } from "../../packages/server/src/services/import/
 import { resolveVisibleGameStateAnchor } from "../../packages/server/src/routes/generate/generate-route-utils.js";
 import {
   resolveAlreadyAppliedSpatialTurn,
+  resolveSpatialGenerationOrigin,
   validateSpatialGenerationRequest,
 } from "../../packages/server/src/routes/generate/spatial-transition-request.js";
 import { mergeSpatialLocationReferenceImages } from "../../packages/server/src/services/image/spatial-location-reference.js";
@@ -62,6 +63,7 @@ const impersonatedMove = {
 assert.equal(
   validateSpatialGenerationRequest({
     mode: "roleplay",
+    origin: "owner",
     pendingSpatialTransition: impersonatedMove,
     impersonate: true,
   }),
@@ -71,6 +73,7 @@ assert.equal(
 assert.equal(
   validateSpatialGenerationRequest({
     mode: "roleplay",
+    origin: "guided",
     pendingSpatialTransition: null,
     impersonate: false,
   }),
@@ -80,6 +83,7 @@ assert.equal(
 assert.deepEqual(
   validateSpatialGenerationRequest({
     mode: "game",
+    origin: "owner",
     pendingSpatialTransition: impersonatedMove,
     impersonate: true,
   }),
@@ -92,6 +96,7 @@ assert.deepEqual(
 assert.deepEqual(
   validateSpatialGenerationRequest({
     mode: "roleplay",
+    origin: "owner",
     pendingSpatialTransition: impersonatedMove,
     regenerateMessageId: "assistant-message",
   }),
@@ -101,6 +106,25 @@ assert.deepEqual(
     code: "spatial_transition_requires_new_turn",
   },
 );
+for (const origin of ["guided", "autonomous", "turn_game"] as const) {
+  assert.deepEqual(
+    validateSpatialGenerationRequest({
+      mode: "roleplay",
+      origin,
+      pendingSpatialTransition: impersonatedMove,
+    }),
+    {
+      statusCode: 400,
+      error: "A hierarchical location change must be submitted as a new owner turn.",
+      code: "spatial_transition_requires_new_turn",
+    },
+  );
+}
+assert.equal(resolveSpatialGenerationOrigin({}), "owner");
+assert.equal(resolveSpatialGenerationOrigin({ generationGuide: "Continue as the shopkeeper." }), "guided");
+assert.equal(resolveSpatialGenerationOrigin({ generationGuideSource: "narrator" }), "guided");
+assert.equal(resolveSpatialGenerationOrigin({ turnGameBots: true }), "turn_game");
+assert.equal(resolveSpatialGenerationOrigin({ autonomous: true }), "autonomous");
 assert.deepEqual(
   resolveVisibleGameStateAnchor([
     { id: "assistant-anchor", role: "assistant", activeSwipeIndex: 2 },

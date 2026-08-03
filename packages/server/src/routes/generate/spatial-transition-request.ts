@@ -1,6 +1,7 @@
 import type { PendingSpatialTransition, SpatialContextSnapshot } from "@marinara-engine/shared";
 
 type SpatialGenerationMode = "conversation" | "roleplay" | "game";
+export type SpatialGenerationOrigin = "owner" | "guided" | "autonomous" | "turn_game";
 
 export type SpatialGenerationRequestError = {
   statusCode: 400;
@@ -31,8 +32,21 @@ export function resolveAlreadyAppliedSpatialTurn(error: {
   };
 }
 
+export function resolveSpatialGenerationOrigin(input: {
+  autonomous?: boolean;
+  turnGameBots?: boolean;
+  generationGuide?: string | null;
+  generationGuideSource?: "narrator" | "guide" | "game_start" | null;
+}): SpatialGenerationOrigin {
+  if (input.autonomous) return "autonomous";
+  if (input.turnGameBots) return "turn_game";
+  if (input.generationGuideSource || input.generationGuide?.trim()) return "guided";
+  return "owner";
+}
+
 export function validateSpatialGenerationRequest(input: {
   mode: SpatialGenerationMode;
+  origin: SpatialGenerationOrigin;
   pendingSpatialTransition?: PendingSpatialTransition | null;
   impersonate?: boolean;
   regenerateMessageId?: string | null;
@@ -58,6 +72,13 @@ export function validateSpatialGenerationRequest(input: {
       statusCode: 400,
       error: "Impersonated hierarchical location changes are only available in Roleplay mode.",
       code: "spatial_mode_unsupported",
+    };
+  }
+  if (input.origin !== "owner") {
+    return {
+      statusCode: 400,
+      error: "A hierarchical location change must be submitted as a new owner turn.",
+      code: "spatial_transition_requires_new_turn",
     };
   }
   return null;
