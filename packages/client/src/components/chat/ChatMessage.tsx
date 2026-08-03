@@ -10,7 +10,8 @@ import {
   type AvatarCropValue,
 } from "../../lib/utils";
 import { applyInlineMarkdown, renderMarkdownBlocks, applyInlineMarkdownHTML } from "../../lib/markdown";
-import { normalizeCardAssetImageSyntax, resolveCardAssetUrl } from "../../lib/card-asset-links";
+import { normalizeCardAssetImageSyntax, resolveCardAssetUrl, resolveSelfCardAssets, type ChatGalleryIndex } from "../../lib/card-asset-links";
+import { useChatGalleryFilenameIndex } from "../../hooks/use-characters";
 import { PendingTypingDots } from "./PendingTypingDots";
 import { isDiceRollResult } from "../dice/AnimatedDiceRoll";
 import { DiceMessageContent } from "./ConversationMessageShared";
@@ -1030,8 +1031,16 @@ function renderContent(
   boldDialogue = true,
   htmlScopeClass = "mari-html-message-content",
   quoteFormat: QuoteFormat = "straight",
+  selfCharacterId?: string | null,
+  galleryIndex?: ChatGalleryIndex | null,
 ): ReactNode {
-  const normalized = decodeEncodedSpeakerTags(decodeEncodedChatHtmlTags(formatTextQuotes(text, quoteFormat)));
+  // Portable card://self/gallery refs resolve to the speaking character before
+  // any rendering, covering both the markdown branch and the embedded-HTML
+  // branch (whose resolveCardAssetUrl then sees an absolute card URL). The
+  // chat-wide index lets merged group replies fall back to whichever chat
+  // character owns the file when the speaker does not.
+  const selfResolved = resolveSelfCardAssets(text, selfCharacterId, galleryIndex);
+  const normalized = decodeEncodedSpeakerTags(decodeEncodedChatHtmlTags(formatTextQuotes(selfResolved, quoteFormat)));
 
   // Strip speaker tags before HTML detection (they aren't real HTML)
   const withoutSpeakerTags = normalized.replace(/<\/?speaker(?:="[^"]*")?>/g, "");
@@ -1144,10 +1153,13 @@ export function RoleplayMessagePreview({
   content,
   dialogueColor,
   className,
+  selfCharacterId,
 }: {
   content: string;
   dialogueColor?: string;
   className?: string;
+  /** Character the previewed greeting belongs to — resolves card://self refs. */
+  selfCharacterId?: string | null;
 }) {
   const previewId = useId();
   const { chatFontColor, defaultDialogueColor, theme, textStrokeWidth, textStrokeColor, boldDialogue, quoteFormat } =
@@ -1175,8 +1187,8 @@ export function RoleplayMessagePreview({
     [chatFontColor, textStrokeColor, textStrokeWidth],
   );
   const renderedContent = useMemo(
-    () => renderContent(content, resolvedDialogueColor, undefined, boldDialogue, htmlScopeClass, quoteFormat),
-    [boldDialogue, content, htmlScopeClass, quoteFormat, resolvedDialogueColor],
+    () => renderContent(content, resolvedDialogueColor, undefined, boldDialogue, htmlScopeClass, quoteFormat, selfCharacterId),
+    [boldDialogue, content, htmlScopeClass, quoteFormat, resolvedDialogueColor, selfCharacterId],
   );
 
   return (
@@ -1848,6 +1860,13 @@ export const ChatMessage = memo(function ChatMessage({
   }, [chatCharacterIds, scopedCharacterMap]);
   const resolvedCharacterInfo = charInfo ?? fallbackChatCharacterEntry?.info ?? null;
   const resolvedCharacterId = charInfo ? message.characterId : (fallbackChatCharacterEntry?.id ?? message.characterId);
+  // Speaker for portable card://self/gallery refs. The isUser/isSystem gate is
+  // load-bearing: resolvedCharacterId is non-null even on user messages in a
+  // single-character chat, and self must never resolve in a user message.
+  const selfCharacterId = isUser || isSystem ? null : (resolvedCharacterId ?? null);
+  // Chat-wide filename index (group chats only) for card://self fallback in
+  // merged group replies where the speaker's gallery lacks the file.
+  const galleryIndex = useChatGalleryFilenameIndex(chatCharacterIds);
   const primaryCharInfo =
     resolvedCharacterInfo ??
     (scopedCharacterMap
@@ -2094,17 +2113,17 @@ export const ChatMessage = memo(function ChatMessage({
   }, [message.id]);
 
   const renderedContent = useMemo(() => {
-    return renderContent(text, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass, quoteFormat);
-  }, [text, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass, quoteFormat]);
+    return renderContent(text, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass, quoteFormat, selfCharacterId, galleryIndex);
+  }, [text, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass, quoteFormat, selfCharacterId, galleryIndex]);
 
   // Translated text is rendered through the same markdown pipeline as the
   // message so bold/italics/quotes format identically.
   const renderedTranslation = useMemo(
     () =>
       translatedText
-        ? renderContent(translatedText, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass, quoteFormat)
+        ? renderContent(translatedText, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass, quoteFormat, selfCharacterId, galleryIndex)
         : null,
-    [translatedText, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass, quoteFormat],
+    [translatedText, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass, quoteFormat, selfCharacterId, galleryIndex],
   );
   const translationDisplayOnly = useMemo(
     () => parseChatMetadata(activeChatMetadata).translationDisplayOnly === true,
