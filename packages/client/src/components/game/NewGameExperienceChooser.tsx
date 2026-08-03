@@ -84,15 +84,19 @@ export function NewGameExperienceChooser({
     ) => {
       const connectionId = connections?.gmConnectionId;
       if (!connectionId) throw new Error("The experience must provide a gmConnectionId to launch a game");
-      const cfg = setupConfig as { promptPresetId?: string };
+      // The config is built by the package, so it is read defensively: a null or non-object return would
+      // otherwise throw on property access here instead of failing validation with a usable message.
+      const cfg: Record<string, unknown> =
+        typeof setupConfig === "object" && setupConfig !== null ? (setupConfig as Record<string, unknown>) : {};
+      const promptPresetId = typeof cfg.promptPresetId === "string" ? cfg.promptPresetId : undefined;
       // Stamps which experience owns this game; /game/create copies it to the chat metadata.
       const res = await createGame.mutateAsync({
         name: gameName,
-        setupConfig: { ...(setupConfig as Record<string, unknown>), gameExperienceId: activeId } as unknown,
+        setupConfig: { ...cfg, gameExperienceId: activeId } as unknown,
         preferences: "",
         chatId: activeChatId,
         connectionId,
-        promptPresetId: cfg.promptPresetId ?? undefined,
+        promptPresetId,
       } as Parameters<typeof createGame.mutateAsync>[0]);
       const chatId = res.sessionChat.id;
       try {
@@ -100,7 +104,7 @@ export function NewGameExperienceChooser({
           chatId,
           connectionId,
           preferences: "",
-          promptPresetId: cfg.promptPresetId ?? null,
+          promptPresetId: promptPresetId ?? null,
         } as Parameters<typeof gameSetup.mutateAsync>[0]);
       } catch (error) {
         // The opening generation can come back as malformed JSON the player is able to repair. The

@@ -11668,7 +11668,10 @@ function GameSurfaceComponent({
 
                   // Mobile widget slot — rendered inside GameNarration to sit above the narration box
                   const mobileWidgetSlot =
-                    !combatUiActive && hudWidgets.length > 0 && !(compactHudWidgets && choicesVisible) ? (
+                    !combatUiActive &&
+                    !experienceSurfaceActive &&
+                    hudWidgets.length > 0 &&
+                    !(compactHudWidgets && choicesVisible) ? (
                       <div
                         data-component="GameSurface.MobileWidgetTray"
                         className={cn(
@@ -11687,7 +11690,7 @@ function GameSurfaceComponent({
                   // win would unmount the anchor its menu is portaled into.
                   const choicesSlot =
                     activeChoices && narrationDone && !activeExperienceChrome?.providesChoices ? (
-                      compactHudWidgets && !combatUiActive && hudWidgets.length > 0 ? (
+                      compactHudWidgets && !combatUiActive && !experienceSurfaceActive && hudWidgets.length > 0 ? (
                         <div
                           data-component="GameSurface.MobileChoiceStage"
                           className={cn(
