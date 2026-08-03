@@ -89,6 +89,8 @@ Where it does not work, by design:
 - **Your own messages** and system messages. They have no speaking character, so a `self` reference shows as a broken image. If you want to post a character's gallery image yourself, use the chat asset browser's insert (which writes the full `card://characters/<id>/...` form).
 - **Persona galleries**. Persona images appear in your messages, which have no speaker — use the persona form `card://personas/<id>/gallery/<file>` instead.
 
+One nuance: the per-speaker resolution described above applies to **Conversation Mode** group replies. In a **Roleplay** merged group reply, every `self` in the message resolves to the message's lead character — if another character in that reply needs their own gallery image, use their full `card://characters/<id>/...` form there.
+
 ### Why `self` instead of the full link
 
 A full link contains the character's internal id (`card://characters/<id>/gallery/<file>`), and ids are regenerated whenever a character is imported — so full links break for anyone you share the character with. The `self` form carries no id and no server address. It survives a **native JSON export and import**: the gallery images travel inside the export and keep their filenames, so every reference keeps working on the other side.

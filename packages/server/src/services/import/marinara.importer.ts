@@ -174,16 +174,28 @@ async function restoreCharacterGallery(
     const randomFilename = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${decoded.ext}`;
     let safeFilename = randomFilename();
     const originalName = typeof entry.filename === "string" ? entry.filename : "";
-    const originalStem = originalName
-      .split(/[\\/]/)
-      .pop()!
+    const originalBase = originalName.split(/[\\/]/).pop()!;
+    const originalStem = originalBase
       .replace(/\.[^.]*$/, "")
       .replace(/[^A-Za-z0-9._-]/g, "-")
       .replace(/^\.+/, "")
-      .slice(0, 80);
+      // The serve and export paths reject any filename containing "..", so a
+      // stem with interior dot-runs — or a trailing dot (also possible after
+      // truncation), which recreates ".." once the extension is appended —
+      // would be written but never readable.
+      .replace(/\.{2,}/g, ".")
+      .slice(0, 80)
+      .replace(/\.+$/, "");
+    // The extension normally comes from the DECODED image (never the envelope),
+    // but uploads store ".jpeg" verbatim while extensionFromImageMime returns
+    // the canonical "jpg" — the one alias in ALLOWED_GALLERY_EXTS. Keep the
+    // original spelling in that case, or portable card://self refs written
+    // against the exported name break on the round trip this preserves.
+    const originalExt = (/\.([A-Za-z0-9]+)$/.exec(originalBase)?.[1] ?? "").toLowerCase();
+    const ext = originalExt === "jpeg" && decoded.ext === "jpg" ? "jpeg" : decoded.ext;
     if (originalStem) {
       for (let attempt = 0; attempt <= 50; attempt++) {
-        const candidate = attempt === 0 ? `${originalStem}.${decoded.ext}` : `${originalStem}-${attempt + 1}.${decoded.ext}`;
+        const candidate = attempt === 0 ? `${originalStem}.${ext}` : `${originalStem}-${attempt + 1}.${ext}`;
         try {
           await access(join(dir, candidate));
           // exists — try the next suffix
