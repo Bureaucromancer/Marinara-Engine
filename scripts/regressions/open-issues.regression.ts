@@ -3997,18 +3997,57 @@ assert.doesNotMatch(
 );
 assert.match(
   summaryPopoverSource,
-  /<button(?:(?!>)[\s\S])*onClick=\{handleEditVisiblePrompt\}(?:(?!>)[\s\S])*aria-expanded=/u,
+  /<button(?:(?!>)[\s\S])*onClick=\{handleEditVisiblePrompt\}(?:(?!>)[\s\S])*disabled=\{!globalPromptSettingsReady \|\| promptSettingsSaveLocked\}(?:(?!>)[\s\S])*aria-expanded=/u,
   "The Summary Prompt Edit action must expose disclosure semantics for its editor",
 );
-assert.match(
-  summaryPopoverSource,
-  /if \(!globalPromptSettingsReady \|\| promptSettingsSaveLockedRef\.current\) return false;[\s\S]{0,120}promptSettingsSaveLockedRef\.current = true;[\s\S]{0,900}finally \{[\s\S]{0,120}promptSettingsSaveLockedRef\.current = false;/u,
-  "Summary prompt writes must lock before capturing a full settings snapshot",
+const promptSettingsPersistSource = summaryPopoverSource.slice(
+  summaryPopoverSource.indexOf("const persistPromptTemplates"),
+  summaryPopoverSource.indexOf("const commitCombinePromptDraft"),
+);
+const promptSettingsLockIndex = promptSettingsPersistSource.indexOf("promptSettingsSaveLockedRef.current = true");
+const promptSettingsMutationIndex = promptSettingsPersistSource.indexOf("updateGlobalPromptSettings.mutateAsync");
+const promptSettingsUnlockIndex = promptSettingsPersistSource.indexOf("promptSettingsSaveLockedRef.current = false");
+assert.ok(
+  promptSettingsLockIndex >= 0 &&
+    promptSettingsLockIndex < promptSettingsMutationIndex &&
+    promptSettingsMutationIndex < promptSettingsUnlockIndex,
+  "Summary prompt writes must lock before mutation and unlock only afterward",
+);
+const summaryPromptControlsSource = summaryPopoverSource.slice(
+  summaryPopoverSource.indexOf('role="tablist"'),
+  summaryPopoverSource.indexOf('localizeUi("ui.chat.summarypopover.summaryConnection")'),
+);
+assert.equal(
+  summaryPromptControlsSource.match(/disabled=\{promptSettingsSaveLocked\}/gu)?.length,
+  9,
+  "Every prompt option, template row, and open template editor control must use the save lock",
+);
+assert.equal(
+  summaryPromptControlsSource.match(/disabled=\{!globalPromptSettingsReady \|\| promptSettingsSaveLocked\}/gu)?.length,
+  3,
+  "Every prompt-level action must use the save lock",
 );
 assert.match(
-  summaryPopoverSource,
-  /<SummaryPromptSelectOption[\s\S]{0,260}disabled=\{promptSettingsSaveLocked\}[\s\S]{0,1300}<SummaryPromptTemplateRow[\s\S]{0,300}disabled=\{promptSettingsSaveLocked\}/u,
-  "Summary prompt selectors and template actions must remain disabled until a save completes",
+  summaryPromptControlsSource,
+  /!hasTemplateDraft \|\|\s*promptSettingsSaveLocked \|\|\s*!globalPromptSettingsReady/u,
+  "The template Save action must use the save lock",
+);
+const summaryPromptSelectOptionSource = summaryPopoverSource.slice(
+  summaryPopoverSource.indexOf("interface SummaryPromptSelectOptionProps"),
+  summaryPopoverSource.indexOf("interface SummaryPromptTemplateRowProps"),
+);
+assert.equal(
+  summaryPromptSelectOptionSource.match(/disabled=\{disabled\}/gu)?.length,
+  1,
+  "Summary prompt select options must forward their disabled state",
+);
+const summaryPromptTemplateRowSource = summaryPopoverSource.slice(
+  summaryPopoverSource.indexOf("interface SummaryPromptTemplateRowProps"),
+);
+assert.equal(
+  summaryPromptTemplateRowSource.match(/disabled=\{disabled\}/gu)?.length,
+  4,
+  "Every template-row action must forward its disabled state",
 );
 assert.match(
   summaryPopoverSource,
