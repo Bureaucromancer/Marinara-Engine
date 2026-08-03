@@ -54,11 +54,9 @@ try {
     join(workspaceRoot, "docs", "connections", "linked-outside"),
     process.platform === "win32" ? "junction" : "dir",
   );
-  await writeFile(join(workspaceRoot, "docs", "zz-oversized.md"), "x".repeat(1024 * 1024 + 1), "utf8");
-
   const searchResponse = await searchCanonicalDocumentation(workspaceRoot, "proxy timeout", 3);
   const results = searchResponse.results;
-  assert.equal(searchResponse.truncated, true);
+  assert.equal(searchResponse.truncated, false);
   assert.equal(results[0]?.path, "docs/connections/proxy.md");
   assert.equal(results[0]?.heading, "Proxy timeout");
   assert.match(results[0]?.excerpt ?? "", /local provider/u);
@@ -67,7 +65,10 @@ try {
   const formattedSearch = formatDocumentationSearch("proxy timeout", searchResponse);
   assert.match(formattedSearch, /Source: docs\/connections\/proxy\.md/u);
   assert.match(formattedSearch, /Heading: Proxy timeout/u);
-  assert.match(formattedSearch, /safe corpus limit/u);
+  assert.doesNotMatch(formattedSearch, /safe corpus limit/u);
+
+  const secretSearch = await searchCanonicalDocumentation(workspaceRoot, "internal secret", 3);
+  assert.equal(secretSearch.results.length, 0);
 
   const section = await readCanonicalDocumentation(workspaceRoot, "docs/connections/proxy.md", "Proxy timeout", 1_000);
   assert.match(section.content, /Increase the proxy timeout/u);
@@ -77,6 +78,12 @@ try {
 
   const readmeResults = await searchCanonicalDocumentation(workspaceRoot, "install engine", 3);
   assert.equal(readmeResults.results[0]?.path, "README.md");
+
+  await writeFile(join(workspaceRoot, "README.md"), "x".repeat(1024 * 1024 + 1), "utf8");
+  const oversizedReadmeSearch = await searchCanonicalDocumentation(workspaceRoot, "local provider timeout", 3);
+  assert.equal(oversizedReadmeSearch.results[0]?.path, "docs/connections/proxy.md");
+  assert.equal(oversizedReadmeSearch.truncated, true);
+  assert.match(formatDocumentationSearch("local provider timeout", oversizedReadmeSearch), /safe corpus limit/u);
 
   await assert.rejects(() => readCanonicalDocumentation(workspaceRoot, "../outside.md"), /must be README\.md/u);
   await assert.rejects(
@@ -107,6 +114,24 @@ try {
   );
   assert.equal(textualAction.commands[0]?.name, "docs_read");
   assert.equal(textualAction.commands[0]?.arguments.heading, "Proxy timeout");
+
+  const linkedWorkspaceRoot = await mkdtemp(join(tmpdir(), "marinara-doc-tools-linked-workspace-"));
+  const externalDocsRoot = await mkdtemp(join(tmpdir(), "marinara-doc-tools-external-docs-"));
+  try {
+    await writeFile(join(linkedWorkspaceRoot, "README.md"), "# Linked docs test\n", "utf8");
+    await writeFile(join(externalDocsRoot, "secret.md"), "# External corpus secret\n", "utf8");
+    await symlink(
+      externalDocsRoot,
+      join(linkedWorkspaceRoot, "docs"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    const linkedDocsSearch = await searchCanonicalDocumentation(linkedWorkspaceRoot, "external corpus secret", 3);
+    assert.equal(linkedDocsSearch.results.length, 0);
+    assert.equal(linkedDocsSearch.truncated, true);
+  } finally {
+    await rm(linkedWorkspaceRoot, { recursive: true, force: true });
+    await rm(externalDocsRoot, { recursive: true, force: true });
+  }
 
   console.log("Professor Mari documentation regression passed");
 } finally {

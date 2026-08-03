@@ -8,6 +8,8 @@ const MAX_DOC_CANDIDATES = 500;
 const MAX_DOC_DIRECTORIES = 250;
 const MAX_DOC_DEPTH = 8;
 const MAX_DOC_AGGREGATE_BYTES = 8 * 1024 * 1024;
+const MAX_DOC_SECTIONS = 20_000;
+const MAX_DOC_MATCHES = 5_000;
 const DEFAULT_SEARCH_LIMIT = 5;
 const MAX_SEARCH_LIMIT = 8;
 const DEFAULT_READ_CHARS = 8_000;
@@ -35,32 +37,31 @@ export interface DocumentationSearchResponse {
 }
 
 interface DocumentationDiscovery {
-  files: string[];
+  files: Array<{ absolutePath: string; path: string }>;
   totalBytes: number;
   directories: number;
-  truncated: boolean;
+  incomplete: boolean;
+  stopped: boolean;
 }
 
-function normalizeDocPath(workspaceRoot: string, absolutePath: string) {
-  return relative(workspaceRoot, absolutePath).split(sep).join("/");
-}
-
-async function addDocumentationCandidate(filePath: string, discovery: DocumentationDiscovery) {
+async function addDocumentationCandidate(filePath: string, path: string, discovery: DocumentationDiscovery) {
   if (discovery.files.length >= MAX_DOC_CANDIDATES) {
-    discovery.truncated = true;
+    discovery.incomplete = true;
+    discovery.stopped = true;
     return;
   }
   try {
     const info = await lstat(filePath);
     if (!info.isFile() || info.size > MAX_DOC_FILE_BYTES) {
-      if (info.isFile()) discovery.truncated = true;
+      if (info.isFile()) discovery.incomplete = true;
       return;
     }
     if (discovery.totalBytes + info.size > MAX_DOC_AGGREGATE_BYTES) {
-      discovery.truncated = true;
+      discovery.incomplete = true;
+      discovery.stopped = true;
       return;
     }
-    discovery.files.push(filePath);
+    discovery.files.push({ absolutePath: filePath, path });
     discovery.totalBytes += info.size;
   } catch {
     // A file can disappear during an update; omit it from this search.
@@ -69,13 +70,14 @@ async function addDocumentationCandidate(filePath: string, discovery: Documentat
 
 async function collectMarkdownFiles(
   dir: string,
-  workspaceRoot: string,
+  docsRoot: string,
   discovery: DocumentationDiscovery,
   depth: number,
 ): Promise<void> {
-  if (discovery.truncated) return;
+  if (discovery.stopped) return;
   if (depth > MAX_DOC_DEPTH || discovery.directories >= MAX_DOC_DIRECTORIES) {
-    discovery.truncated = true;
+    discovery.incomplete = true;
+    discovery.stopped = true;
     return;
   }
   discovery.directories += 1;
@@ -87,25 +89,41 @@ async function collectMarkdownFiles(
   }
 
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    if (discovery.truncated) return;
+    if (discovery.stopped) return;
     if (entry.isDirectory()) {
       if (EXCLUDED_DOC_DIRS.has(entry.name.toLowerCase())) continue;
-      await collectMarkdownFiles(join(dir, entry.name), workspaceRoot, discovery, depth + 1);
+      await collectMarkdownFiles(join(dir, entry.name), docsRoot, discovery, depth + 1);
       continue;
     }
     if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".md")) continue;
     const absolutePath = join(dir, entry.name);
-    if (normalizeDocPath(workspaceRoot, absolutePath).startsWith("docs/")) {
-      await addDocumentationCandidate(absolutePath, discovery);
-    }
+    const path = `docs/${relative(docsRoot, absolutePath).split(sep).join("/")}`;
+    await addDocumentationCandidate(absolutePath, path, discovery);
   }
 }
 
 async function canonicalDocumentationFiles(workspaceRoot: string): Promise<DocumentationDiscovery> {
-  const root = resolve(workspaceRoot);
-  const discovery: DocumentationDiscovery = { files: [], totalBytes: 0, directories: 0, truncated: false };
-  await addDocumentationCandidate(join(root, "README.md"), discovery);
-  await collectMarkdownFiles(join(root, "docs"), root, discovery, 0);
+  const root = await realpath(resolve(workspaceRoot));
+  const discovery: DocumentationDiscovery = {
+    files: [],
+    totalBytes: 0,
+    directories: 0,
+    incomplete: false,
+    stopped: false,
+  };
+  await addDocumentationCandidate(join(root, "README.md"), "README.md", discovery);
+  let docsRoot: string;
+  try {
+    docsRoot = await realpath(join(root, "docs"));
+  } catch {
+    return discovery;
+  }
+  if (!isPathWithin(root, docsRoot)) {
+    discovery.incomplete = true;
+    discovery.stopped = true;
+    return discovery;
+  }
+  await collectMarkdownFiles(docsRoot, docsRoot, discovery, 0);
   return discovery;
 }
 
@@ -122,14 +140,28 @@ async function readBoundedMarkdown(filePath: string, maxBytes = MAX_DOC_FILE_BYT
   }
 }
 
-function markdownSections(path: string, content: string): DocumentationSection[] {
+function markdownSections(
+  path: string,
+  content: string,
+  maxSections: number,
+): { sections: DocumentationSection[]; truncated: boolean } {
   const lines = content.split(/\r?\n/);
-  const headings = lines.flatMap((line, index) => {
+  const headings: Array<{ index: number; heading: string }> = [];
+  let overflowIndex: number | null = null;
+  for (const [index, line] of lines.entries()) {
     const match = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/u);
-    return match ? [{ index, heading: match[2]!.trim() }] : [];
-  });
+    if (!match) continue;
+    if (headings.length >= Math.max(1, maxSections)) {
+      overflowIndex = index;
+      break;
+    }
+    headings.push({ index, heading: match[2]!.trim() });
+  }
   if (headings.length === 0) {
-    return [{ path, heading: "Document overview", content, startLine: 1 }];
+    return {
+      sections: [{ path, heading: "Document overview", content, startLine: 1 }],
+      truncated: false,
+    };
   }
 
   const sections: DocumentationSection[] = [];
@@ -142,7 +174,7 @@ function markdownSections(path: string, content: string): DocumentationSection[]
     });
   }
   headings.forEach((heading, index) => {
-    const end = headings[index + 1]?.index ?? lines.length;
+    const end = headings[index + 1]?.index ?? overflowIndex ?? lines.length;
     sections.push({
       path,
       heading: heading.heading,
@@ -150,7 +182,14 @@ function markdownSections(path: string, content: string): DocumentationSection[]
       startLine: heading.index + 1,
     });
   });
-  return sections;
+  return {
+    sections: sections.slice(0, maxSections),
+    truncated: overflowIndex !== null || sections.length > maxSections,
+  };
+}
+
+function firstMarkdownHeading(content: string) {
+  return content.match(/^#{1,6}\s+(.+?)\s*#*\s*$/mu)?.[1]?.trim() ?? "Document overview";
 }
 
 function readMarkdownHeading(path: string, content: string, requestedHeading: string): DocumentationSection | null {
@@ -226,6 +265,10 @@ function excerptForMatch(content: string, phrase: string, terms: string[]) {
   return `${excerpt.slice(0, MAX_EXCERPT_CHARS - 1).trimEnd()}…`;
 }
 
+function compareSearchResults(a: DocumentationSearchResult, b: DocumentationSearchResult) {
+  return b.score - a.score || a.path.localeCompare(b.path) || a.startLine - b.startLine;
+}
+
 export async function searchCanonicalDocumentation(
   workspaceRoot: string,
   query: string,
@@ -239,40 +282,59 @@ export async function searchCanonicalDocumentation(
   const discovery = await canonicalDocumentationFiles(workspaceRoot);
   const results: DocumentationSearchResult[] = [];
   let bytesRead = 0;
-  let truncated = discovery.truncated;
+  let sectionCount = 0;
+  let matchCount = 0;
+  let truncated = discovery.incomplete;
 
-  for (const filePath of discovery.files) {
+  fileLoop: for (const file of discovery.files) {
     const remainingBytes = MAX_DOC_AGGREGATE_BYTES - bytesRead;
     if (remainingBytes <= 0) {
       truncated = true;
       break;
     }
-    const content = await readBoundedMarkdown(filePath, remainingBytes);
+    const content = await readBoundedMarkdown(file.absolutePath, remainingBytes);
     if (content === null) {
       truncated = true;
       continue;
     }
     bytesRead += Buffer.byteLength(content, "utf8");
-    const path = normalizeDocPath(resolve(workspaceRoot), filePath);
-    for (const section of markdownSections(path, content)) {
+    const remainingSections = MAX_DOC_SECTIONS - sectionCount;
+    if (remainingSections <= 0) {
+      truncated = true;
+      break;
+    }
+    const sectionBatch = markdownSections(file.path, content, remainingSections);
+    for (const section of sectionBatch.sections) {
+      sectionCount += 1;
       const score = sectionScore(section, phrase, terms);
-      if (score === 0) continue;
-      results.push({
-        path: section.path,
-        heading: section.heading,
-        excerpt: excerptForMatch(section.content, phrase, terms),
-        startLine: section.startLine,
-        score,
-      });
+      if (score > 0) {
+        matchCount += 1;
+        results.push({
+          path: section.path,
+          heading: section.heading,
+          excerpt: excerptForMatch(section.content, phrase, terms),
+          startLine: section.startLine,
+          score,
+        });
+        results.sort(compareSearchResults);
+        if (results.length > limit) results.pop();
+        if (matchCount >= MAX_DOC_MATCHES) {
+          truncated = true;
+          break fileLoop;
+        }
+      }
+      if (sectionCount >= MAX_DOC_SECTIONS) {
+        truncated = true;
+        break fileLoop;
+      }
+    }
+    if (sectionBatch.truncated) {
+      truncated = true;
+      break;
     }
   }
 
-  return {
-    results: results
-      .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.startLine - b.startLine)
-      .slice(0, limit),
-    truncated,
-  };
+  return { results, truncated };
 }
 
 function isPathWithin(parent: string, child: string) {
@@ -330,7 +392,7 @@ export async function readCanonicalDocumentation(
   const truncated = selected.length > maxChars;
   return {
     path: normalized,
-    heading: section?.heading ?? markdownSections(normalized, content)[0]?.heading ?? "Document overview",
+    heading: section?.heading ?? firstMarkdownHeading(content),
     startLine: section?.startLine ?? 1,
     content: truncated ? `${selected.slice(0, maxChars).trimEnd()}\n…` : selected,
     truncated,
