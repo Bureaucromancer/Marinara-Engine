@@ -4694,6 +4694,7 @@
   "ui.game.gamewidgetfilecontrols.exportWidgets": "Export Widgets",
   "ui.game.gamewidgetfilecontrols.failedToImportGameWidgets": "Failed to import game widgets.",
   "ui.game.gamewidgetfilecontrols.importWidgets": "Import Widgets",
+  "ui.game.gamewidgetsessionprepmodal.removeWidget": "Remove widget?",
   "ui.game.gamewidgetsetupeditor.accent": "Accent",
   "ui.game.gamewidgetsetupeditor.exportedWidgets_one": "Exported {{count}} widget.",
   "ui.game.gamewidgetsetupeditor.exportedWidgets_other": "Exported {{count}} widgets.",
