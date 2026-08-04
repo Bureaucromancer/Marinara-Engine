@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "../lib/api-client";
+import type { LibraryFolderScope } from "@marinara-engine/shared";
 
-export type LibraryFolderScope = "lorebooks" | "presets" | "agents";
+export type { LibraryFolderScope } from "@marinara-engine/shared";
 
 export type LibraryFolder = {
   id: string;
@@ -20,14 +22,7 @@ export const libraryFolderKeys = {
   list: (scope: LibraryFolderScope) => [...libraryFolderKeys.all, scope] as const,
 };
 
-function createId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `folder-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function readFolders(): LibraryFolder[] {
+function readLegacyFolders(): LibraryFolder[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -48,13 +43,43 @@ function readFolders(): LibraryFolder[] {
   }
 }
 
-function writeFolders(folders: LibraryFolder[]) {
+function writeLegacyFolders(folders: LibraryFolder[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(folders));
 }
 
 function sortFolders(folders: LibraryFolder[]) {
   return [...folders].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+}
+
+const migrationPromises = new Map<LibraryFolderScope, Promise<void>>();
+
+function migrateLegacyFolders(scope: LibraryFolderScope) {
+  const existingPromise = migrationPromises.get(scope);
+  if (existingPromise) return existingPromise;
+
+  const migrationPromise = (async () => {
+    const allLegacyFolders = readLegacyFolders();
+    const scopedFolders = allLegacyFolders.filter((folder) => folder.scope === scope);
+    if (scopedFolders.length === 0) return;
+
+    await api.post(`/library-folders/${scope}/migrate`, {
+      folders: scopedFolders.map(({ id, name, collapsed, sortOrder, itemIds }) => ({
+        id,
+        name,
+        collapsed,
+        sortOrder,
+        itemIds,
+      })),
+    });
+    writeLegacyFolders(allLegacyFolders.filter((folder) => folder.scope !== scope));
+  })().catch((error) => {
+    migrationPromises.delete(scope);
+    throw error;
+  });
+
+  migrationPromises.set(scope, migrationPromise);
+  return migrationPromise;
 }
 
 export function getNextUnnamedLibraryFolderName(folders: Array<{ name: string }>) {
@@ -68,7 +93,10 @@ export function getNextUnnamedLibraryFolderName(folders: Array<{ name: string }>
 export function useLibraryFolders(scope: LibraryFolderScope) {
   return useQuery({
     queryKey: libraryFolderKeys.list(scope),
-    queryFn: () => sortFolders(readFolders().filter((folder) => folder.scope === scope)),
+    queryFn: async () => {
+      await migrateLegacyFolders(scope);
+      return sortFolders(await api.get<LibraryFolder[]>(`/library-folders/${scope}`));
+    },
   });
 }
 
@@ -76,21 +104,7 @@ export function useCreateLibraryFolder(scope: LibraryFolderScope) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (data: { name: string }) => {
-      const now = new Date().toISOString();
-      const folders = readFolders();
-      const scopedFolders = folders.filter((folder) => folder.scope === scope);
-      const folder: LibraryFolder = {
-        id: createId(),
-        scope,
-        name: data.name,
-        collapsed: false,
-        sortOrder: scopedFolders.length,
-        itemIds: [],
-        createdAt: now,
-        updatedAt: now,
-      };
-      writeFolders([...folders, folder]);
-      return folder;
+      return api.post<LibraryFolder>(`/library-folders/${scope}`, data);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: libraryFolderKeys.list(scope) }),
   });
@@ -100,11 +114,7 @@ export function useUpdateLibraryFolder(scope: LibraryFolderScope) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, ...data }: { id: string; name?: string; collapsed?: boolean; itemIds?: string[] }) => {
-      const now = new Date().toISOString();
-      const folders = readFolders().map((folder) =>
-        folder.scope === scope && folder.id === id ? { ...folder, ...data, updatedAt: now } : folder,
-      );
-      writeFolders(folders);
+      return api.patch<LibraryFolder>(`/library-folders/${scope}/${id}`, data);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: libraryFolderKeys.list(scope) }),
   });
@@ -114,7 +124,7 @@ export function useDeleteLibraryFolder(scope: LibraryFolderScope) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      writeFolders(readFolders().filter((folder) => !(folder.scope === scope && folder.id === id)));
+      await api.delete(`/library-folders/${scope}/${id}`);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: libraryFolderKeys.list(scope) }),
   });
@@ -134,17 +144,7 @@ export function useMoveLibraryItem(scope: LibraryFolderScope) {
     }) => {
       const ids = Array.from(new Set(itemIds ?? (itemId ? [itemId] : [])));
       if (ids.length === 0) return;
-      const idSet = new Set(ids);
-      const now = new Date().toISOString();
-      const folders = readFolders().map((folder) => {
-        if (folder.scope !== scope) return folder;
-        const nextItemIds = folder.itemIds.filter((id) => !idSet.has(id));
-        if (folder.id === folderId) {
-          nextItemIds.push(...ids.filter((id) => !nextItemIds.includes(id)));
-        }
-        return { ...folder, itemIds: nextItemIds, updatedAt: now };
-      });
-      writeFolders(folders);
+      await api.post(`/library-folders/${scope}/move`, { itemIds: ids, folderId });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: libraryFolderKeys.list(scope) }),
   });

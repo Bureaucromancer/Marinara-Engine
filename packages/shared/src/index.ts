@@ -57,6 +57,7 @@ export * from "./schemas/capability-package.schema.js";
 export * from "./schemas/personal-extension.schema.js";
 export * from "./schemas/folder.schema.js";
 export * from "./schemas/scene-analysis.schema.js";
+export * from "./schemas/library-folder.schema.js";
 
 // Constants
 export * from "./constants/providers.js";
