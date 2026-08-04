@@ -2,6 +2,16 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolveChatSummaryTemperatureOptions } from "../../packages/server/src/services/chat-summary/connection-resolution.js";
 import { generateMissingConversationSummaries } from "../../packages/server/src/services/conversation/auto-summary.service.js";
+import { computeSummaryMessageRange } from "../../packages/server/src/routes/generate/generate-route-utils.js";
+
+assert.deepEqual(
+  computeSummaryMessageRange(
+    [{ id: "message-1" }, { id: "message-2" }, { id: "message-3" }],
+    [{ id: "message-3" }, { id: "message-2" }],
+  ),
+  { startIndex: 2, endIndex: 3 },
+);
+assert.equal(computeSummaryMessageRange([{ id: "message-1" }], [{ id: "missing-message" }]), null);
 
 assert.deepEqual(
   resolveChatSummaryTemperatureOptions({
@@ -69,7 +79,7 @@ assert.match(
 );
 assert.match(
   chatsRouteSource,
-  /selectedRangeStartIndex = Math\.min\([\s\S]*?rangeStartIndex: selectedRangeStartIndex/u,
+  /computeSummaryMessageRange\(allMessages, selectedMessages\)[\s\S]*?rangeStartIndex: selectedRangeStartIndex/u,
   "Manual and backfilled summaries should persist their covered message range",
 );
 
@@ -79,7 +89,7 @@ const generateRouteSource = await readFile(
 );
 assert.match(
   generateRouteSource,
-  /autoRangeStartIndex[\s\S]*?rangeStartIndex: autoRangeStartIndex/u,
+  /computeSummaryMessageRange\(freshMessages, selectedMessages\)[\s\S]*?rangeStartIndex: autoRangeStartIndex/u,
   "Automatic summaries should persist their covered message range",
 );
 

@@ -124,7 +124,7 @@ Leave any of these blank to use the app's default theme colors. For a fuller wal
 The **Stats** tab has two separate blocks. Both feed the on-screen stat display (HUD) during chat.
 
 - **Enable Persona Stats** turns on status bars for needs like hunger, energy, and mood. When you enable it fresh, you get starter bars for Satiety, Energy, Hygiene, and Mood, each at 100 of 100. The **Persona Stats** agent adjusts these values as the story goes.
-- **Enable RPG Attributes** turns on RPG-style Pools and Attributes. When you enable it fresh, you get starter Pools for HP and MP and starter Attributes STR, DEX, CON, INT, WIS, and CHA, each at 10. These values are sent with the persona card for Combat and Game Mode, and for optional rolls in Roleplay or Game Mode. Tracker agents do not update them.
+- **Enable RPG Attributes** turns on RPG-style Pools and Attributes. When you enable it fresh, you get starter HP and MP Pools at 100 out of 100 and starter Attributes STR, DEX, CON, INT, WIS, and CHA at 10. These values are sent with the persona card for Combat and Game Mode, and for optional rolls in Roleplay or Game Mode. Tracker agents do not update them.
 
 The values you set here are the starting defaults for new chats. Persona Status Bars can update automatically when the Persona Stats agent is enabled; persona RPG Pools and Attributes are not agent-managed. For the full explanation, see [Character Colors and RPG Stats](colors-and-stats.md).
 

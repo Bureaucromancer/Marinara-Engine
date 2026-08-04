@@ -81,6 +81,7 @@ import { normalizeTimestampOverrides } from "../services/import/import-timestamp
 import {
   appendNonLeadingSystemMessagesToLastUser,
   computeSummaryHideIds,
+  computeSummaryMessageRange,
   selectRollingSummaryMessages,
   findTrackerContextInsertIndex,
   isManualTrackerCharacterId,
@@ -4084,13 +4085,10 @@ export async function chatsRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "No non-hidden messages available for the requested summary range" });
     }
     if (selectedRangeStartIndex === undefined || selectedRangeEndIndex === undefined) {
-      const messageIndexes = new Map(allMessages.map((message, index) => [message.id, index + 1]));
-      const selectedIndexes = selectedMessages
-        .map((message) => messageIndexes.get(message.id))
-        .filter((index): index is number => index !== undefined);
-      if (selectedIndexes.length > 0) {
-        selectedRangeStartIndex = Math.min(...selectedIndexes);
-        selectedRangeEndIndex = Math.max(...selectedIndexes);
+      const selectedRange = computeSummaryMessageRange(allMessages, selectedMessages);
+      if (selectedRange) {
+        selectedRangeStartIndex = selectedRange.startIndex;
+        selectedRangeEndIndex = selectedRange.endIndex;
       }
     }
     const chatLog = formatRoleplaySummaryChatLog(selectedMessages);
