@@ -1549,6 +1549,101 @@ try {
   assert.deepEqual(JSON.parse(sourceFolder?.characterIds ?? "[]"), []);
   assert.deepEqual(JSON.parse(targetFolder?.characterIds ?? "[]"), [characterId]);
 
+  const unchangedFolderTimestamp = "2026-08-04T12:30:00.000Z";
+  const unchangedMembership = ["neighbor-before", characterId, "neighbor-after"];
+  await db
+    .update(characterGroups)
+    .set({ characterIds: JSON.stringify(unchangedMembership), updatedAt: unchangedFolderTimestamp })
+    .where(eq(characterGroups.id, "character-folder-target"));
+  const noOpFolderMoveResult = await mariDb.executeAction({
+    action: "character.moveToFolder",
+    characterId,
+    folderId: "character-folder-target",
+    apply: true,
+  });
+  assert.equal(noOpFolderMoveResult.ok, true);
+  const unchangedFolder = (await db.select().from(characterGroups)).find(
+    (folder) => folder.id === "character-folder-target",
+  );
+  assert.deepEqual(JSON.parse(unchangedFolder?.characterIds ?? "[]"), unchangedMembership);
+  assert.equal(unchangedFolder?.updatedAt, unchangedFolderTimestamp);
+
+  for (const id of ["character-folder-duplicate-a", "character-folder-duplicate-b"]) {
+    await db.insert(characterGroups).values({
+      id,
+      name: "Duplicate Folder",
+      description: "",
+      characterIds: "[]",
+      createdAt: characterFolderTimestamp,
+      updatedAt: characterFolderTimestamp,
+    });
+  }
+  const ambiguousFolderMoveResult = await mariDb.executeAction({
+    action: "character.moveToFolder",
+    characterId,
+    folderName: "Duplicate Folder",
+    apply: true,
+  });
+  assert.equal(ambiguousFolderMoveResult.ok, false, "Duplicate folder names must require an explicit folder ID");
+  const duplicateFoldersAfterAmbiguousMove = (await db.select().from(characterGroups)).filter((folder) =>
+    folder.id.startsWith("character-folder-duplicate-"),
+  );
+  assert.deepEqual(
+    duplicateFoldersAfterAmbiguousMove.map((folder) => JSON.parse(folder.characterIds)),
+    [[], []],
+  );
+
+  const duplicateFolderIdMoveResult = await mariDb.executeAction({
+    action: "character.moveToFolder",
+    characterId,
+    folderId: "character-folder-duplicate-a",
+    apply: true,
+  });
+  assert.equal(duplicateFolderIdMoveResult.ok, true, "An explicit folder ID must disambiguate duplicate names");
+  const duplicateFoldersAfterIdMove = (await db.select().from(characterGroups)).filter((folder) =>
+    folder.id.startsWith("character-folder-duplicate-"),
+  );
+  const selectedDuplicateFolder = duplicateFoldersAfterIdMove.find((folder) => folder.id.endsWith("-a"));
+  const unselectedDuplicateFolder = duplicateFoldersAfterIdMove.find((folder) => folder.id.endsWith("-b"));
+  assert.deepEqual(JSON.parse(selectedDuplicateFolder?.characterIds ?? "[]"), [characterId]);
+  assert.deepEqual(JSON.parse(unselectedDuplicateFolder?.characterIds ?? "[]"), []);
+
+  const concurrentCharacterId = "character-folder-concurrent-character";
+  const concurrentCharacterCreateResult = await mariDb.executeAction({
+    action: "character.create",
+    characterId: concurrentCharacterId,
+    data: { name: "Concurrent Folder Character" },
+    apply: true,
+  });
+  assert.equal(concurrentCharacterCreateResult.ok, true);
+  await db.insert(characterGroups).values({
+    id: "character-folder-concurrent-target",
+    name: "Concurrent Target",
+    description: "",
+    characterIds: "[]",
+    createdAt: characterFolderTimestamp,
+    updatedAt: characterFolderTimestamp,
+  });
+  const concurrentFolderMoves = await Promise.all(
+    [characterId, concurrentCharacterId].map((movingCharacterId) =>
+      mariDb.executeAction({
+        action: "character.moveToFolder",
+        characterId: movingCharacterId,
+        folderId: "character-folder-concurrent-target",
+        apply: true,
+      }),
+    ),
+  );
+  assert.ok(concurrentFolderMoves.every((result) => result.ok), "Concurrent folder moves must both succeed");
+  const concurrentTargetFolder = (await db.select().from(characterGroups)).find(
+    (folder) => folder.id === "character-folder-concurrent-target",
+  );
+  assert.deepEqual(
+    JSON.parse(concurrentTargetFolder?.characterIds ?? "[]").sort(),
+    [characterId, concurrentCharacterId].sort(),
+    "Serialized folder moves must preserve both memberships",
+  );
+
   for (const approval of mariDb.getPendingApprovals()) {
     await mariDb.keepAppliedReview(approval.id);
   }

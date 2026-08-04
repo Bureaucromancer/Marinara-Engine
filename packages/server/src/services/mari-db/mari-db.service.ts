@@ -1632,6 +1632,7 @@ export class MariDbService {
   private pending = new Map<string, PendingRecord>();
   private history: MariDbHistoryEntry[] = [];
   private writeQueue: Promise<unknown> = Promise.resolve();
+  private characterFolderMutationQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly db: DB) {}
 
@@ -1872,49 +1873,51 @@ export class MariDbService {
         );
       }
       case "movetofolder": {
-        const characterId = requiredString(args, ["characterId", "id"], "character id");
-        const character = await this.getRawById(getMeta("characters"), characterId);
-        if (!character) throw new Error(`Character ${characterId} not found`);
+        return this.withCharacterFolderMutationLock(async () => {
+          const characterId = requiredString(args, ["characterId", "id"], "character id");
+          const character = await this.getRawById(getMeta("characters"), characterId);
+          if (!character) throw new Error(`Character ${characterId} not found`);
 
-        const requestedFolderId = firstString(args, ["folderId"]);
-        const requestedFolderName = firstString(args, ["folderName", "folder"]);
-        if (!requestedFolderId && !requestedFolderName) {
-          throw new Error("character.moveToFolder needs folderId or folderName");
-        }
+          const requestedFolderId = firstString(args, ["folderId"]);
+          const requestedFolderName = firstString(args, ["folderName", "folder"]);
+          if (!requestedFolderId && !requestedFolderName) {
+            throw new Error("character.moveToFolder needs folderId or folderName");
+          }
 
-        const groups = await this.rawRows("character_groups");
-        const matches = requestedFolderId
-          ? groups.filter((group) => group.id === requestedFolderId)
-          : groups.filter(
-              (group) =>
-                typeof group.name === "string" &&
-                group.name.trim().toLowerCase() === requestedFolderName!.trim().toLowerCase(),
+          const groups = await this.rawRows("character_groups");
+          const matches = requestedFolderId
+            ? groups.filter((group) => group.id === requestedFolderId)
+            : groups.filter(
+                (group) =>
+                  typeof group.name === "string" &&
+                  group.name.trim().toLowerCase() === requestedFolderName!.trim().toLowerCase(),
+              );
+          if (matches.length === 0) {
+            throw new Error(
+              requestedFolderId
+                ? `Character folder ${requestedFolderId} not found`
+                : `Character folder ${requestedFolderName} not found`,
             );
-        if (matches.length === 0) {
-          throw new Error(
-            requestedFolderId
-              ? `Character folder ${requestedFolderId} not found`
-              : `Character folder ${requestedFolderName} not found`,
-          );
-        }
-        if (matches.length > 1) {
-          throw new Error(`More than one character folder is named ${requestedFolderName}; use folderId instead`);
-        }
+          }
+          if (matches.length > 1) {
+            throw new Error(`More than one character folder is named ${requestedFolderName}; use folderId instead`);
+          }
 
-        return this.executeMutation(
-          {
-            kind: "character-move-folder",
-            table: "character_groups",
-            characterId,
-            folderId: String(matches[0]!.id),
-            apply: firstBoolean(args, ["apply"]) === true,
-            cascade: false,
-            reason: firstString(args, ["reason"]) ?? null,
-            cwd: context.cwd,
-          },
-          context.command,
-          context.sessionId,
-        );
+          return this.executeMutation(
+            {
+              kind: "character-move-folder",
+              table: "character_groups",
+              characterId,
+              folderId: String(matches[0]!.id),
+              apply: firstBoolean(args, ["apply"]) === true,
+              cascade: false,
+              reason: firstString(args, ["reason"]) ?? null,
+              cwd: context.cwd,
+            },
+            context.command,
+            context.sessionId,
+          );
+        });
       }
       default:
         return { ok: false, mode: "read", command: context.command, error: "Unsupported character app_data action." };
@@ -4602,10 +4605,13 @@ export class MariDbService {
           throw new Error(`Character folder ${String(group.id)} has invalid membership data`);
         }
         const currentIds = parsed.characterIds.filter((id): id is string => typeof id === "string" && !!id);
+        const matchingIdCount = currentIds.filter((id) => id === characterId).length;
         const withoutCharacter = currentIds.filter((id) => id !== characterId);
         const nextIds =
-          group.id === targetFolderId && !withoutCharacter.includes(characterId)
-            ? [...withoutCharacter, characterId]
+          group.id === targetFolderId
+            ? matchingIdCount === 1
+              ? currentIds
+              : [...withoutCharacter, characterId]
             : withoutCharacter;
         if (nextIds.length === currentIds.length && nextIds.every((id, index) => id === currentIds[index])) {
           return null;
@@ -4627,6 +4633,15 @@ export class MariDbService {
         };
       })
       .filter((change): change is PlanChange => change !== null);
+  }
+
+  private withCharacterFolderMutationLock<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.characterFolderMutationQueue.then(operation);
+    this.characterFolderMutationQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   private async planDelete(request: ParsedMutationRequest, issues: MariDbValidationIssue[]): Promise<PlanChange[]> {
