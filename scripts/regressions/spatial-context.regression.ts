@@ -39,6 +39,11 @@ import {
 } from "../../packages/server/src/services/spatial-context/state-resolution.js";
 import { ensureTimestampAfter } from "../../packages/server/src/services/import/import-timestamps.js";
 import { resolveVisibleGameStateAnchor } from "../../packages/server/src/routes/generate/generate-route-utils.js";
+import {
+  resolveAlreadyAppliedSpatialTurn,
+  resolveSpatialGenerationOrigin,
+  validateSpatialGenerationRequest,
+} from "../../packages/server/src/routes/generate/spatial-transition-request.js";
 import { mergeSpatialLocationReferenceImages } from "../../packages/server/src/services/image/spatial-location-reference.js";
 import {
   buildInitialGameMapPatch,
@@ -49,6 +54,77 @@ import {
 assert.equal(ensureTimestampAfter("2026-07-16T07:47:03.766Z", "2026-07-16T07:47:03.765Z"), "2026-07-16T07:47:03.766Z");
 assert.equal(ensureTimestampAfter("2026-07-16T07:47:03.765Z", "2026-07-16T07:47:03.765Z"), "2026-07-16T07:47:03.766Z");
 assert.equal(ensureTimestampAfter("2026-07-16T07:47:03.700Z", "2026-07-16T07:47:03.765Z"), "2026-07-16T07:47:03.766Z");
+const impersonatedMove = {
+  destinationId: "harbor",
+  expectedDefinitionRevision: 4,
+  expectedCurrentLocationId: "world",
+  commandId: "impersonated-owner-move",
+};
+assert.equal(
+  validateSpatialGenerationRequest({
+    mode: "roleplay",
+    origin: "owner",
+    pendingSpatialTransition: impersonatedMove,
+    impersonate: true,
+  }),
+  null,
+  "Roleplay impersonation is a generated owner turn and may commit its queued move",
+);
+assert.equal(
+  validateSpatialGenerationRequest({
+    mode: "roleplay",
+    origin: "guided",
+    pendingSpatialTransition: null,
+    impersonate: false,
+  }),
+  null,
+  "Guided assistant generation does not submit the queued owner move",
+);
+assert.deepEqual(
+  validateSpatialGenerationRequest({
+    mode: "game",
+    origin: "owner",
+    pendingSpatialTransition: impersonatedMove,
+    impersonate: true,
+  }),
+  {
+    statusCode: 400,
+    error: "Impersonated hierarchical location changes are only available in Roleplay mode.",
+    code: "spatial_mode_unsupported",
+  },
+);
+assert.deepEqual(
+  validateSpatialGenerationRequest({
+    mode: "roleplay",
+    origin: "owner",
+    pendingSpatialTransition: impersonatedMove,
+    regenerateMessageId: "assistant-message",
+  }),
+  {
+    statusCode: 400,
+    error: "A hierarchical location change must be submitted as a new owner turn.",
+    code: "spatial_transition_requires_new_turn",
+  },
+);
+for (const origin of ["guided", "autonomous", "turn_game"] as const) {
+  assert.deepEqual(
+    validateSpatialGenerationRequest({
+      mode: "roleplay",
+      origin,
+      pendingSpatialTransition: impersonatedMove,
+    }),
+    {
+      statusCode: 400,
+      error: "A hierarchical location change must be submitted as a new owner turn.",
+      code: "spatial_transition_requires_new_turn",
+    },
+  );
+}
+assert.equal(resolveSpatialGenerationOrigin({}), "owner");
+assert.equal(resolveSpatialGenerationOrigin({ generationGuide: "Continue as the shopkeeper." }), "guided");
+assert.equal(resolveSpatialGenerationOrigin({ generationGuideSource: "narrator" }), "guided");
+assert.equal(resolveSpatialGenerationOrigin({ turnGameBots: true }), "turn_game");
+assert.equal(resolveSpatialGenerationOrigin({ autonomous: true }), "autonomous");
 assert.deepEqual(
   resolveVisibleGameStateAnchor([
     { id: "assistant-anchor", role: "assistant", activeSwipeIndex: 2 },
@@ -199,6 +275,24 @@ const snapshotInput = {
 };
 assert.equal(spatialContextSnapshotSchema.safeParse(snapshotInput).success, true);
 assert.equal(spatialContextSnapshotSchema.safeParse({ ...snapshotInput, messageId: "" }).success, false);
+assert.deepEqual(
+  resolveAlreadyAppliedSpatialTurn({
+    code: "spatial_transition_already_applied",
+    details: { messageId: snapshotInput.messageId, snapshot: snapshotInput },
+  }),
+  {
+    messageId: "message-1",
+    swipeIndex: 0,
+    currentLocationId: null,
+    definitionRevision: 0,
+  },
+  "Already-applied generated owner turns recover the original persisted message and snapshot",
+);
+assert.equal(
+  resolveAlreadyAppliedSpatialTurn({ code: "spatial_transition_stale_location" }),
+  null,
+  "Rejected spatial transitions must not enter the idempotent success path",
+);
 assert.deepEqual(
   extractAssistantSpatialDirective('The lift opens onto Level 1.\n[spatial_move: destination_id="tower_level_1"]'),
   {
