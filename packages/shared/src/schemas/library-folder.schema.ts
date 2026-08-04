@@ -19,7 +19,7 @@ const nonEmptyLibraryFolderItemIdsSchema = z
     }
   });
 
-export const libraryFolderScopeSchema = z.enum(["lorebooks", "presets", "agents"]);
+export const libraryFolderScopeSchema = z.enum(["lorebooks", "scenarios", "presets", "agents"]);
 
 export const libraryFolderScopeParamsSchema = z.object({
   scope: libraryFolderScopeSchema,
