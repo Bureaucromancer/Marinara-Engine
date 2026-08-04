@@ -100,6 +100,7 @@ import { NoodlerOnboardingWizard } from "./NoodlerBulkCreatePanel";
 import {
   Avatar,
   getNoodleAccentStyle,
+  NewSinceLastVisitDivider,
   NoodleShell,
   ProfileInitial,
   NOODLE_PERSONA_SWITCHER_PAGE_SIZE,
@@ -3237,15 +3238,7 @@ function ViewerHub({
             <div>
               {feed.map((item, index) => (
                 <Fragment key={item.post.id}>
-                  {index === dividerIndex && (
-                    <div className="flex items-center gap-3 border-b border-[var(--noodle-divider)] px-4 py-2">
-                      <span className="h-px flex-1 bg-[var(--noodle-accent)]/30" />
-                      <span className="text-[0.68rem] font-bold uppercase tracking-wide text-[var(--noodle-accent)]">
-                        {localizeUi("ui.noodle.viewerhub.newSinceYourLastVisit")}
-                      </span>
-                      <span className="h-px flex-1 bg-[var(--noodle-accent)]/30" />
-                    </div>
-                  )}
+                  {index === dividerIndex && <NewSinceLastVisitDivider />}
                   {renderFeedPost(item)}
                 </Fragment>
               ))}

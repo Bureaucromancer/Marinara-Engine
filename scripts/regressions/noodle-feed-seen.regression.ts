@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { countNoodlerPostsSince } from "../../packages/shared/src/utils/noodler-unseen.js";
+import { countActivityAfter, countNoodlerPostsSince } from "../../packages/shared/src/utils/noodle-unseen.js";
 import type { NoodlerViewerScope } from "../../packages/shared/src/types/noodle.js";
 import type { DB } from "../../packages/server/src/db/connection.js";
 import { createFileNativeDB } from "../../packages/server/src/db/file-backed-store.js";
@@ -81,6 +81,28 @@ try {
     0,
     "a post exactly at the seen timestamp was already shown",
   );
+
+  // ── Noodle's own timeline uses a separate field ──
+  // One shared value would let opening either surface clear the other's counter.
+  await noodle.patchAccountSettings(viewerA.id, {
+    subtree: "social",
+    patch: { noodleFeedSeenAt: "2026-08-04T11:00:00.000Z" },
+  });
+  const bothStored = await noodle.getAccountById(viewerA.id);
+  assert.equal(bothStored?.settings.social.noodleFeedSeenAt, "2026-08-04T11:00:00.000Z");
+  assert.equal(
+    bothStored?.settings.social.noodlerFeedSeenAt,
+    seenAt,
+    "recording a Noodle visit must not disturb the NoodleR timestamp",
+  );
+
+  // Public Noodle sorts by latest activity, not creation time, so the counter measures the
+  // same value the sort does — a post bumped by a new reply is unseen again.
+  const activity = [Date.parse("2026-08-04T12:00:00.000Z"), Date.parse("2026-08-04T09:00:00.000Z")];
+  assert.equal(countActivityAfter(activity, "2026-08-04T11:00:00.000Z"), 1);
+  assert.equal(countActivityAfter(activity, undefined), 0, "a first visit must not count the backlog");
+  assert.equal(countActivityAfter(activity, "not-a-date"), 0);
+  assert.equal(countActivityAfter([], "2026-08-04T11:00:00.000Z"), 0);
 
   console.log("noodle-feed-seen: OK");
 } finally {

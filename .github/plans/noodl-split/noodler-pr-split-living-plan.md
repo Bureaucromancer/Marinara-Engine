@@ -704,7 +704,7 @@ ahead of 8f-3/4/5/6 rather than behind all of 8f.
 **8f-5** (new-since-last-visit divider and entry-point counter) is implemented and unmerged
 on `fix/noodler-locked-blurred-teaser`: `noodlerFeedSeenAt` on
 `NoodleAccountSocialSettings` (per viewer persona, advanced only once the feed is actually
-shown), `countNoodlerPostsSince()` in `packages/shared/src/utils/noodler-unseen.ts`, a
+shown), `countNoodlerPostsSince()` in `packages/shared/src/utils/noodle-unseen.ts`, a
 divider at the boundary in the ViewerHub feed, and a badge on the NoodleR mode toggle so the
 count is visible from the Noodle side. Covered by `noodle-feed-seen.regression.ts`.
 

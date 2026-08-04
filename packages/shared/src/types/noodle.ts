@@ -50,6 +50,9 @@ export interface NoodleAccountSocialSettings {
    * account-wide timestamp would let one persona silently clear another's.
    */
   noodlerFeedSeenAt?: string;
+  /** The same, for the public Noodle timeline. Separate field: one value would let a visit to
+   * either surface clear the other's counter. */
+  noodleFeedSeenAt?: string;
 }
 
 export interface NoodleAutoPostingSettings {

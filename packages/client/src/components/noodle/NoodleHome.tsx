@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import { useReducedMotion } from "framer-motion";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -60,6 +61,7 @@ import {
   type NoodlePollInput,
   type NoodleRefreshSchedulerStatus,
   type NoodleSettingsUpdateInput,
+  countActivityAfter,
 } from "@marinara-engine/shared";
 import { ApiError } from "../../lib/api-client";
 import { showConfirmDialog } from "../../lib/app-dialogs";
@@ -117,6 +119,7 @@ import { useUIStore } from "../../stores/ui.store";
 import {
   Avatar,
   getNoodleAccentStyle,
+  NewSinceLastVisitDivider,
   NoodleLogo,
   NOODLER_ADD_MARK,
   NOODLER_MARK,
@@ -581,6 +584,11 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
     selectedPersonaId || null,
     data?.settings.enableNoodler === true,
   );
+  // Same idea for Noodle's own timeline. Frozen per account for the same reason as NoodleR:
+  // the stored value advances as soon as the timeline is shown, which would otherwise erase
+  // the divider while the reader is still on it.
+  const [frozenNoodleFeedSeenAt, setFrozenNoodleFeedSeenAt] = useState<Record<string, string | null>>({});
+  const timelineShownForAccountRef = useRef<string | null>(null);
   const noodlerCreators = noodlerAccountsQuery.data ?? [];
   const noodlerCreatorCount = noodlerCreators.length;
   const noodlerAutomatingCount = noodlerCreators.filter((profile) => profile.autoPosting.enabled).length;
@@ -1604,23 +1612,21 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
     }
     return latest;
   }, [interactionById, interactions, personaAccount]);
+  // The timeline orders by latest activity, not creation time, so the unseen count and the
+  // divider have to measure the same thing the sort does — otherwise the divider lands
+  // somewhere other than the boundary the reader actually sees.
+  const timelineActivityAt = useCallback(
+    (post: NoodlePost) =>
+      Math.max(new Date(post.createdAt).getTime() || 0, latestExternalReplyToPersonaCommentAtByPostId.get(post.id) ?? 0),
+    [latestExternalReplyToPersonaCommentAtByPostId],
+  );
   const baseTimelinePosts = useMemo(() => {
     const visiblePosts =
       timelineTab === "following"
         ? posts.filter((post) => followedCharacterAccountIds.has(post.authorAccountId))
         : posts;
-    return visiblePosts.slice().sort((left, right) => {
-      const leftActivityAt = Math.max(
-        new Date(left.createdAt).getTime() || 0,
-        latestExternalReplyToPersonaCommentAtByPostId.get(left.id) ?? 0,
-      );
-      const rightActivityAt = Math.max(
-        new Date(right.createdAt).getTime() || 0,
-        latestExternalReplyToPersonaCommentAtByPostId.get(right.id) ?? 0,
-      );
-      return rightActivityAt - leftActivityAt;
-    });
-  }, [followedCharacterAccountIds, latestExternalReplyToPersonaCommentAtByPostId, posts, timelineTab]);
+    return visiblePosts.slice().sort((left, right) => timelineActivityAt(right) - timelineActivityAt(left));
+  }, [followedCharacterAccountIds, posts, timelineActivityAt, timelineTab]);
   const timelinePosts = useMemo(() => {
     if (!normalizedPostSearch || isAccountSearch) return baseTimelinePosts;
     return baseTimelinePosts.filter((post) => {
@@ -1853,6 +1859,44 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
     notificationLikes.filter((item) => new Date(item.interaction.createdAt).getTime() > notificationReadTime).length +
     notificationFollowAccounts.filter((item) => (Date.parse(item.followedAt) || 0) > notificationReadTime).length +
     notificationReplyItems.filter((item) => new Date(item.createdAt).getTime() > notificationReadTime).length;
+  const noodleUnseenCount = countActivityAfter(
+    baseTimelinePosts
+      .filter((post) => post.authorAccountId !== personaAccount?.id)
+      .map((post) => timelineActivityAt(post)),
+    personaAccount?.settings.social.noodleFeedSeenAt,
+  );
+  // Mark the visit once the timeline itself is on screen — opening Noodle on a profile or the
+  // notifications view is not the same as having seen the feed.
+  const timelineIsOnScreen = activeNoodleView === "home" && !isAccountSearch && Boolean(personaAccount);
+  useEffect(() => {
+    if (!timelineIsOnScreen || !personaAccount) return;
+    if (timelineShownForAccountRef.current === personaAccount.id) return;
+    timelineShownForAccountRef.current = personaAccount.id;
+    const accountId = personaAccount.id;
+    setFrozenNoodleFeedSeenAt((current) => ({
+      ...current,
+      [accountId]: personaAccount.settings.social.noodleFeedSeenAt ?? null,
+    }));
+    patchAccountSettings.mutate(
+      { id: accountId, subtree: "social", patch: { noodleFeedSeenAt: new Date().toISOString() } },
+      {
+        // Ambient state: failing to record the visit leaves the counter up, which the next
+        // visit fixes. Not worth interrupting the user for.
+        onError: (error: unknown) => console.warn("[noodle] Could not record the timeline visit", error),
+      },
+    );
+  }, [patchAccountSettings, personaAccount, timelineIsOnScreen]);
+  // Newest-first, so everything unseen is one run at the top and the divider is the boundary
+  // after it. Shown only with posts on both sides: otherwise it labels nothing.
+  const noodleSeenAt = personaAccount ? frozenNoodleFeedSeenAt[personaAccount.id] : null;
+  const noodleSeenTime = noodleSeenAt ? new Date(noodleSeenAt).getTime() : NaN;
+  const timelineNewRunLength = timelinePosts.findIndex(
+    (post) =>
+      Number.isNaN(noodleSeenTime) ||
+      post.authorAccountId === personaAccount?.id ||
+      timelineActivityAt(post) <= noodleSeenTime,
+  );
+  const timelineDividerIndex = timelineNewRunLength > 0 ? timelineNewRunLength : -1;
   const followableCharacterAccounts = useMemo(
     () =>
       accounts
@@ -4037,7 +4081,14 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
               </p>
             )
           ) : timelinePosts.length > 0 ? (
-            <div>{timelinePosts.map(renderPostArticle)}</div>
+            <div>
+              {timelinePosts.map((post, index) => (
+                <Fragment key={post.id}>
+                  {index === timelineDividerIndex && <NewSinceLastVisitDivider />}
+                  {renderPostArticle(post)}
+                </Fragment>
+              ))}
+            </div>
           ) : (
             <p className="px-4 py-6 text-sm text-[var(--muted-foreground)]">
               {localizeUi("ui.noodle.noodlehome.noPostsFound")}
@@ -4178,6 +4229,7 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
           : null
       }
       noodlerUnseenCount={noodlerUnseenCount}
+      noodleUnseenCount={noodleUnseenCount}
       personaAccount={personaAccount}
       sortedPersonaAccounts={sortedPersonaAccounts}
       visiblePersonaAccounts={visiblePersonaAccounts}

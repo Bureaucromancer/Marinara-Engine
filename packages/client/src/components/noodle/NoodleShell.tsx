@@ -55,6 +55,19 @@ export function NoodleLogo({ className, src = NOODLE_LOGO_SRC }: { className?: s
   return <img src={src} alt="" className={cn("object-contain", className)} />;
 }
 
+// The count is the reason to come back, so it carries its own label rather than leaving a
+// bare number for screen readers to read out of context.
+function UnseenBadge({ count }: { count: number }) {
+  const { t: localizeUi } = useUiTranslation();
+  if (count <= 0) return null;
+  return (
+    <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--noodle-accent)] px-1.5 text-[0.65rem] font-bold tabular-nums text-zinc-950">
+      {count > 99 ? "99+" : count}
+      <span className="sr-only">{localizeUi("ui.noodle.noodlemodetoggle.newSinceLastVisitCount", { count })}</span>
+    </span>
+  );
+}
+
 // Two-way switch between the Noodle and NoodleR apps — reads as picking one of two
 // exclusive modes, not another item in the vertical nav list.
 function NoodleModeToggle({
@@ -62,12 +75,15 @@ function NoodleModeToggle({
   onOpenHome,
   onOpenNoodler,
   noodlerUnseenCount = 0,
+  noodleUnseenCount = 0,
 }: {
   activeMode: NoodleShellMode;
   onOpenHome: () => void;
   onOpenNoodler: () => void;
   /** Posts published since this viewer persona last had the NoodleR feed shown to it. */
   noodlerUnseenCount?: number;
+  /** The same for the public Noodle timeline. */
+  noodleUnseenCount?: number;
 }) {
   const { t: localizeUi } = useUiTranslation();
   const noodler = activeMode === "noodler";
@@ -86,20 +102,26 @@ function NoodleModeToggle({
     >
       <button type="button" role="tab" aria-selected={!noodler} onClick={onOpenHome} className={segment(!noodler)}>
         {localizeUi("navigation.topbar.noodle")}
+        <UnseenBadge count={noodleUnseenCount} />
       </button>
       <button type="button" role="tab" aria-selected={noodler} onClick={onOpenNoodler} className={segment(noodler)}>
         {localizeUi("ui.noodle.noodlemodetoggle.noodler")}
-        {/* The count is the reason to come back, so it carries its own label rather than
-            leaving a bare number for screen readers to read out of context. */}
-        {noodlerUnseenCount > 0 && (
-          <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--noodle-accent)] px-1.5 text-[0.65rem] font-bold tabular-nums text-zinc-950">
-            {noodlerUnseenCount > 99 ? "99+" : noodlerUnseenCount}
-            <span className="sr-only">
-              {localizeUi("ui.noodle.noodlemodetoggle.newSinceLastVisitCount", { count: noodlerUnseenCount })}
-            </span>
-          </span>
-        )}
+        <UnseenBadge count={noodlerUnseenCount} />
       </button>
+    </div>
+  );
+}
+
+/** Boundary marker between posts arrived since the last visit and everything already read. */
+export function NewSinceLastVisitDivider() {
+  const { t: localizeUi } = useUiTranslation();
+  return (
+    <div className="flex items-center gap-3 border-b border-[var(--noodle-divider)] px-4 py-2">
+      <span className="h-px flex-1 bg-[var(--noodle-accent)]/30" />
+      <span className="text-[0.68rem] font-bold uppercase tracking-wide text-[var(--noodle-accent)]">
+        {localizeUi("ui.noodle.viewerhub.newSinceYourLastVisit")}
+      </span>
+      <span className="h-px flex-1 bg-[var(--noodle-accent)]/30" />
     </div>
   );
 }
@@ -182,6 +204,8 @@ export interface NoodleShellProps {
   homeActive?: boolean;
   /** Posts published since this viewer persona last had the NoodleR feed shown to it. */
   noodlerUnseenCount?: number;
+  /** The same for the public Noodle timeline. */
+  noodleUnseenCount?: number;
   personaAccount: NoodleAccount | null;
   sortedPersonaAccounts: NoodleAccount[];
   visiblePersonaAccounts: NoodleAccount[];
@@ -226,6 +250,7 @@ export function NoodleShell({
   appMode,
   homeActive: homeActiveOverride,
   noodlerUnseenCount = 0,
+  noodleUnseenCount = 0,
   personaAccount,
   sortedPersonaAccounts,
   visiblePersonaAccounts,
@@ -335,6 +360,7 @@ export function NoodleShell({
                       onOpenHome={onOpenHome}
                       onOpenNoodler={onOpenNoodler}
                       noodlerUnseenCount={noodlerUnseenCount}
+                      noodleUnseenCount={noodleUnseenCount}
                     />
                   </div>
                 )}
@@ -475,6 +501,7 @@ export function NoodleShell({
                       onOpenHome={onOpenHome}
                       onOpenNoodler={onOpenNoodler}
                       noodlerUnseenCount={noodlerUnseenCount}
+                      noodleUnseenCount={noodleUnseenCount}
                     />
                   </div>
                 )}

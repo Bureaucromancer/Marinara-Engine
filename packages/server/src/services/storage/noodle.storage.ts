@@ -307,6 +307,7 @@ export function normalizeNoodleAccountSettings(value: unknown): NoodleAccountSet
   const rawFollowingAccountTimestamps = nestedOrLegacy(rawSocial, raw, "followingAccountTimestamps");
   const rawNotificationsReadAt = nestedOrLegacy(rawSocial, raw, "notificationsReadAt");
   const rawNoodlerFeedSeenAt = nestedOrLegacy(rawSocial, raw, "noodlerFeedSeenAt");
+  const rawNoodleFeedSeenAt = nestedOrLegacy(rawSocial, raw, "noodleFeedSeenAt");
   const rawIdentityDisclosure = nestedOrLegacy(rawPrivacy, raw, "identityDisclosure");
   const rawStagePersonality = nestedOrLegacy(rawPrivacy, raw, "stagePersonality");
   const rawAccess = parseRecord(rawPrivacy.access);
@@ -335,6 +336,7 @@ export function normalizeNoodleAccountSettings(value: unknown): NoodleAccountSet
       validSocialField("followingAccountTimestamps", followingAccountTimestamps)),
     ...(rawNotificationsReadAt !== undefined && validSocialField("notificationsReadAt", rawNotificationsReadAt)),
     ...(rawNoodlerFeedSeenAt !== undefined && validSocialField("noodlerFeedSeenAt", rawNoodlerFeedSeenAt)),
+    ...(rawNoodleFeedSeenAt !== undefined && validSocialField("noodleFeedSeenAt", rawNoodleFeedSeenAt)),
   };
   const privacy = {
     ...(rawIdentityDisclosure !== undefined && validPrivacyField("identityDisclosure", rawIdentityDisclosure)),
