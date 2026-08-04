@@ -2,6 +2,7 @@
 // Noodle Zod Schemas
 // ──────────────────────────────────────────────
 import { z } from "zod";
+import { avatarCropSchema } from "./avatar-crop.schema.js";
 
 export const noodleAccountKindSchema = z.enum(["persona", "character", "random_user"]);
 export const noodleInteractionTypeSchema = z.enum(["like", "repost", "reply", "vote"]);
@@ -125,28 +126,9 @@ export const noodleSettingsSchema = z.object({
 
 export const noodleSettingsUpdateSchema = noodleSettingsSchema.partial();
 
-const noodleAvatarCropSchema = z.union([
-  z
-    .object({
-      srcX: z.number().finite(),
-      srcY: z.number().finite(),
-      srcWidth: z.number().finite().positive(),
-      srcHeight: z.number().finite().positive(),
-    })
-    .strict(),
-  z
-    .object({
-      zoom: z.number().finite().positive(),
-      offsetX: z.number().finite(),
-      offsetY: z.number().finite(),
-      fullImage: z.boolean().optional(),
-    })
-    .strict(),
-]);
-
 export const noodleAccountProfileSettingsSchema = z
   .object({
-    avatarCrop: noodleAvatarCropSchema.nullable().optional(),
+    avatarCrop: avatarCropSchema.nullable().optional(),
     bannerUrl: z.string().max(2000).optional(),
     location: z.string().max(120).optional(),
     profileGenerated: z.boolean().optional(),

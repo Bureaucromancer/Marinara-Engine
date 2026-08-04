@@ -22,7 +22,7 @@ import {
   type NoodleAccountSubscription,
   type NoodleAccountUpdateInput,
   type NoodlerReserveStatus,
-  type NoodleAvatarCrop,
+  type AvatarCrop,
   type NoodleAuthorSnapshot,
   type NoodleBootstrap,
   type NoodleCreateInteractionInput,
@@ -314,8 +314,7 @@ export function normalizeNoodleAccountSettings(value: unknown): NoodleAccountSet
   const normalizedAvatarCrop = rawAvatarCrop === null ? null : parseNoodleAvatarCrop(rawAvatarCrop);
   const profile = {
     ...(rawAvatarCrop !== undefined &&
-      (rawAvatarCrop === null || normalizedAvatarCrop !== null) &&
-      validProfileField("avatarCrop", normalizedAvatarCrop)),
+      (rawAvatarCrop === null || normalizedAvatarCrop !== null) && { avatarCrop: normalizedAvatarCrop }),
     ...(rawBannerUrl !== undefined && validProfileField("bannerUrl", rawBannerUrl)),
     ...(rawLocation !== undefined && validProfileField("location", rawLocation)),
     ...(rawProfileGenerated !== undefined &&
@@ -391,7 +390,7 @@ function parseRefreshAttempts(value: unknown): NoodleRefreshAttempt[] {
   });
 }
 
-export function parseNoodleAvatarCrop(value: unknown): NoodleAvatarCrop | null {
+export function parseNoodleAvatarCrop(value: unknown): AvatarCrop | null {
   let parsed = value;
   if (typeof parsed === "string") {
     if (!parsed.trim()) return null;
@@ -1392,7 +1391,7 @@ export function createNoodleStorage(db: DB) {
       entityId: string;
       displayName: string;
       avatarUrl?: string | null;
-      avatarCrop?: NoodleAvatarCrop | null;
+      avatarCrop?: AvatarCrop | null;
       bio?: string | null;
       invited?: boolean;
       /** Keep entity-owned identity fields current without replacing generated profile copy. */
