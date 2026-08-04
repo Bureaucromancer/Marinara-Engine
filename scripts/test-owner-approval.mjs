@@ -153,6 +153,18 @@ async function runCase(options, env = {}) {
     membershipError: notFound,
     reviews: [
       { id: 1, state: "APPROVED", commit_id: "head-sha", user: { login: "SpicyMarinara" } },
+      { id: 2, state: "DISMISSED", commit_id: "head-sha", user: { login: "SpicyMarinara" } },
+    ],
+  });
+  assert.equal(status.state, "failure");
+}
+
+{
+  const notFound = Object.assign(new Error("Not Found"), { status: 404 });
+  const { status } = await runCase({
+    membershipError: notFound,
+    reviews: [
+      { id: 1, state: "APPROVED", commit_id: "head-sha", user: { login: "SpicyMarinara" } },
       { id: 2, state: "COMMENTED", commit_id: "head-sha", user: { login: "SpicyMarinara" } },
     ],
   });
