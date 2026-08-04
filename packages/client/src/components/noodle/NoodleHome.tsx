@@ -138,6 +138,7 @@ import type {
   NoodleNavigationState,
   NoodleProfileConnection,
   NoodleSettingsNavigationState,
+  NoodleSettingsReturnState,
 } from "./noodle-navigation.types";
 import { NoodlerAgeGate } from "./NoodlerAgeGate";
 import { NoodleProfileSurface } from "./NoodleProfileSurface";
@@ -1178,7 +1179,7 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
         allProfiles
           ? "ui.noodle.ambientProfiles.rerollAllConfirmMessage"
           : "ui.noodle.ambientProfiles.rerollConfirmMessage",
-        allProfiles ? undefined : { name: profiles[0]!.displayName },
+        allProfiles ? { count: profiles.length } : { name: profiles[0]!.displayName },
       ),
       confirmLabel: localizeUi(
         allProfiles ? "ui.noodle.ambientProfiles.rerollAll" : "ui.noodle.ambientProfiles.reroll",
@@ -2621,8 +2622,13 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
   };
 
   const openSettings = () => {
-    const returnTo =
-      navigation.mode === "public" ? navigation : (navigation.returnTo ?? { mode: "public", view: "home" });
+    // Drop any nested return target so repeated settings ↔ profile hops cannot grow the state.
+    const returnTo: NoodleSettingsReturnState =
+      navigation.mode === "public"
+        ? navigation.view === "profile"
+          ? { ...navigation, returnToSettings: undefined }
+          : navigation
+        : (navigation.returnTo ?? { mode: "public", view: "home" });
     onNavigate({ mode: "settings", tab: "noodle", section: "general", returnTo });
     setAccountSwitcherOpen(false);
     setMobileDrawerOpen(false);
@@ -3209,7 +3215,9 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
             ))}
             {ambientProfiles.length === 0 && (
               <p className="px-3 py-5 text-center text-xs text-[var(--muted-foreground)]">
-                {localizeUi("ui.noodle.ambientProfiles.loading")}
+                {isLoading
+                  ? localizeUi("ui.noodle.ambientProfiles.loading")
+                  : localizeUi("ui.noodle.ambientProfiles.loadFailed")}
               </p>
             )}
           </div>

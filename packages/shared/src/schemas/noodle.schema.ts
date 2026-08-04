@@ -238,7 +238,7 @@ export const noodleAmbientProfileRerollSchema = z
     accountIds: z
       .array(z.string().min(1).max(64))
       .min(1)
-      .max(6)
+      .max(AMBIENT_NOODLE_ENTITY_IDS.length)
       .refine((ids) => new Set(ids).size === ids.length, { message: "Duplicate account IDs are not allowed." }),
     debugMode: z.boolean().default(false),
   })
@@ -716,6 +716,10 @@ export type NoodleAccountProfileUpdateInput = z.infer<typeof noodleAccountProfil
 export type NoodleAccountSettingsPatchInput = z.infer<typeof noodleAccountSettingsPatchSchema>;
 export type NoodleAccountFollowUpdateInput = z.infer<typeof noodleAccountFollowUpdateSchema>;
 export type NoodleAmbientProfileRerollInput = z.infer<typeof noodleAmbientProfileRerollSchema>;
+export type NoodleAmbientProfileRerollOutcome = {
+  accountId: string;
+  status: "updated" | "invalid_response" | "error";
+};
 export type NoodlerAccountCreateInput = z.infer<typeof noodlerAccountCreateSchema>;
 export type NoodleBulkNoodlerAccountCreateInput = z.infer<typeof noodleBulkNoodlerAccountCreateSchema>;
 export type NoodleStageProfileInput = z.infer<typeof noodleStageProfileSchema>;

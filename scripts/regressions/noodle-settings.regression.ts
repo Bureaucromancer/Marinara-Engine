@@ -260,8 +260,19 @@ try {
     ]),
     reseededAmbient.map((account) => account.handle),
   );
+  // Neither account may be handed a handle the other still holds, or the write trips the unique index.
   assert.equal(swappedHandles.get(preservedAmbient.id), `${swapTarget.handle}_2`);
-  assert.equal(swappedHandles.get(swapTarget.id), preservedAmbient.handle);
+  assert.equal(swappedHandles.get(swapTarget.id), `${preservedAmbient.handle}_2`);
+  for (const account of [preservedAmbient, swapTarget]) {
+    const applied = await firstNoodle.updateAccountProfile(account.id, {
+      handle: swappedHandles.get(account.id)!,
+      displayName: `${account.displayName} Swapped`,
+      bio: "Swapped identity.",
+      avatarUrl: null,
+      profile: { avatarCrop: null, profileGenerated: true, profileManuallyEdited: false },
+    });
+    assert.equal(applied?.handle, swappedHandles.get(account.id));
+  }
   assert.equal(
     ambientGeneratedProfileChanged(preservedAmbient, {
       entityId: preservedAmbient.entityId,

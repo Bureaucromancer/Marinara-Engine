@@ -1,4 +1,9 @@
-import { type APIProvider, type NoodleAccount, type NoodleGeneratedProfile } from "@marinara-engine/shared";
+import {
+  type APIProvider,
+  type NoodleAccount,
+  type NoodleAmbientProfileRerollOutcome,
+  type NoodleGeneratedProfile,
+} from "@marinara-engine/shared";
 import { logDebugOverride, logger } from "../../lib/logger.js";
 import { resolveBaseUrl } from "../generation/connection-base-url.js";
 import { resolveStoredChatOptions, resolveStoredMaxTokens } from "../generation/generation-parameters.js";
@@ -17,10 +22,7 @@ import { noodleResponseFormat, NOODLE_JSON_OUTPUT_HEADING } from "./noodle-respo
 
 type GenerationConnection = NonNullable<Awaited<ReturnType<ReturnType<typeof createConnectionsStorage>["getWithKey"]>>>;
 
-export type AmbientProfileRerollOutcome = {
-  accountId: string;
-  status: "updated" | "invalid_response" | "error";
-};
+export type AmbientProfileRerollOutcome = NoodleAmbientProfileRerollOutcome;
 
 function normalizedPublicHandle(handle: string): string {
   return (
@@ -60,8 +62,13 @@ export function allocateAmbientProfileHandles(
   for (const account of accounts) {
     const profile = profiles.get(account.entityId);
     if (!profile || !ambientGeneratedProfileChanged(account, profile)) continue;
-    reserved.delete(normalizedPublicHandle(account.handle));
-    allocated.set(account.id, nextAvailableAmbientHandle(profile.handle, reserved));
+    // Free the account's own handle only long enough for it to reclaim it. Leaving it free would
+    // let a later account take a handle its owner still holds, which trips the unique index on write.
+    const ownHandle = normalizedPublicHandle(account.handle);
+    reserved.delete(ownHandle);
+    const nextHandle = nextAvailableAmbientHandle(profile.handle, reserved);
+    if (nextHandle !== ownHandle) reserved.add(ownHandle);
+    allocated.set(account.id, nextHandle);
   }
   return allocated;
 }

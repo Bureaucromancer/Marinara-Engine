@@ -9,6 +9,7 @@ import { useUIStore } from "../stores/ui.store";
 import type {
   NoodleAccount,
   NoodleAmbientProfileRerollInput,
+  NoodleAmbientProfileRerollOutcome,
   NoodleAccountFollowUpdateInput,
   NoodleAccountKind,
   NoodleAccountProfileUpdateInput,
@@ -91,7 +92,7 @@ export function useRerollAmbientNoodleProfiles() {
     mutationFn: (input: NoodleAmbientProfileRerollInput) =>
       api.post<{
         accounts: NoodleAccount[];
-        outcomes: Array<{ accountId: string; status: "updated" | "invalid_response" | "error" }>;
+        outcomes: NoodleAmbientProfileRerollOutcome[];
       }>("/noodle/ambient-profiles/reroll", input),
     onSuccess: ({ accounts }) => {
       qc.setQueryData<NoodleBootstrap | undefined>(noodleKeys.bootstrap(), (current) => {

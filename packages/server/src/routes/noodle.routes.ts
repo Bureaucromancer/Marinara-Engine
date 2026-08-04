@@ -118,6 +118,8 @@ const noodleImagePromptConfirmationSchema = z.object({
   debugMode: z.boolean().optional(),
 });
 
+/** The `identity` lock is shared by refresh, reroll, and profile edits, so the 409 stays operation-neutral. */
+const NOODLE_IDENTITY_LOCK_BUSY = "Another Noodle identity operation is already running. Wait for it to finish.";
 const NOODLER_MEDIA_MAX_BYTES = 20 * 1024 * 1024;
 const NOODLER_MEDIA_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif"]);
 
@@ -292,7 +294,7 @@ export async function noodleRoutes(app: FastifyInstance) {
     const parsed = noodleAmbientProfileRerollSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const releaseOperation = claimNoodleOperation("identity");
-    if (!releaseOperation) return reply.code(409).send({ error: "Wait for the current Noodle refresh to finish." });
+    if (!releaseOperation) return reply.code(409).send({ error: NOODLE_IDENTITY_LOCK_BUSY });
     try {
       const settings = await noodle.getSettings();
       const connectionId = settings.generationConnectionId;
@@ -1028,7 +1030,7 @@ export async function noodleRoutes(app: FastifyInstance) {
     const parsed = noodleRescheduleRefreshSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     if (isNoodleOperationActive("identity")) {
-      return reply.code(409).send({ error: "Wait for the current Noodle refresh to finish." });
+      return reply.code(409).send({ error: NOODLE_IDENTITY_LOCK_BUSY });
     }
     const at = new Date();
     const schedule = await noodle.ensureRefreshSchedule(at);
@@ -1046,7 +1048,7 @@ export async function noodleRoutes(app: FastifyInstance) {
     const parsed = noodleAccountUpdateSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const releaseOperation = claimNoodleOperation("identity");
-    if (!releaseOperation) return reply.code(409).send({ error: "Wait for the current Noodle refresh to finish." });
+    if (!releaseOperation) return reply.code(409).send({ error: NOODLE_IDENTITY_LOCK_BUSY });
     try {
       const updated = await noodle.updateAccount(id, parsed.data);
       if (!updated) return reply.code(404).send({ error: "Noodle account not found" });
@@ -1066,7 +1068,7 @@ export async function noodleRoutes(app: FastifyInstance) {
     const parsed = noodleAccountProfileUpdateSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const releaseOperation = claimNoodleOperation("identity");
-    if (!releaseOperation) return reply.code(409).send({ error: "Wait for the current Noodle refresh to finish." });
+    if (!releaseOperation) return reply.code(409).send({ error: NOODLE_IDENTITY_LOCK_BUSY });
     try {
       const existing = await noodle.getAccountById(id);
       if (!existing) return reply.code(404).send({ error: "Noodle account not found" });
@@ -1551,7 +1553,7 @@ export async function noodleRoutes(app: FastifyInstance) {
       }
     }
     const releaseOperation = claimNoodleOperation("identity");
-    if (!releaseOperation) return reply.code(409).send({ error: "A Noodle timeline refresh is already running." });
+    if (!releaseOperation) return reply.code(409).send({ error: NOODLE_IDENTITY_LOCK_BUSY });
     try {
       const settings = await noodle.getSettings();
       const connectionId = decoded.data.connectionId ?? settings.generationConnectionId;
