@@ -62,7 +62,7 @@ function UnseenBadge({ count }: { count: number }) {
   if (count <= 0) return null;
   return (
     <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--noodle-accent)] px-1.5 text-[0.65rem] font-bold tabular-nums text-zinc-950">
-      {count > 99 ? "99+" : count}
+      <span aria-hidden="true">{count > 99 ? "99+" : count}</span>
       <span className="sr-only">{localizeUi("ui.noodle.noodlemodetoggle.newSinceLastVisitCount", { count })}</span>
     </span>
   );

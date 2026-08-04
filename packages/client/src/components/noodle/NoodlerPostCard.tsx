@@ -104,6 +104,9 @@ export function LockedNoodlerPostCard({
   // A locked post's URL resolves to a server-blurred teaser, not the original bytes. Where no
   // teaser can be built the server sends nothing and only the frame renders.
   const mediaSrc = (revealed && demo?.unlockedImageUrl) || post.imageUrl || null;
+  // No teaser could be built (the route 404s), so drop the broken <img> and keep the frame.
+  const [failedMediaSrc, setFailedMediaSrc] = useState<string | null>(null);
+  const shownMediaSrc = mediaSrc && mediaSrc !== failedMediaSrc ? mediaSrc : null;
   return (
     <article
       data-noodle-post-id={post.id}
@@ -150,9 +153,10 @@ export function LockedNoodlerPostCard({
               "relative mt-3 aspect-[4/3] w-full overflow-hidden rounded-lg bg-[var(--muted)] ring-1 ring-inset ring-white/10",
             )}
           >
-            {mediaSrc ? (
+            {shownMediaSrc ? (
               <img
-                src={mediaSrc}
+                src={shownMediaSrc}
+                onError={() => setFailedMediaSrc(shownMediaSrc)}
                 alt={
                   revealed
                     ? localizeUi("ui.noodle.post.imageBy", { name: profile.displayName })

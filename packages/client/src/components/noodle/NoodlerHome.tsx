@@ -2896,7 +2896,8 @@ function ViewerHub({
   // The visit counts once the feed itself is on screen and loaded — not on app entry, and not
   // while discovery search has replaced it. Declared above the early returns so hook order
   // stays stable across the empty and error states below.
-  const feedIsOnScreen = Boolean(scope) && !isLoading && !isError && !discoveryOpen;
+  // A search-filtered list is not the feed either, so it does not count as having seen it.
+  const feedIsOnScreen = Boolean(scope) && !isLoading && !isError && !discoveryOpen && !search.trim();
   useEffect(() => {
     if (feedIsOnScreen) onFeedShown();
   }, [feedIsOnScreen, onFeedShown]);
@@ -2956,16 +2957,18 @@ function ViewerHub({
         creator.profile.handle.toLowerCase().includes(searchTerm) ||
         creator.profile.displayName.toLowerCase().includes(searchTerm)),
   );
-  // The feed is newest-first, so everything new sits in one run at the top and the divider is
-  // the boundary after it. Shown only when there is something on both sides: with no older
-  // posts it would sit at the bottom labelling nothing, and with no new ones it says nothing.
+  // The feed is newest-first, so the divider goes after the *last* new post — the viewer's own
+  // posts sitting in that run are not news themselves but must not cut it short. Shown only
+  // when there is something on both sides: with no older posts it would sit at the bottom
+  // labelling nothing, and with no new ones it says nothing. A search-filtered list is not the
+  // feed, so no boundary marker there either.
   const newSince = newSinceAt ? new Date(newSinceAt).getTime() : NaN;
   const isNewToViewer = ({ post, creator }: (typeof feed)[number]) =>
     !Number.isNaN(newSince) &&
     creator.profile.noodleAccountId !== scope?.viewer.id &&
     new Date(post.createdAt).getTime() > newSince;
-  const newRunLength = feed.findIndex((item) => !isNewToViewer(item));
-  const dividerIndex = newRunLength > 0 ? newRunLength : -1;
+  const lastNewIndex = searchTerm ? -1 : feed.findLastIndex(isNewToViewer);
+  const dividerIndex = lastNewIndex >= 0 && lastNewIndex < feed.length - 1 ? lastNewIndex + 1 : -1;
   const renderFeedPost = ({ post, creator }: (typeof searchResults)[number]) =>
     post.locked ? (
       <LockedNoodlerPostCard

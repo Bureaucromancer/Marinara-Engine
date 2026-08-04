@@ -1848,7 +1848,9 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
   const noodleUnseenCount = useNoodleUnseenCount(personaAccount);
   // Mark the visit once the timeline itself is on screen — opening Noodle on a profile or the
   // notifications view is not the same as having seen the feed.
-  const timelineIsOnScreen = activeNoodleView === "home" && !isAccountSearch && Boolean(personaAccount);
+  // A filtered list is not the feed either, so a search does not count as having seen it.
+  const timelineIsOnScreen =
+    activeNoodleView === "home" && !isAccountSearch && !normalizedPostSearch && Boolean(personaAccount);
   useEffect(() => {
     if (!timelineIsOnScreen || !personaAccount) return;
     if (timelineShownForAccountRef.current === personaAccount.id) return;
@@ -1867,19 +1869,23 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
       },
     );
   }, [patchAccountSettings, personaAccount, timelineIsOnScreen]);
-  // Newest-first, so everything unseen is one run at the top and the divider is the boundary
-  // after it. Shown only with posts on both sides: otherwise it labels nothing.
+  // Newest-first, so the divider goes after the *last* unseen post. Own posts interleaved in
+  // that run must not end it early — they are not news, but everything below them still is.
+  // Shown only with posts on both sides: otherwise it labels nothing.
   const noodleSeenAt = personaAccount ? frozenNoodleFeedSeenAt[personaAccount.id] : null;
   const noodleSeenTime = noodleSeenAt ? new Date(noodleSeenAt).getTime() : NaN;
-  const timelineNewRunLength = timelinePosts.findIndex(
+  const lastUnseenTimelineIndex = timelinePosts.findLastIndex(
     (post) =>
-      Number.isNaN(noodleSeenTime) ||
-      post.authorAccountId === personaAccount?.id ||
-      timelineActivityAt(post) <= noodleSeenTime,
+      !Number.isNaN(noodleSeenTime) &&
+      post.authorAccountId !== personaAccount?.id &&
+      timelineActivityAt(post) > noodleSeenTime,
   );
   // Search results are not the feed: a "where you stopped" marker means nothing in a filtered
   // list, so the divider is suppressed while a post search is active.
-  const timelineDividerIndex = !normalizedPostSearch && timelineNewRunLength > 0 ? timelineNewRunLength : -1;
+  const timelineDividerIndex =
+    !normalizedPostSearch && lastUnseenTimelineIndex >= 0 && lastUnseenTimelineIndex < timelinePosts.length - 1
+      ? lastUnseenTimelineIndex + 1
+      : -1;
   const followableCharacterAccounts = useMemo(
     () =>
       accounts

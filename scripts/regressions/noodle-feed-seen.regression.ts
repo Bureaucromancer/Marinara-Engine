@@ -63,6 +63,14 @@ try {
         posts: [post("new-1", "2026-08-04T12:00:00.000Z"), post("old-1", "2026-08-04T09:00:00.000Z")],
       },
       {
+        // Unfollowed, and still counted: NoodleR's counter is about the whole visible feed,
+        // not the Following tab, which is a view preference rather than what is new.
+        profile: { id: "creator-2", noodleAccountId: null },
+        subscribed: false,
+        followed: false,
+        posts: [post("new-2", "2026-08-04T12:00:00.000Z")],
+      },
+      {
         // The viewer's own stage profile: their own posts are never "new" to them.
         profile: { id: "creator-own", noodleAccountId: viewerA.id },
         subscribed: false,
@@ -72,7 +80,7 @@ try {
     ],
   } as unknown as NoodlerViewerScope;
 
-  assert.equal(countNoodlerPostsSince(scope, seenAt), 1, "only other creators' newer posts count");
+  assert.equal(countNoodlerPostsSince(scope, seenAt), 2, "every other creator's newer posts count, followed or not");
   assert.equal(
     countNoodlerPostsSince(scope, undefined),
     0,

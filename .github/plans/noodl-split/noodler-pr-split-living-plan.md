@@ -90,7 +90,7 @@ The product experience therefore needs both agency and life:
 | 6 | Slice 8g — creators reply to the viewer | Merged through #4515 (2026-08-03); `noodle-noodler-creator-reply.operation.ts` + `noodle-noodler-reply-generation.service.ts`, covered by `noodle-creator-reply.regression.ts` | 8f-2 access model only |
 | 7 | Slice 8f-3 — front-loaded scheduled-post reserve | Merged through #4515 (2026-08-03); `noodle-noodler-reserve.operation.ts`, `noodle-autopost-cadence.ts` deleted | 8f-2 |
 | 8 | Slice 8f-4 — setup wizard with an emulated Professor Mari teaching post | Merged through #4515 (2026-08-03); `noodler-onboarding.ts` + wizard screens | 8f-2, 8f-3, 8c bulk creation |
-| 9 | Slice 8f-5 — watching surface: new-since-last-visit divider and entry-point counter | Implemented on `fix/noodler-locked-blurred-teaser`, unmerged; `noodlerFeedSeenAt` per viewer persona + `countNoodlerPostsSince()`, covered by `noodle-feed-seen.regression.ts` | 8f-2 |
+| 9 | Slice 8f-5 — watching surface: new-since-last-visit divider and entry-point counter, on NoodleR **and** public Noodle | Implemented on `fix/noodler-locked-blurred-teaser`, unmerged; `noodlerFeedSeenAt` + `noodleFeedSeenAt` per viewer persona, `countNoodlerPostsSince()` + `countNoodlePostsSince()` (which counts reply-bumped activity time, not creation time), covered by `noodle-feed-seen.regression.ts` | 8f-2 |
 | 9+ | Slice 8f-6 — creator-page operator area, including source-changed and source-missing notices | Planning; independent of the access and scheduling work, so it may land any time after 8f-1 | 8f-1 |
 | 10 | Slice 9a — quiet synthetic fan engagement | Later, and **optional** rather than the road ahead — see the note below | 6, 6b, 8, 8f-2, 8g |
 | 11 | Slice 9c — persona-first named superfans and non-economic visible moments | Roleplay-first, compute-bounded follow-up | 9a |
@@ -702,11 +702,26 @@ ahead of 8f-3/4/5/6 rather than behind all of 8f.
 `big-chungus-1` for review" below for why, recorded rather than reversed.
 
 **8f-5** (new-since-last-visit divider and entry-point counter) is implemented and unmerged
-on `fix/noodler-locked-blurred-teaser`: `noodlerFeedSeenAt` on
-`NoodleAccountSocialSettings` (per viewer persona, advanced only once the feed is actually
-shown), `countNoodlerPostsSince()` in `packages/shared/src/utils/noodle-unseen.ts`, a
-divider at the boundary in the ViewerHub feed, and a badge on the NoodleR mode toggle so the
-count is visible from the Noodle side. Covered by `noodle-feed-seen.regression.ts`.
+on `fix/noodler-locked-blurred-teaser`, and covers **both** surfaces:
+
+- **NoodleR.** `noodlerFeedSeenAt` on `NoodleAccountSocialSettings` (per viewer persona,
+  advanced only once the feed is actually shown — not on app entry, during discovery search,
+  or while a search filters the list), counted by `countNoodlerPostsSince()` in
+  `packages/shared/src/utils/noodle-unseen.ts`, with a divider at the boundary in the
+  ViewerHub feed and a badge on the NoodleR mode toggle so the count is visible from the
+  Noodle side.
+- **Public Noodle.** A separate `noodleFeedSeenAt` on the same settings subtree — one shared
+  value would let opening either surface silently clear the other's counter — counted by
+  `countNoodlePostsSince()`, with the same divider and badge on the Noodle timeline. Public
+  Noodle sorts by **latest activity, not creation time**, so the count measures the same
+  value the sort does: a post bumped by someone replying to this persona's own comment
+  (`noodleReplyBumpByPostId()` / `noodleActivityAt()`) is unseen again and the divider
+  follows it. Replies between other people do not bump anything.
+
+Both counters exclude the viewer's own posts, count across the whole timeline rather than
+the selected Following/All tab, and stay silent on a first visit rather than announcing the
+backlog. All of the above is covered by `noodle-feed-seen.regression.ts`, including the
+persona scoping, the two independent timestamps, and the reply-bump counting.
 
 **Remaining: 8f-6** (creator-page operator area, including source-changed / source-missing
 notices). No code exists for it — no source-snapshot compare exists anywhere in the tree.
