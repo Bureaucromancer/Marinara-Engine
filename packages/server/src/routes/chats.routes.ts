@@ -62,7 +62,10 @@ import { createSpatialContextStorage } from "../services/storage/spatial-context
 import { createRegexScriptsStorage } from "../services/storage/regex-scripts.storage.js";
 import { processLorebooks } from "../services/lorebook/index.js";
 import { injectAtDepth } from "../services/lorebook/prompt-injector.js";
-import { resolveChatSummaryConnection } from "../services/chat-summary/connection-resolution.js";
+import {
+  resolveChatSummaryConnection,
+  resolveChatSummaryTemperatureOptions,
+} from "../services/chat-summary/connection-resolution.js";
 import { generateMissingConversationSummaries } from "../services/conversation/auto-summary.service.js";
 import { clearChatActivity, recordUserReaction } from "../services/conversation/autonomous.service.js";
 import { rebuildMemoryChunks } from "../services/memory-recall.js";
@@ -3912,6 +3915,7 @@ export async function chatsRoutes(app: FastifyInstance) {
       );
     }
     const { provider, model } = resolvedSummaryConnection;
+    const summaryTemperatureOptions = resolveChatSummaryTemperatureOptions(resolvedSummaryConnection);
 
     if (requestedSummaryEntryIds.length >= 2) {
       const currentEntries = normalizeChatSummaryEntries(chatMeta.summaryEntries, {
@@ -3963,7 +3967,7 @@ export async function chatsRoutes(app: FastifyInstance) {
         ],
         {
           model,
-          temperature: 0.5,
+          ...summaryTemperatureOptions,
           maxTokens: effectiveSummaryMaxTokens,
         },
       );
@@ -4102,7 +4106,7 @@ export async function chatsRoutes(app: FastifyInstance) {
 
     const result = await provider.chatComplete(messages, {
       model,
-      temperature: 0.5,
+      ...summaryTemperatureOptions,
       maxTokens: summaryMaxTokens,
     });
 
