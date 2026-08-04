@@ -107,7 +107,7 @@ const capabilityPackageManifestBaseSchema = z
   })
   .strict();
 
-export const supportedCapabilityApi = Object.freeze({ major: 1, minor: 7 } as const);
+export const supportedCapabilityApi = Object.freeze({ major: 1, minor: 8 } as const);
 
 const capabilityApiVersionSchema = z
   .object({
@@ -143,7 +143,7 @@ export const capabilityPackageManifestSchema = z
     // A game-surface package draws the whole mode from its client bundle: without a client entrypoint the
     // module loader skips it, so it would be offered in the setup wizard and then render nothing. Caught
     // here so it fails at install with a clear reason rather than as an empty screen later.
-    if (manifest.contributions?.slots?.includes("game-surface") && !manifest.entrypoints.client) {
+    if (manifest.contributions?.slots?.includes("game-surface") && !manifest.entrypoints.client?.trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["entrypoints", "client"],

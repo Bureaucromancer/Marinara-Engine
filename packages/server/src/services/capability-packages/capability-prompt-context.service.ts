@@ -99,15 +99,21 @@ export async function collectCapabilityPromptContext(
   if (contributorsByPackage.size === 0) return { blocks: [], provides: {} };
   const blocks: string[] = [];
   const provides: CapabilityProvidedGameSystems = {};
+  const activeExperienceId =
+    typeof request.chatMeta.gameExperienceId === "string" ? request.chatMeta.gameExperienceId : null;
   for (const [packageId, contribute] of contributorsByPackage) {
     try {
       const contribution = await withDeadline(contribute(request), packageId);
       if (contribution === null || contribution === undefined) continue;
       const text = typeof contribution === "string" ? contribution : contribution.text;
       if (typeof text === "string" && text.trim().length > 0) blocks.push(text.trim());
-      // Declarations only ever turn a built-in system OFF, so the union is a plain OR: one package
-      // replacing inventory is enough, and no package can force another's system back on.
-      if (typeof contribution === "object" && contribution.provides?.inventory === true) {
+      // Only the experience recorded on this game may replace its built-in systems. Other packages may
+      // still contribute prompt context, but cannot hide Classic inventory from unrelated games.
+      if (
+        packageId === activeExperienceId &&
+        typeof contribution === "object" &&
+        contribution.provides?.inventory === true
+      ) {
         provides.inventory = true;
       }
     } catch (error) {

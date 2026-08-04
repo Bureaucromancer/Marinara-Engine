@@ -93,11 +93,18 @@ export function NewGameExperienceChooser({
       const cfg: Record<string, unknown> =
         typeof setupConfig === "object" && setupConfig !== null ? (setupConfig as Record<string, unknown>) : {};
       const promptPresetId = typeof cfg.promptPresetId === "string" ? cfg.promptPresetId : undefined;
+      if (!selectedId) throw new Error("Choose an installed experience before launching the game");
       try {
         // Stamps which experience owns this game; /game/create copies it to the chat metadata.
         const res = await createGame.mutateAsync({
           name: gameName,
-          setupConfig: { ...cfg, gameExperienceId: selectedId } as unknown,
+          setupConfig: {
+            ...cfg,
+            gameExperienceId: selectedId,
+            // The host validates the fields it needs above and preserves the package-owned payload here.
+            // Keeping the opaque config nested prevents Zod from stripping unknown experience fields.
+            experienceConfig: cfg,
+          } as unknown,
           preferences: "",
           chatId: activeChatId,
           connectionId,
@@ -172,7 +179,7 @@ export function NewGameExperienceChooser({
                   aria-checked={isActive}
                   disabled={launching}
                   onClick={() => setActiveId(isActive ? null : exp.id)}
-                  className="flex w-full items-center justify-between gap-3 text-left disabled:cursor-wait disabled:opacity-50"
+                  className="flex min-h-11 w-full items-center justify-between gap-3 rounded-md px-1 py-1 text-left transition-colors hover:bg-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]/40 disabled:cursor-wait disabled:opacity-50 disabled:hover:bg-transparent"
                 >
                   <div className="min-w-0">
                     <span className="block text-xs font-medium text-[var(--foreground)]">{exp.manifest.name}</span>
@@ -260,7 +267,9 @@ export function NewGameExperienceChooser({
               capabilityProps={{
                 chatId: activeChatId,
                 onLaunch,
-                onCancel: () => setActiveId(null),
+                onCancel: () => {
+                  if (!launching) setActiveId(null);
+                },
               }}
             />
           </div>

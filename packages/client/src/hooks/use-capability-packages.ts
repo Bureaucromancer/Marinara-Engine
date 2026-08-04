@@ -50,9 +50,9 @@ export function useCapabilityAgentRegistry() {
 }
 
 /**
- * Installed packages that can provide a game's EXPERIENCE: active, declaring the `game-surface` slot, and
- * carrying the client entrypoint that renders it. Shared so the setup chooser can only ever offer what
- * `GameSurface` would actually mount.
+ * Installed packages that can provide a game's EXPERIENCE: runtime-ready, declaring the `game-surface`
+ * slot, and carrying the client entrypoint that renders it. Shared so the setup chooser can only ever
+ * offer what `GameSurface` would actually mount.
  *
  * The manifest schema rejects a game-surface package with no client entrypoint, so this is a second line
  * for anything installed before that rule existed — the module loader skips such a package, and offering
@@ -63,9 +63,9 @@ export function selectGameExperiencePackages(
 ): InstalledCapabilityPackage[] {
   return (installed ?? []).filter(
     (pkg) =>
-      pkg.status === "active" &&
+      isInstalledCapabilityReady(pkg) &&
       pkg.manifest.contributions?.slots?.includes("game-surface") &&
-      Boolean(pkg.manifest.entrypoints.client),
+      Boolean(pkg.manifest.entrypoints.client?.trim()),
   );
 }
 
