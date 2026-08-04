@@ -75,6 +75,7 @@ import {
 } from "../services/spatial-context/projection.js";
 import { isHierarchicalMapsEnabledForChat } from "../services/spatial-context/activation.js";
 import {
+  createAssistantSpatialDirectiveStreamFilter,
   extractAssistantSpatialDirective,
   materializeAssistantSpatialState,
 } from "../services/spatial-context/state-resolution.js";
@@ -4824,7 +4825,11 @@ export async function generateRoutes(app: FastifyInstance) {
         const TOKEN_CHUNK_SIZE = 6;
         const TOKEN_CHUNK_YIELD_EVERY = 64;
         let tokenChunksSinceYield = 0;
-        const sendTokenTextChunked = async (text: string) => {
+        const spatialDirectiveStreamFilter =
+          hierarchicalMapsEnabledForChat && (requestChatMode === "roleplay" || requestChatMode === "game")
+            ? createAssistantSpatialDirectiveStreamFilter()
+            : null;
+        const emitTokenTextChunked = async (text: string) => {
           for (let i = 0; i < text.length; i += TOKEN_CHUNK_SIZE) {
             const chunk = text.slice(i, i + TOKEN_CHUNK_SIZE);
             trySendSseEvent(reply, { type: "token", data: chunk });
@@ -4834,18 +4839,13 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           }
         };
+        const sendTokenTextChunked = async (text: string) => {
+          const visibleText = spatialDirectiveStreamFilter?.push(text) ?? text;
+          if (visibleText) await emitTokenTextChunked(visibleText);
+        };
         const writeContentChunked = async (text: string) => {
-          for (let i = 0; i < text.length; i += TOKEN_CHUNK_SIZE) {
-            const chunk = text.slice(i, i + TOKEN_CHUNK_SIZE);
-            fullResponse += chunk;
-            tokenChunksSinceYield += 1;
-            if (!holdForTextRewrite) {
-              trySendSseEvent(reply, { type: "token", data: chunk });
-            }
-            if (tokenChunksSinceYield % TOKEN_CHUNK_YIELD_EVERY === 0) {
-              await yieldToEventLoop();
-            }
-          }
+          fullResponse += text;
+          if (!holdForTextRewrite) await sendTokenTextChunked(text);
         };
 
         const resolveMessageSpeakerName = (message: any): string => {
@@ -5914,6 +5914,11 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           }
 
+          if (!holdForTextRewrite) {
+            const pendingSpatialText = spatialDirectiveStreamFilter?.flush() ?? "";
+            if (pendingSpatialText) await emitTokenTextChunked(pendingSpatialText);
+          }
+
           const durationMs = Date.now() - genStartTime;
 
           if (input.debugMode && chatMode === "game") {
@@ -5927,6 +5932,8 @@ export async function generateRoutes(app: FastifyInstance) {
             debugLog("[generate/game/raw] chatId=%s characterId=%s END", input.chatId, targetCharId ?? "gm");
           }
 
+          let contentReplaced = false;
+
           // Some models inline reasoning blocks instead of using provider-native
           // thinking channels. Lift those blocks into message.extra.thinking.
           const inlineThinking = extractLeadingThinkingBlocks(fullResponse, customThinkingTags);
@@ -5935,9 +5942,7 @@ export async function generateRoutes(app: FastifyInstance) {
               fullThinking = fullThinking ? fullThinking + "\n\n" + inlineThinking.thinking : inlineThinking.thinking;
             }
             fullResponse = inlineThinking.content;
-            if (!holdForTextRewrite) {
-              reply.raw.write(`data: ${JSON.stringify({ type: "content_replace", data: fullResponse })}\n\n`);
-            }
+            contentReplaced = true;
           }
 
           // ── LOG_LEVEL=debug or Settings -> Advanced -> Debug mode: log full response + usage to server console ──
@@ -5986,7 +5991,6 @@ export async function generateRoutes(app: FastifyInstance) {
           let parsedRawCommandCount = 0;
           let assistantSpatialDirective: ReturnType<typeof extractAssistantSpatialDirective>["directive"] = null;
           let conversationCommandContent: string | null = null;
-          let contentReplaced = false;
           if (tailMessages.assistantPrefillInjected && assistantPrefill && fullResponse.startsWith(assistantPrefill)) {
             const responseAfterPrefill = fullResponse.slice(assistantPrefill.length);
             if (responseAfterPrefill.startsWith(assistantPrefill)) {
@@ -6272,14 +6276,10 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           }
 
-          if (
-            !input.impersonate &&
-            hierarchicalMapsEnabledForChat &&
-            (requestChatMode === "roleplay" || requestChatMode === "game")
-          ) {
+          if (hierarchicalMapsEnabledForChat && (requestChatMode === "roleplay" || requestChatMode === "game")) {
             const parsedSpatial = extractAssistantSpatialDirective(fullResponse);
-            assistantSpatialDirective = parsedSpatial.directive;
-            if (parsedSpatial.cleanContent !== fullResponse) {
+            assistantSpatialDirective = input.impersonate ? null : parsedSpatial.directive;
+            if (parsedSpatial.matched) {
               fullResponse = parsedSpatial.cleanContent;
               contentReplaced = true;
             }
@@ -6287,6 +6287,12 @@ export async function generateRoutes(app: FastifyInstance) {
               logger.debug(
                 "[generate/spatial] Parsed assistant %s directive for chat %s",
                 assistantSpatialDirective.type,
+                input.chatId,
+              );
+            } else if (input.impersonate && parsedSpatial.directive) {
+              logger.debug(
+                "[generate/spatial] Stripped impersonated %s directive for chat %s",
+                parsedSpatial.directive.type,
                 input.chatId,
               );
             }
@@ -8991,6 +8997,20 @@ export async function generateRoutes(app: FastifyInstance) {
                 ) {
                   const edData = editorResult.data as Record<string, unknown>;
                   const editedText = typeof edData.editedText === "string" ? edData.editedText : "";
+                  let sanitizedEditedText = editedText;
+                  if (
+                    hierarchicalMapsEnabledForChat &&
+                    (requestChatMode === "roleplay" || requestChatMode === "game")
+                  ) {
+                    const parsedRewriteSpatial = extractAssistantSpatialDirective(editedText);
+                    if (parsedRewriteSpatial.matched) {
+                      sanitizedEditedText = parsedRewriteSpatial.cleanContent;
+                      logger.warn(
+                        "[text-rewrite] Stripped package-owned spatial directive from rewritten message %s",
+                        messageId,
+                      );
+                    }
+                  }
                   const changes = Array.isArray(edData.changes)
                     ? (edData.changes as Array<{ description: string }>)
                     : [{ description: "Rewrote the assistant response." }];
@@ -9003,7 +9023,7 @@ export async function generateRoutes(app: FastifyInstance) {
                         ? explicitlyRequestsTextRewrite(editNeededValue)
                         : true;
                   const droppedProtectedMarkup =
-                    strictEditNeeded && textRewriteDropsProtectedMarkup(currentResponseForRewrite, editedText);
+                    strictEditNeeded && textRewriteDropsProtectedMarkup(currentResponseForRewrite, sanitizedEditedText);
                   if (droppedProtectedMarkup) {
                     logger.warn(
                       "[text-rewrite] Skipping %s rewrite because it dropped protected markup from message %s",
@@ -9022,11 +9042,11 @@ export async function generateRoutes(app: FastifyInstance) {
                     !input.impersonate &&
                     !input.regenerateMessageId &&
                     !input.continueMessageId &&
-                    editedText.trim().length > 0 &&
+                    sanitizedEditedText.trim().length > 0 &&
                     isRepeatedConversationResponse(
                       await chats.listMessages(input.chatId),
                       rewriteCharacterId,
-                      editedText,
+                      sanitizedEditedText,
                       { excludeMessageId: messageId },
                     );
                   if (repeatsPriorConversationResponse) {
@@ -9039,16 +9059,16 @@ export async function generateRoutes(app: FastifyInstance) {
                     rewriteAllowed &&
                     !droppedProtectedMarkup &&
                     !repeatsPriorConversationResponse &&
-                    editedText.trim().length > 0 &&
-                    editedText !== currentResponseForRewrite;
+                    sanitizedEditedText.trim().length > 0 &&
+                    sanitizedEditedText !== currentResponseForRewrite;
                   if (changedMessage) {
                     const originalText = strictEditNeeded ? originalResponseBeforeRewrite : null;
-                    currentResponseForRewrite = editedText;
-                    await chats.updateMessageContent(messageId, editedText);
+                    currentResponseForRewrite = sanitizedEditedText;
+                    await chats.updateMessageContent(messageId, sanitizedEditedText);
                     if (originalText) {
                       await chats.updateMessageExtra(messageId, {
                         proseGuardianOriginalText: originalText,
-                        proseGuardianRewrittenText: editedText,
+                        proseGuardianRewrittenText: sanitizedEditedText,
                         proseGuardianRewrittenAt: new Date().toISOString(),
                       });
                     }
@@ -9057,7 +9077,7 @@ export async function generateRoutes(app: FastifyInstance) {
                       `data: ${JSON.stringify({
                         type: "text_rewrite",
                         data: {
-                          editedText,
+                          editedText: sanitizedEditedText,
                           changes,
                           rewriteApplied: true,
                           ...(originalText ? { originalText, agentType: editorResult.agentType } : {}),
