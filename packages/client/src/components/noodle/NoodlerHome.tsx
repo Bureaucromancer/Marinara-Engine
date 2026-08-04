@@ -61,6 +61,7 @@ import {
   useNoodlerEligibleAccounts,
   useNoodlerPosts,
   useNoodlerSubscribers,
+  useNoodleUnseenCount,
   useNoodlerViewer,
   usePatchNoodleAccountSettings,
   useRemoveNoodlerInteraction,
@@ -403,6 +404,7 @@ export function NoodlerHome({ navigation, onNavigate }: NoodlerHomeProps) {
   const [onboardingMode, setOnboardingMode] = useState<"first-run" | null>(null);
   const viewerQuery = useNoodlerViewer(viewerPersonaId, enabled);
   const patchAccountSettings = usePatchNoodleAccountSettings();
+  const noodleUnseenCount = useNoodleUnseenCount(shellPersonaAccount, enabled);
   // The stored timestamp advances as soon as the feed is shown, which would erase the divider
   // out from under the reader. Freeze the value the divider uses per persona at that moment,
   // and keep advancing the stored one so the next visit measures from here.
@@ -952,6 +954,9 @@ export function NoodlerHome({ navigation, onNavigate }: NoodlerHomeProps) {
       viewerQuery.data,
       viewerQuery.data?.viewer.settings.social.noodlerFeedSeenAt,
     ),
+    // The Noodle count matters most from here: this is where the user is while the public
+    // timeline is the one filling up unwatched.
+    noodleUnseenCount,
     accent: NOODLE_PINK,
     enableNoodler: enabled,
     personaAccount: shellPersonaAccount,

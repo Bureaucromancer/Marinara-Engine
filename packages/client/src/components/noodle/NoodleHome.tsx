@@ -61,7 +61,8 @@ import {
   type NoodlePollInput,
   type NoodleRefreshSchedulerStatus,
   type NoodleSettingsUpdateInput,
-  countActivityAfter,
+  noodleActivityAt,
+  noodleReplyBumpByPostId,
 } from "@marinara-engine/shared";
 import { ApiError } from "../../lib/api-client";
 import { showConfirmDialog } from "../../lib/app-dialogs";
@@ -102,6 +103,7 @@ import {
   useInviteNoodleCharacters,
   useNoodle,
   useNoodlerAccounts,
+  useNoodleUnseenCount,
   useNoodlerUnseenCount,
   usePatchNoodleAccountSettings,
   useRefreshNoodle,
@@ -1593,31 +1595,15 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
       ),
     [accounts, folderInvitedCharacterIds, followedAccountIds],
   );
-  const latestExternalReplyToPersonaCommentAtByPostId = useMemo(() => {
-    const latest = new Map<string, number>();
-    if (!personaAccount) return latest;
-    for (const interaction of interactions) {
-      if (
-        interaction.type !== "reply" ||
-        interaction.actorAccountId === personaAccount.id ||
-        !interaction.parentInteractionId
-      ) {
-        continue;
-      }
-      const parentComment = interactionById.get(interaction.parentInteractionId);
-      if (parentComment?.type !== "reply" || parentComment.actorAccountId !== personaAccount.id) continue;
-      const createdAt = new Date(interaction.createdAt).getTime();
-      if (!Number.isFinite(createdAt)) continue;
-      latest.set(interaction.postId, Math.max(latest.get(interaction.postId) ?? 0, createdAt));
-    }
-    return latest;
-  }, [interactionById, interactions, personaAccount]);
+  const latestExternalReplyToPersonaCommentAtByPostId = useMemo(
+    () => noodleReplyBumpByPostId(interactions, personaAccount?.id ?? null),
+    [interactions, personaAccount],
+  );
   // The timeline orders by latest activity, not creation time, so the unseen count and the
   // divider have to measure the same thing the sort does — otherwise the divider lands
   // somewhere other than the boundary the reader actually sees.
   const timelineActivityAt = useCallback(
-    (post: NoodlePost) =>
-      Math.max(new Date(post.createdAt).getTime() || 0, latestExternalReplyToPersonaCommentAtByPostId.get(post.id) ?? 0),
+    (post: NoodlePost) => noodleActivityAt(post, latestExternalReplyToPersonaCommentAtByPostId),
     [latestExternalReplyToPersonaCommentAtByPostId],
   );
   const baseTimelinePosts = useMemo(() => {
@@ -1859,12 +1845,7 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
     notificationLikes.filter((item) => new Date(item.interaction.createdAt).getTime() > notificationReadTime).length +
     notificationFollowAccounts.filter((item) => (Date.parse(item.followedAt) || 0) > notificationReadTime).length +
     notificationReplyItems.filter((item) => new Date(item.createdAt).getTime() > notificationReadTime).length;
-  const noodleUnseenCount = countActivityAfter(
-    baseTimelinePosts
-      .filter((post) => post.authorAccountId !== personaAccount?.id)
-      .map((post) => timelineActivityAt(post)),
-    personaAccount?.settings.social.noodleFeedSeenAt,
-  );
+  const noodleUnseenCount = useNoodleUnseenCount(personaAccount);
   // Mark the visit once the timeline itself is on screen — opening Noodle on a profile or the
   // notifications view is not the same as having seen the feed.
   const timelineIsOnScreen = activeNoodleView === "home" && !isAccountSearch && Boolean(personaAccount);

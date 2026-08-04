@@ -6,8 +6,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { countActivityAfter, countNoodlerPostsSince } from "../../packages/shared/src/utils/noodle-unseen.js";
-import type { NoodlerViewerScope } from "../../packages/shared/src/types/noodle.js";
+import {
+  countActivityAfter,
+  countNoodlePostsSince,
+  countNoodlerPostsSince,
+} from "../../packages/shared/src/utils/noodle-unseen.js";
+import type { NoodleInteraction, NoodlePost, NoodlerViewerScope } from "../../packages/shared/src/types/noodle.js";
 import type { DB } from "../../packages/server/src/db/connection.js";
 import { createFileNativeDB } from "../../packages/server/src/db/file-backed-store.js";
 import { createNoodleStorage } from "../../packages/server/src/services/storage/noodle.storage.js";
@@ -103,6 +107,41 @@ try {
   assert.equal(countActivityAfter(activity, undefined), 0, "a first visit must not count the backlog");
   assert.equal(countActivityAfter(activity, "not-a-date"), 0);
   assert.equal(countActivityAfter([], "2026-08-04T11:00:00.000Z"), 0);
+
+  // ── Public Noodle counting, including the reply bump ──
+  const noodlePost = (id: string, authorAccountId: string, createdAt: string) =>
+    ({ id, authorAccountId, createdAt }) as NoodlePost;
+  const reply = (id: string, postId: string, actorAccountId: string, createdAt: string, parentInteractionId?: string) =>
+    ({ id, postId, actorAccountId, createdAt, type: "reply", parentInteractionId: parentInteractionId ?? null }) as
+      NoodleInteraction;
+
+  const me = viewerA.id;
+  const noodlePosts = [
+    noodlePost("stale", "someone-else", "2026-08-04T08:00:00.000Z"),
+    noodlePost("mine", me, "2026-08-04T13:00:00.000Z"),
+    noodlePost("fresh", "someone-else", "2026-08-04T12:00:00.000Z"),
+  ];
+  const since = "2026-08-04T11:00:00.000Z";
+  assert.equal(countNoodlePostsSince(noodlePosts, [], me, since), 1, "own posts are never new to their author");
+
+  // An old post bumped by someone replying to my comment is unseen again — the timeline sorts
+  // it back to the top, so the counter has to agree or the divider lands in the wrong place.
+  const bumped = [
+    reply("my-comment", "stale", me, "2026-08-04T08:30:00.000Z"),
+    reply("their-reply", "stale", "someone-else", "2026-08-04T12:30:00.000Z", "my-comment"),
+  ];
+  assert.equal(countNoodlePostsSince(noodlePosts, bumped, me, since), 2, "a reply to my comment bumps its post");
+
+  // A reply to somebody else's comment is not my business and must not bump anything.
+  const unrelated = [
+    reply("their-comment", "stale", "someone-else", "2026-08-04T08:30:00.000Z"),
+    reply("other-reply", "stale", "third-party", "2026-08-04T12:30:00.000Z", "their-comment"),
+  ];
+  assert.equal(countNoodlePostsSince(noodlePosts, unrelated, me, since), 1, "unrelated replies must not bump");
+  assert.equal(countNoodlePostsSince(noodlePosts, bumped, me, undefined), 0, "a first visit counts nothing");
+  // With no persona there is nothing to own and no comment to bump: every newer post counts,
+  // and the bumped one stays old because the bump was relative to a comment that is not mine.
+  assert.equal(countNoodlePostsSince(noodlePosts, bumped, null, since), 2, "no persona means nothing is 'mine'");
 
   console.log("noodle-feed-seen: OK");
 } finally {

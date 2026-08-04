@@ -42,7 +42,7 @@ import type {
   NoodlerReserveStatus,
   NoodlerRemoveInteractionInput,
 } from "@marinara-engine/shared";
-import { countNoodlerPostsSince, mergeNoodlePollVoteInteractions } from "@marinara-engine/shared";
+import { countNoodlePostsSince, countNoodlerPostsSince, mergeNoodlePollVoteInteractions } from "@marinara-engine/shared";
 import type { ImagePromptOverride, ImagePromptReviewItem } from "../components/ui/ImagePromptReviewModal";
 
 export type NoodleRefreshResult = {
@@ -342,6 +342,21 @@ export function useNoodlerViewer(personaId: string | null, enabled = true) {
     refetchInterval: enabled && personaId ? 30_000 : false,
     refetchIntervalInBackground: false,
   });
+}
+
+/**
+ * Unseen-post count for the public Noodle entry point. Reads the bootstrap query both Noodle
+ * surfaces already hold, so the badge is the same number whether it is rendered from Noodle or
+ * from NoodleR.
+ */
+export function useNoodleUnseenCount(personaAccount: NoodleAccount | null, enabled = true) {
+  const { data } = useNoodle(enabled);
+  return countNoodlePostsSince(
+    data?.posts ?? [],
+    data?.interactions ?? [],
+    personaAccount?.id ?? null,
+    personaAccount?.settings.social.noodleFeedSeenAt,
+  );
 }
 
 /** Unseen-post count for the NoodleR entry point; reuses the viewer-scope query already cached. */

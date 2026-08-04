@@ -1,4 +1,4 @@
-import type { NoodlerViewerScope } from "../types/noodle.js";
+import type { NoodleInteraction, NoodlePost, NoodlerViewerScope } from "../types/noodle.js";
 
 /**
  * How many of these activity timestamps land after `seenAt`.
@@ -16,6 +16,53 @@ export function countActivityAfter(activityAtMs: number[], seenAt: string | unde
   const seen = new Date(seenAt).getTime();
   if (Number.isNaN(seen)) return 0;
   return activityAtMs.filter((at) => at > seen).length;
+}
+
+/**
+ * When each post last received a reply from someone else to one of this persona's own
+ * comments. Public Noodle's timeline bumps a post to the top for this, so it is part of the
+ * activity timestamp the feed is ordered by — not just the post's creation time.
+ */
+export function noodleReplyBumpByPostId(
+  interactions: NoodleInteraction[],
+  personaAccountId: string | null,
+): Map<string, number> {
+  const latest = new Map<string, number>();
+  if (!personaAccountId) return latest;
+  const byId = new Map(interactions.map((interaction) => [interaction.id, interaction]));
+  for (const interaction of interactions) {
+    if (interaction.type !== "reply" || interaction.actorAccountId === personaAccountId) continue;
+    if (!interaction.parentInteractionId) continue;
+    const parentComment = byId.get(interaction.parentInteractionId);
+    if (parentComment?.type !== "reply" || parentComment.actorAccountId !== personaAccountId) continue;
+    const createdAt = new Date(interaction.createdAt).getTime();
+    if (!Number.isFinite(createdAt)) continue;
+    latest.set(interaction.postId, Math.max(latest.get(interaction.postId) ?? 0, createdAt));
+  }
+  return latest;
+}
+
+/** The value public Noodle's timeline is sorted by: creation, or a later reply bump. */
+export function noodleActivityAt(post: NoodlePost, replyBumpByPostId: Map<string, number>): number {
+  return Math.max(new Date(post.createdAt).getTime() || 0, replyBumpByPostId.get(post.id) ?? 0);
+}
+
+/**
+ * Posts on the public Noodle timeline this persona has not been shown yet. Counted across the
+ * whole timeline rather than the selected Following/All tab: the tab is a view preference, and
+ * a counter that changed when you switched tabs would be reporting the filter, not the news.
+ */
+export function countNoodlePostsSince(
+  posts: NoodlePost[],
+  interactions: NoodleInteraction[],
+  personaAccountId: string | null,
+  seenAt: string | undefined,
+): number {
+  const bumps = noodleReplyBumpByPostId(interactions, personaAccountId);
+  return countActivityAfter(
+    posts.filter((post) => post.authorAccountId !== personaAccountId).map((post) => noodleActivityAt(post, bumps)),
+    seenAt,
+  );
 }
 
 /**
