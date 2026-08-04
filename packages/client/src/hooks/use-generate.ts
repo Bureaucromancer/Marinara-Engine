@@ -1190,12 +1190,13 @@ export function useGenerate() {
 
       // Create an AbortController so the stop button can cancel this generation.
       const abortController = new AbortController();
-      const submittedUserTurn = params.userMessage !== undefined;
+      const pendingAttachments = params.attachments ?? [];
+      const submittedUserTurn = hasVisibleUserMessagePayload(params.userMessage, pendingAttachments);
       const submissionId = submittedUserTurn && !params.impersonate ? createGenerationSubmissionId() : null;
       const confirmDurableSubmittedUserTurn = async () => {
         if (!submittedUserTurn || !submissionId || params.impersonate) return false;
         try {
-          const messages = await api.get<Message[]>(`/chats/${params.chatId}/messages`);
+          const messages = await api.get<Message[]>(`/chats/${params.chatId}/messages?limit=20`);
           upsertPersistedMessages(qc, params.chatId, messages);
           qc.invalidateQueries({ queryKey: chatKeys.messageCount(params.chatId) });
           qc.invalidateQueries({ queryKey: lorebookKeys.active(params.chatId) });
@@ -1247,7 +1248,6 @@ export function useGenerate() {
         { queryKey: chatKeys.messages(params.chatId), exact: true },
         { silent: true, revert: false },
       );
-      const pendingAttachments = params.attachments ?? [];
 
       // Optimistically show the user message in the chat immediately
       if (hasVisibleUserMessagePayload(params.userMessage, pendingAttachments) && !params.impersonate) {

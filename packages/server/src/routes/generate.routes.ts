@@ -173,6 +173,7 @@ import {
 import {
   suppressesReferencePromptLine,
   mergeIllustratorNegativePrompt,
+  illustratorPromptTemplateOwnsComposition,
   resolveIllustratorCharacterReferences,
 } from "./generate/illustrator-references.js";
 import {
@@ -8870,7 +8871,9 @@ export async function generateRoutes(app: FastifyInstance) {
                         imageDefaults,
                         generatedStyle: style,
                         omitProfileStyleText: typeof agentContext.memory._illustratorImageStyleInstruction === "string",
-                        omitProfileSubjectTags: true,
+                        omitProfileSubjectTags: illustratorPromptTemplateOwnsComposition(
+                          imagePromptAgent?.promptTemplate ?? "",
+                        ),
                       });
                       fullPrompt = compiledPrompt.prompt;
                       const finalNegativePrompt = mergeIllustratorNegativePrompt(
