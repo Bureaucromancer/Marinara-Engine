@@ -1,5 +1,5 @@
 import type { GameTurnStoryboard, GameTurnStoryboardKeyframe } from "@marinara-engine/shared";
-import { ChevronLeft, ChevronRight, Loader2, PanelsTopLeft } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, PanelsTopLeft, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation as useUiTranslation } from "react-i18next";
 import { cn } from "../../lib/utils";
@@ -71,6 +71,21 @@ export function RoleplayStoryboardMessageMedia({
           </span>
         ) : null}
       </div>
+
+      {storyboard?.error ? (
+        <div
+          className="flex items-start gap-2 border-b border-amber-200/20 bg-amber-300/12 px-3 py-2 text-amber-50"
+          role="status"
+        >
+          <TriangleAlert size={14} className="mt-0.5 shrink-0 text-amber-200" />
+          <div className="min-w-0">
+            <p className="text-[0.6875rem] font-semibold">
+              {localizeUi("ui.game.gamesurfacecomponent.storyboardDegradedResult")}
+            </p>
+            <p className="line-clamp-3 text-[0.625rem] leading-4 text-amber-50/75">{storyboard.error}</p>
+          </div>
+        </div>
+      ) : null}
 
       {activeFrame?.video ? (
         <video
