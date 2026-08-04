@@ -44,6 +44,7 @@ import {
 import { toast } from "sonner";
 import {
   noodleTextMentionsHandle as textMentionsHandle,
+  AMBIENT_NOODLE_ENTITY_IDS,
   noodlePollInputSchema,
   NOODLER_POSTS_PER_DAY_MAX,
   parseConnectionImageCaptioningDefaults,
@@ -102,6 +103,7 @@ import {
   useNoodlerAccounts,
   usePatchNoodleAccountSettings,
   useRefreshNoodle,
+  useRerollAmbientNoodleProfiles,
   useRemoveNoodleCharacter,
   useRemoveNoodleInteraction,
   useRescheduleNoodleRefresh,
@@ -349,7 +351,11 @@ function extractAccountSearchTerm(query: string) {
 }
 
 /** Uninvited characters and ambient users keep their profile row but stay out of search until re-invited. */
-function accountIsDiscoverable(account: NoodleAccount, folderInvitedCharacterIds: Set<string>, allowRandomUsers: boolean) {
+function accountIsDiscoverable(
+  account: NoodleAccount,
+  folderInvitedCharacterIds: Set<string>,
+  allowRandomUsers: boolean,
+) {
   if (account.kind === "character") return account.invited || folderInvitedCharacterIds.has(account.entityId);
   if (account.kind === "random_user") return allowRandomUsers;
   return true;
@@ -441,15 +447,27 @@ function noodleSchedulerSummary(scheduler: NoodleRefreshSchedulerStatus) {
   return nextTime ? `Next automatic refresh at ${nextTime}.` : "Automatic refresh is scheduled.";
 }
 
-function MobileTimelineBackButton({ onClick }: { onClick: () => void }) {
+function MobileTimelineBackButton({
+  onClick,
+  label,
+  showOnDesktop = false,
+}: {
+  onClick: () => void;
+  label?: string;
+  showOnDesktop?: boolean;
+}) {
   const { t: localizeUi } = useUiTranslation();
+  const accessibleLabel = label ?? localizeUi("ui.noodle.mobiletimelinebackbutton.backToNoodleTimeline");
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--noodle-accent)] transition-colors hover:bg-[var(--noodle-accent)]/10 @min-[1024px]:hidden"
-      title={localizeUi("ui.noodle.mobiletimelinebackbutton.backToTimeline")}
-      aria-label={localizeUi("ui.noodle.mobiletimelinebackbutton.backToNoodleTimeline")}
+      className={cn(
+        "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--noodle-accent)] transition-colors hover:bg-[var(--noodle-accent)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--noodle-accent)]",
+        !showOnDesktop && "@min-[1024px]:hidden",
+      )}
+      title={label ?? localizeUi("ui.noodle.mobiletimelinebackbutton.backToTimeline")}
+      aria-label={accessibleLabel}
     >
       <ChevronLeft size={22} />
     </button>
@@ -590,6 +608,7 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
   const { data: characterGroupsRaw } = useCharacterGroups();
   const { data: connectionsRaw } = useConnections();
   const updateSettings = useUpdateNoodleSettings();
+  const rerollAmbientProfiles = useRerollAmbientNoodleProfiles();
   const updateAccountFollow = useUpdateNoodleAccountFollow();
   const updateAccountProfile = useUpdateNoodleAccountProfile();
   const patchAccountSettings = usePatchNoodleAccountSettings();
@@ -750,6 +769,8 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
     navigation.mode === "public" && navigation.view === "profile" ? navigation.accountId : null;
   const profileConnectionTab =
     navigation.mode === "public" && navigation.view === "profile" ? navigation.connection : null;
+  const profileReturnToSettings =
+    navigation.mode === "public" && navigation.view === "profile" ? navigation.returnToSettings : undefined;
 
   const noodlePromptOverride = noodlePromptDetail.data?.override ?? null;
   const noodleDefaultPromptText = noodlePromptDefault.data?.template ?? "";
@@ -781,6 +802,11 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
           account.entityId !== PROFESSOR_MARI_ID,
       ),
     [data?.accounts, settings?.allowProfessorMari],
+  );
+  const ambientEntityIds = useMemo(() => new Set<string>(AMBIENT_NOODLE_ENTITY_IDS), []);
+  const ambientProfiles = useMemo(
+    () => accounts.filter((account) => account.kind === "random_user" && ambientEntityIds.has(account.entityId)),
+    [accounts, ambientEntityIds],
   );
   const livePersonaIds = useMemo(() => {
     const ids = new Set<string>();
@@ -880,7 +906,9 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
     settings?.enableNoodler && viewedProfileAccount && linkedNoodleAccountIds.has(viewedProfileAccount.id),
   );
   const canEditViewedProfile = Boolean(
-    viewingOwnProfile || (viewedProfileAccount?.kind === "character" && viewedProfileAccount.invited),
+    viewingOwnProfile ||
+    (viewedProfileAccount?.kind === "character" && viewedProfileAccount.invited) ||
+    (viewedProfileAccount?.kind === "random_user" && ambientEntityIds.has(viewedProfileAccount.entityId)),
   );
 
   useEffect(() => {
@@ -983,11 +1011,13 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
       setProfileName(viewedProfileAccount.displayName);
       setProfileBio(viewedProfileAccount.bio);
       setProfileLocation(readAccountSetting(viewedProfileAccount, "location"));
-      setProfileEditing(false);
+      setProfileEditing(
+        identityChanged && navigation.mode === "public" && navigation.view === "profile" && navigation.edit === true,
+      );
     }
     setProfileAvatarUrl(viewedProfileAccount.avatarUrl ?? "");
     setProfileBannerUrl(readAccountSetting(viewedProfileAccount, "bannerUrl"));
-  }, [profileEditing, viewedProfileAccount]);
+  }, [navigation, profileEditing, viewedProfileAccount]);
 
   useEffect(() => {
     setInviteCharacterLimit(NOODLE_INVITE_PAGE_SIZE);
@@ -1118,6 +1148,55 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
                 : localizeUi("ui.noodle.noodlehome.couldNotUpdateNoodleProfile"),
           );
         },
+      },
+    );
+  };
+
+  const rerollAmbient = async (profiles: NoodleAccount[]) => {
+    if (profiles.length === 0 || rerollAmbientProfiles.isPending) return;
+    const allProfiles = profiles.length > 1;
+    const confirmed = await showConfirmDialog({
+      title: localizeUi(
+        allProfiles
+          ? "ui.noodle.ambientProfiles.rerollAllConfirmTitle"
+          : "ui.noodle.ambientProfiles.rerollConfirmTitle",
+      ),
+      message: localizeUi(
+        allProfiles
+          ? "ui.noodle.ambientProfiles.rerollAllConfirmMessage"
+          : "ui.noodle.ambientProfiles.rerollConfirmMessage",
+        allProfiles ? undefined : { name: profiles[0]!.displayName },
+      ),
+      confirmLabel: localizeUi(
+        allProfiles ? "ui.noodle.ambientProfiles.rerollAll" : "ui.noodle.ambientProfiles.reroll",
+      ),
+    });
+    if (!confirmed) return;
+    rerollAmbientProfiles.mutate(
+      {
+        accountIds: profiles.map((profile) => profile.id),
+        debugMode: useUIStore.getState().debugMode,
+      },
+      {
+        onSuccess: ({ outcomes }) => {
+          const updated = outcomes.filter((outcome) => outcome.status === "updated").length;
+          if (updated === outcomes.length) {
+            toast.success(
+              localizeUi(
+                allProfiles ? "ui.noodle.ambientProfiles.rerolledAll" : "ui.noodle.ambientProfiles.rerolledOne",
+              ),
+            );
+          } else {
+            toast.error(
+              localizeUi("ui.noodle.ambientProfiles.rerolledPartial", {
+                updated,
+                total: outcomes.length,
+              }),
+            );
+          }
+        },
+        onError: (error) =>
+          toast.error(error instanceof Error ? error.message : localizeUi("ui.noodle.ambientProfiles.couldNotReroll")),
       },
     );
   };
@@ -2531,6 +2610,20 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
     onNavigate({ mode: "noodler", view: "profile", accountId, returnToSettings: navigation });
   };
 
+  const openAmbientProfileFromSettings = (accountId: string) => {
+    if (navigation.mode !== "settings") return;
+    setProfileEditing(true);
+    setProfileTab("posts");
+    onNavigate({
+      mode: "public",
+      view: "profile",
+      accountId,
+      connection: null,
+      edit: true,
+      returnToSettings: navigation,
+    });
+  };
+
   const openNoodler = () => {
     if (!settings?.enableNoodler) {
       void openNoodlerVerification();
@@ -2589,6 +2682,15 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
   const openProfileConnection = (connection: ProfileConnectionTab | null) => {
     if (navigation.mode !== "public" || navigation.view !== "profile") return;
     onNavigate({ ...navigation, connection });
+  };
+
+  const closeProfile = () => {
+    if (profileReturnToSettings) {
+      setProfileEditing(false);
+      onNavigate(profileReturnToSettings);
+      return;
+    }
+    openMobileHomeTimeline();
   };
 
   const normalizedInviteSearch = inviteSearch.trim().toLowerCase();
@@ -2995,6 +3097,81 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
                 </button>
               )}
             </div>
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        visible={settingsTab === "noodle" && settingsSection === "participants"}
+        title={localizeUi("ui.noodle.ambientProfiles.title")}
+        help={localizeUi("ui.noodle.ambientProfiles.help")}
+      >
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="max-w-[65ch] text-xs leading-5 text-[var(--muted-foreground)]">
+              {localizeUi("ui.noodle.ambientProfiles.description")}
+            </p>
+            <button
+              type="button"
+              onClick={() => void rerollAmbient(ambientProfiles)}
+              disabled={ambientProfiles.length === 0 || rerollAmbientProfiles.isPending}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-[var(--noodle-accent)]/40 px-3 text-xs font-semibold text-[var(--noodle-accent)] transition-colors hover:bg-[var(--noodle-accent)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--noodle-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {rerollAmbientProfiles.isPending ? <Loader2 size={14} className="animate-spin" /> : <Dices size={14} />}
+              {rerollAmbientProfiles.isPending
+                ? localizeUi("ui.noodle.ambientProfiles.rerolling")
+                : localizeUi("ui.noodle.ambientProfiles.rerollAll")}
+            </button>
+          </div>
+          <div className="overflow-hidden rounded-md border border-[var(--marinara-chat-chrome-panel-border)] bg-[var(--background)]">
+            {ambientProfiles.map((profile) => (
+              <div
+                key={profile.id}
+                className="flex min-h-16 items-center gap-3 border-b border-[var(--marinara-chat-chrome-panel-border)] p-3 last:border-b-0"
+              >
+                <Avatar account={profile} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-semibold">{profile.displayName}</p>
+                  <p className="truncate text-[0.68rem] text-[var(--muted-foreground)]">@{profile.handle}</p>
+                  {profile.bio && (
+                    <p className="mt-1 line-clamp-2 text-[0.68rem] leading-4 text-[var(--muted-foreground)]">
+                      {profile.bio}
+                    </p>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => openAmbientProfileFromSettings(profile.id)}
+                    disabled={rerollAmbientProfiles.isPending}
+                    title={localizeUi("ui.noodle.ambientProfiles.edit")}
+                    aria-label={localizeUi("ui.noodle.ambientProfiles.editNamed", { name: profile.displayName })}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--noodle-accent)] transition-colors hover:bg-[var(--noodle-accent)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--noodle-accent)] disabled:opacity-50"
+                  >
+                    <Pencil size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void rerollAmbient([profile])}
+                    disabled={rerollAmbientProfiles.isPending}
+                    title={localizeUi("ui.noodle.ambientProfiles.reroll")}
+                    aria-label={localizeUi("ui.noodle.ambientProfiles.rerollNamed", { name: profile.displayName })}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--noodle-accent)] transition-colors hover:bg-[var(--noodle-accent)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--noodle-accent)] disabled:opacity-50"
+                  >
+                    {rerollAmbientProfiles.isPending ? (
+                      <Loader2 size={15} className="animate-spin" />
+                    ) : (
+                      <Dices size={15} />
+                    )}
+                  </button>
+                </div>
+              </div>
+            ))}
+            {ambientProfiles.length === 0 && (
+              <p className="px-3 py-5 text-center text-xs text-[var(--muted-foreground)]">
+                {localizeUi("ui.noodle.ambientProfiles.loading")}
+              </p>
+            )}
           </div>
         </div>
       </Section>
@@ -4629,12 +4806,25 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
           ) : activeNoodleView === "profile" ? (
             <NoodleProfileSurface
               mobileHeader={
-                <div className="sticky top-0 z-20 flex min-h-14 items-center gap-3 border-b border-[var(--noodle-divider)] bg-[var(--background)]/95 px-2 py-2 backdrop-blur @min-[1024px]:hidden">
-                  <MobileTimelineBackButton onClick={openMobileHomeTimeline} />
+                <div
+                  className={cn(
+                    "sticky top-0 z-20 flex min-h-14 items-center gap-3 border-b border-[var(--noodle-divider)] bg-[var(--background)]/95 px-2 py-2 backdrop-blur",
+                    !profileReturnToSettings && "@min-[1024px]:hidden",
+                  )}
+                >
+                  <MobileTimelineBackButton
+                    onClick={closeProfile}
+                    label={profileReturnToSettings ? localizeUi("ui.noodle.ambientProfiles.backToSettings") : undefined}
+                    showOnDesktop={Boolean(profileReturnToSettings)}
+                  />
                   <div className="min-w-0">
                     <h2 className="truncate text-base font-bold">{localizeUi("ui.noodle.noodlehome.profile")}</h2>
                     <p className="truncate text-xs text-[var(--muted-foreground)]">
-                      @{profileDisplayHandle || "noodle"}
+                      {profileReturnToSettings
+                        ? localizeUi("ui.noodle.ambientProfiles.backToSettings")
+                        : localizeUi("ui.noodle.noodlehome.value1_0a5edda", {
+                            value1: profileDisplayHandle || localizeUi("ui.noodle.noodleshell.noodleHandle"),
+                          })}
                     </p>
                   </div>
                 </div>
