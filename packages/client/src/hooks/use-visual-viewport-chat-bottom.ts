@@ -119,7 +119,11 @@ export function useKeepLatestChatMessageVisible(
       const detail = (event as CustomEvent<ChatVisualViewportChangeDetail>).detail;
       if (!detail?.keyboardOpen) {
         keyboardOpen = false;
-        if (!focusedChatComposerAcceptsText()) pendingAnchor = null;
+        pendingAnchor = null;
+        if (restoreFrame) cancelAnimationFrame(restoreFrame);
+        if (settleFrame) cancelAnimationFrame(settleFrame);
+        restoreFrame = 0;
+        settleFrame = 0;
         return;
       }
       if (keyboardOpen || !focusedChatComposerAcceptsText()) return;
@@ -127,8 +131,10 @@ export function useKeepLatestChatMessageVisible(
 
       const anchor = pendingAnchor ?? captureAnchor();
       if (!anchor) return;
+      pendingAnchor = null;
 
       const restore = () => {
+        if (!keyboardOpen) return;
         const scrollElement = scrollRef.current;
         if (!scrollElement) return;
         if (anchor.pinnedToBottom) {

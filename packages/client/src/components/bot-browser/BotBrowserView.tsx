@@ -464,9 +464,15 @@ const chubProvider: ProviderConfig = {
     // Chub now reports the filtered result total in `count`. Older deployments
     // exposed only a page count, so keep the cursor-based estimate as a fallback.
     const hasMore = !!data?.cursor;
-    const reportedCount = data?.count === null || data?.count === undefined ? Number.NaN : Number(data.count);
+    const rawReportedCount = data?.count;
+    const reportedCount =
+      typeof rawReportedCount === "number"
+        ? rawReportedCount
+        : typeof rawReportedCount === "string" && rawReportedCount.trim().length > 0
+          ? Number(rawReportedCount)
+          : Number.NaN;
     const chubTotal =
-      Number.isFinite(reportedCount) && reportedCount >= 0
+      Number.isFinite(reportedCount) && reportedCount > 0
         ? reportedCount
         : hasMore
           ? (p.page + 1) * 48
@@ -493,7 +499,9 @@ const chubProvider: ProviderConfig = {
         // the canonical NSFW topic (including Kathrin Vaughan).
         nsfw:
           n.nsfw === true ||
-          (Array.isArray(n.topics) && n.topics.some((topic: unknown) => String(topic).trim().toLowerCase() === "nsfw")),
+          (n.nsfw == null &&
+            Array.isArray(n.topics) &&
+            n.topics.some((topic: unknown) => String(topic).trim().toLowerCase() === "nsfw")),
         externalUrl: `https://chub.ai/characters/${n.fullPath}`,
         _raw: n,
       })),

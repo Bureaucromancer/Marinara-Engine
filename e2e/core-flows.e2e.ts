@@ -3110,12 +3110,12 @@ test("stopped and refused generations keep sent text cleared and accept the firs
     await expect(input).toHaveValue("");
     await expect
       .poll(async () =>
-        (await readMessages()).some(
+        (await readMessages()).filter(
           (message) =>
             message.role === "user" && message.content === "Provider refusal must not duplicate this sent message",
-        ),
+        ).length,
       )
-      .toBe(true);
+      .toBe(1);
 
     const transportFailureDraft = "Restore this draft when transport fails before persistence";
     await page.route("**/api/generate", async (route) => route.abort("failed"));

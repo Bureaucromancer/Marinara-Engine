@@ -346,29 +346,18 @@ function latestNewMessageByRole(
 }
 
 function latestDurableSubmittedUserMessage(
-  qc: QueryClient,
-  chatId: string,
-  snapshot: MessageSnapshot,
+  messages: Message[],
+  submissionId: string,
   submittedContent: string,
-  submittedAt: number,
 ): Message | null {
-  const candidates = getCachedMessages(qc, chatId).filter(
-    (message) =>
-      message.role === "user" &&
-      !message.id.startsWith("__optimistic_") &&
-      !snapshot.fingerprints.has(message.id) &&
-      message.content === submittedContent,
-  );
-  if (snapshot.cacheWasLoaded) return latestMessage(candidates);
-
-  // An active chat normally has a loaded message cache. If it did not, use a
-  // narrow time/content match rather than mistaking an arbitrary historical
-  // user row for this submission after a transport failure.
   return latestMessage(
-    candidates.filter((message) => {
-      const createdAt = new Date(message.createdAt).getTime();
-      return Number.isFinite(createdAt) && createdAt >= submittedAt - 5_000;
-    }),
+    messages.filter(
+      (message) =>
+        message.role === "user" &&
+        !message.id.startsWith("__optimistic_") &&
+        message.content === submittedContent &&
+        parseMessageExtraRecord(message.extra).submissionId === submissionId,
+    ),
   );
 }
 
@@ -567,6 +556,13 @@ function createPendingAgentWriteApproval(proposal: AgentWriteApprovalProposal): 
     id,
     timestamp: Date.now(),
   };
+}
+
+function createGenerationSubmissionId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `submission-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 import { useChatStore } from "../stores/chat.store";
 import { useAgentStore } from "../stores/agent.store";
@@ -1195,21 +1191,18 @@ export function useGenerate() {
       // Create an AbortController so the stop button can cancel this generation.
       const abortController = new AbortController();
       const submittedUserTurn = params.userMessage !== undefined;
-      const submittedUserTurnStartedAt = Date.now();
-      const userMessagesBeforeGeneration = submittedUserTurn
-        ? snapshotMessagesByRole(qc, params.chatId, "user")
-        : null;
+      const submissionId = submittedUserTurn && !params.impersonate ? createGenerationSubmissionId() : null;
       const confirmDurableSubmittedUserTurn = async () => {
-        if (!submittedUserTurn || !userMessagesBeforeGeneration || params.impersonate) return false;
-        const refreshed = await refreshMessagesAuthoritatively(qc, params.chatId);
-        if (!refreshed) return false;
-        return !!latestDurableSubmittedUserMessage(
-          qc,
-          params.chatId,
-          userMessagesBeforeGeneration,
-          params.userMessage ?? "",
-          submittedUserTurnStartedAt,
-        );
+        if (!submittedUserTurn || !submissionId || params.impersonate) return false;
+        try {
+          const messages = await api.get<Message[]>(`/chats/${params.chatId}/messages`);
+          upsertPersistedMessages(qc, params.chatId, messages);
+          qc.invalidateQueries({ queryKey: chatKeys.messageCount(params.chatId) });
+          qc.invalidateQueries({ queryKey: lorebookKeys.active(params.chatId) });
+          return !!latestDurableSubmittedUserMessage(messages, submissionId, params.userMessage ?? "");
+        } catch {
+          return false;
+        }
       };
       try {
         useChatStore.getState().setAbortController(params.chatId, abortController);
@@ -1315,6 +1308,7 @@ export function useGenerate() {
             tokenCount: null,
             generationInfo: null,
             personaSnapshot,
+            ...(submissionId ? { submissionId } : {}),
             ...(pendingAttachments.length ? { attachments: pendingAttachments } : {}),
           },
           createdAt: new Date().toISOString(),
@@ -1634,6 +1628,7 @@ export function useGenerate() {
           "/generate",
           {
             ...params,
+            submissionId,
             ...(currentBackground !== undefined ? { currentBackground } : {}),
             userStatus,
             userActivity,

@@ -1527,7 +1527,7 @@ export function CharactersPanel() {
               <div
                 className={cn(
                   "min-w-0 flex-1",
-                  !selectionMode && "pr-0 max-md:pr-20 [@media(pointer:coarse)]:pr-24",
+                  !selectionMode && "pr-0 max-md:pr-32 [@media(pointer:coarse)]:pr-32",
                 )}
               >
                 <div
