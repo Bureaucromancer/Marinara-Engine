@@ -267,7 +267,12 @@ if not defined PNPM_DESCRIPTOR (
     set "INSTALL_ERROR=Could not read the pinned pnpm descriptor from the checked-out package.json."
     goto :fatal
 )
+set "PNPM_VERSION="
 for /f "tokens=1 delims=+" %%i in ("!PNPM_DESCRIPTOR!") do set "PNPM_VERSION=%%i"
+if not defined PNPM_VERSION (
+    set "INSTALL_ERROR=The pinned pnpm descriptor in the checked-out package.json has no version."
+    goto :fatal
+)
 set "PNPM_RUNNER=pnpm"
 set "CURRENT_PNPM_VERSION="
 
@@ -314,7 +319,7 @@ echo  [OK] pnpm !CURRENT_PNPM_VERSION! ready
 :: -- Install dependencies --
 echo.
 echo  [..] Installing dependencies (this may take a few minutes)...
-call :run_pnpm install --force
+call :run_pnpm install --force --frozen-lockfile
 if %errorlevel% neq 0 (
     set "INSTALL_ERROR=Failed to install dependencies."
     goto :fatal

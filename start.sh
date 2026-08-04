@@ -95,6 +95,10 @@ resolve_pnpm_runner() {
         return 1
     fi
     PNPM_VERSION=${PNPM_DESCRIPTOR%%+*}
+    if [ -z "$PNPM_VERSION" ]; then
+        echo "  [ERROR] The pinned pnpm descriptor in package.json has no version."
+        return 1
+    fi
     PNPM_RUNNER="pnpm"
     CURRENT_PNPM_VERSION=""
 
@@ -259,12 +263,15 @@ elif [ -d ".git" ]; then
                 echo "  [WARN] Update did not land on ${TARGET_REF}. Continuing with current version."
             else
                 echo "  [OK] Updated to $(git log -1 --format='%h %s' 2>/dev/null)"
-                resolve_pnpm_runner || exit 1
-                echo "  [..] Reinstalling dependencies and refreshing native packages..."
-                install_workspace_dependencies
-                # Force rebuild
-                rm -rf packages/shared/dist packages/server/dist packages/client/dist
-                rm -f packages/shared/tsconfig.tsbuildinfo packages/server/tsconfig.tsbuildinfo packages/client/tsconfig.tsbuildinfo
+                if ! resolve_pnpm_runner; then
+                    PNPM_RESOLUTION_FAILED=1
+                else
+                    echo "  [..] Reinstalling dependencies and refreshing native packages..."
+                    install_workspace_dependencies
+                    # Force rebuild
+                    rm -rf packages/shared/dist packages/server/dist packages/client/dist
+                    rm -f packages/shared/tsconfig.tsbuildinfo packages/server/tsconfig.tsbuildinfo packages/client/tsconfig.tsbuildinfo
+                fi
             fi
         elif [ "$SKIP_UPDATE_FOR_LOCAL_CHANGES" != "1" ]; then
             echo "  [WARN] Could not update to ${TARGET_REF}. Continuing with current version."
@@ -282,6 +289,9 @@ fi
 
 if [ "${DATA_SNAPSHOT_READY:-0}" = "1" ] && ! node scripts/protect-launcher-data.mjs restore-if-missing; then
     echo "  [ERROR] User data verification failed after the update attempt. Startup stopped to avoid creating empty data."
+    exit 1
+fi
+if [ "${PNPM_RESOLUTION_FAILED:-0}" = "1" ]; then
     exit 1
 fi
 

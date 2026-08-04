@@ -67,6 +67,11 @@ for (const dynamicDescriptorPath of ["start-local.bat", "start.bat", "win/instal
     /packageManager\?\.replace\(\/\^\^pnpm@\//u,
     `${dynamicDescriptorPath} must preserve the anchored packageManager check through cmd parsing`,
   );
+  assert.match(
+    dynamicDescriptorSource,
+    /set "PNPM_VERSION="[\s\S]*if not defined PNPM_VERSION/u,
+    `${dynamicDescriptorPath} must reject descriptors that do not contain a version`,
+  );
   assert.ok(
     !dynamicDescriptorSource.includes(pinnedPnpmDescriptor),
     `${dynamicDescriptorPath} must read the canonical descriptor instead of duplicating it`,
@@ -94,14 +99,27 @@ assert.match(
   /pnpm --version \| %SystemRoot%\\System32\\findstr\.exe \/x \/l \/c:\$\{PNPM_VERSION\}/u,
   "The Windows installer must reject a global pnpm version that differs from the repository pin",
 );
+assert.equal(
+  windowsInstallerSource.match(/confirmModulesPurge=false install --force --frozen-lockfile/gu)?.length,
+  6,
+  "Every NSIS installer dependency path must preserve the frozen lockfile",
+);
 
 const batchInstallerSource = readFileSync(join(repositoryRoot, "win/installer/install.bat"), "utf8");
 const batchInstallerDeps = batchInstallerSource.indexOf(":deps");
 const batchInstallerDescriptorLookup = batchInstallerSource.indexOf("packageManager?.replace", batchInstallerDeps);
+const batchInstallerInstall = batchInstallerSource.indexOf(
+  "call :run_pnpm install --force --frozen-lockfile",
+  batchInstallerDescriptorLookup,
+);
 assert.ok(batchInstallerDeps >= 0, "The batch installer must define its dependency-install phase");
 assert.ok(
   batchInstallerDescriptorLookup > batchInstallerDeps,
   "The batch installer must read the pnpm descriptor from the checked-out release",
+);
+assert.ok(
+  batchInstallerInstall > batchInstallerDescriptorLookup,
+  "The batch installer must resolve the checked-out descriptor before its frozen dependency install",
 );
 
 const troubleshootingSource = readFileSync(join(repositoryRoot, "docs/TROUBLESHOOTING.md"), "utf8");
@@ -193,8 +211,11 @@ for (const launcherName of ["start.sh", "start-termux.sh", "start.bat"]) {
 for (const launcherName of ["start.sh", "start-termux.sh"]) {
   const launcherSource = readFileSync(join(repositoryRoot, launcherName), "utf8");
   const updateSuccess = launcherSource.indexOf('echo "  [OK] Updated to');
-  const refreshedRunner = launcherSource.indexOf("resolve_pnpm_runner || exit 1", updateSuccess);
+  const refreshedRunner = launcherSource.indexOf("if ! resolve_pnpm_runner; then", updateSuccess);
   const refreshedInstall = launcherSource.indexOf("install_workspace_dependencies", refreshedRunner);
+  const resolutionFailure = launcherSource.indexOf("PNPM_RESOLUTION_FAILED=1", updateSuccess);
+  const dataRestore = launcherSource.indexOf("restore-if-missing", resolutionFailure);
+  const resolutionAbort = launcherSource.indexOf('if [ "${PNPM_RESOLUTION_FAILED:-0}" = "1" ]', dataRestore);
 
   assert.ok(updateSuccess >= 0, `${launcherName} must identify a successful checkout update`);
   assert.ok(refreshedRunner > updateSuccess, `${launcherName} must reload the pnpm pin after updating the checkout`);
@@ -202,6 +223,9 @@ for (const launcherName of ["start.sh", "start-termux.sh"]) {
     refreshedInstall > refreshedRunner,
     `${launcherName} must refresh the pnpm runner before its first post-update dependency install`,
   );
+  assert.ok(resolutionFailure > updateSuccess, `${launcherName} must record a post-update pnpm resolution failure`);
+  assert.ok(dataRestore > resolutionFailure, `${launcherName} must restore protected data after resolution failure`);
+  assert.ok(resolutionAbort > dataRestore, `${launcherName} must abort only after protected data is restored`);
 }
 
 {
@@ -211,6 +235,12 @@ for (const launcherName of ["start.sh", "start-termux.sh"]) {
     "call :run_pnpm install --frozen-lockfile --prefer-offline",
     refreshedRunner,
   );
+  const resolutionFailure = windowsLauncherSource.indexOf('set "PNPM_RESOLUTION_FAILED=1"', updateSuccess);
+  const dataRestore = windowsLauncherSource.indexOf("restore-if-missing", resolutionFailure);
+  const resolutionAbort = windowsLauncherSource.indexOf(
+    'if "!PNPM_RESOLUTION_FAILED!"=="1"',
+    dataRestore,
+  );
 
   assert.ok(updateSuccess >= 0, "start.bat must identify a successful checkout update");
   assert.ok(refreshedRunner > updateSuccess, "start.bat must reload the pnpm pin after updating the checkout");
@@ -218,6 +248,9 @@ for (const launcherName of ["start.sh", "start-termux.sh"]) {
     refreshedInstall > refreshedRunner,
     "start.bat must refresh the pnpm runner before its first post-update dependency install",
   );
+  assert.ok(resolutionFailure > updateSuccess, "start.bat must record a post-update pnpm resolution failure");
+  assert.ok(dataRestore > resolutionFailure, "start.bat must restore protected data after resolution failure");
+  assert.ok(resolutionAbort > dataRestore, "start.bat must abort only after protected data is restored");
 }
 
 const devSource = readFileSync(join(repositoryRoot, "scripts/dev.mjs"), "utf8");

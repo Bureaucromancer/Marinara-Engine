@@ -43,7 +43,13 @@ if not defined PNPM_DESCRIPTOR (
     pause
     exit /b 1
 )
+set "PNPM_VERSION="
 for /f "tokens=1 delims=+" %%i in ("!PNPM_DESCRIPTOR!") do set "PNPM_VERSION=%%i"
+if not defined PNPM_VERSION (
+    echo  [ERROR] The pinned pnpm descriptor in package.json has no version.
+    pause
+    exit /b 1
+)
 set "PNPM_RUNNER=pnpm"
 set "CURRENT_PNPM_VERSION="
 

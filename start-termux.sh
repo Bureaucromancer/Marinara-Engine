@@ -171,6 +171,10 @@ resolve_pnpm_runner() {
         return 1
     fi
     PNPM_VERSION=${PNPM_DESCRIPTOR%%+*}
+    if [ -z "$PNPM_VERSION" ]; then
+        echo "  [ERROR] The pinned pnpm descriptor in package.json has no version."
+        return 1
+    fi
     PNPM_RUNNER="pnpm"
     CURRENT_PNPM_VERSION=""
 
@@ -335,12 +339,15 @@ elif [ -d ".git" ]; then
                 echo "  [WARN] Update did not land on ${TARGET_REF}. Continuing with current version."
             else
                 echo "  [OK] Updated to $(git log -1 --format='%h %s' 2>/dev/null)"
-                resolve_pnpm_runner || exit 1
-                prune_pnpm_store
-                echo "  [..] Refreshing dependencies..."
-                install_workspace_dependencies
-                rm -rf packages/shared/dist packages/server/dist packages/client/dist
-                rm -f packages/shared/tsconfig.tsbuildinfo packages/server/tsconfig.tsbuildinfo packages/client/tsconfig.tsbuildinfo
+                if ! resolve_pnpm_runner; then
+                    PNPM_RESOLUTION_FAILED=1
+                else
+                    prune_pnpm_store
+                    echo "  [..] Refreshing dependencies..."
+                    install_workspace_dependencies
+                    rm -rf packages/shared/dist packages/server/dist packages/client/dist
+                    rm -f packages/shared/tsconfig.tsbuildinfo packages/server/tsconfig.tsbuildinfo packages/client/tsconfig.tsbuildinfo
+                fi
             fi
         elif [ "$SKIP_UPDATE_FOR_LOCAL_CHANGES" != "1" ]; then
             echo "  [WARN] Could not update to ${TARGET_REF}. Continuing with current version."
@@ -358,6 +365,9 @@ fi
 
 if [ "${DATA_SNAPSHOT_READY:-0}" = "1" ] && ! node scripts/protect-launcher-data.mjs restore-if-missing; then
     echo "  [ERROR] User data verification failed after the update attempt. Startup stopped to avoid creating empty data."
+    exit 1
+fi
+if [ "${PNPM_RESOLUTION_FAILED:-0}" = "1" ]; then
     exit 1
 fi
 
@@ -420,7 +430,7 @@ if [ ! -d "packages/client/dist" ]; then
     if ! SKIP_PWA=1 run_pnpm --filter @marinara-engine/client exec vite build 2>&1; then
         echo "  [WARN] Vite build failed — native binaries may not match Node.js $(node -v)."
         echo "  [..] Ensuring WASM fallback for rollup is installed and retrying..."
-        run_pnpm install --filter @marinara-engine/client 2>/dev/null || true
+        run_pnpm install --frozen-lockfile --prefer-offline --filter @marinara-engine/client 2>/dev/null || true
         SKIP_PWA=1 run_pnpm --filter @marinara-engine/client exec vite build
     fi
 fi

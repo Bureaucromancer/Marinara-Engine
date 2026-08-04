@@ -79,6 +79,7 @@ goto :eof
 set "INSTALL_REQUIRED=0"
 set "BUILD_REQUIRED=0"
 set "DATA_SNAPSHOT_READY=0"
+set "PNPM_RESOLUTION_FAILED=0"
 
 :: Drop untracked leftovers in the source trees (e.g. files a failed Windows
 :: checkout could not delete after a channel switch); they break tsc. This is
@@ -218,11 +219,11 @@ echo  [OK] Updated to latest version
 echo  [..] Dependencies and build will be refreshed before startup.
 call :resolve_pnpm_runner
 if errorlevel 1 (
-    pause
-    exit /b 1
+    set "PNPM_RESOLUTION_FAILED=1"
+) else (
+    set "INSTALL_REQUIRED=1"
+    set "BUILD_REQUIRED=1"
 )
-set "INSTALL_REQUIRED=1"
-set "BUILD_REQUIRED=1"
 
 :skip_update
 if "!DATA_SNAPSHOT_READY!"=="1" (
@@ -233,6 +234,10 @@ if "!DATA_SNAPSHOT_READY!"=="1" (
         pause
         exit /b 1
     )
+)
+if "!PNPM_RESOLUTION_FAILED!"=="1" (
+    pause
+    exit /b 1
 )
 echo  [OK] Node.js found:
 node -v
@@ -382,7 +387,12 @@ if not defined PNPM_DESCRIPTOR (
     echo  [ERROR] Could not read the pinned pnpm descriptor from package.json.
     exit /b 1
 )
+set "PNPM_VERSION="
 for /f "tokens=1 delims=+" %%i in ("!PNPM_DESCRIPTOR!") do set "PNPM_VERSION=%%i"
+if not defined PNPM_VERSION (
+    echo  [ERROR] The pinned pnpm descriptor in package.json has no version.
+    exit /b 1
+)
 set "PNPM_RUNNER=pnpm"
 set "CURRENT_PNPM_VERSION="
 
