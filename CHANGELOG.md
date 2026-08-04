@@ -4,12 +4,19 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 
 ## [Unreleased]
 
+## [2.4.1]
+
 ### Added
 
 - Let a capability package provide an entire Game mode: a package declaring the new `game-surface` slot draws its own HUD, menus and combat over the shared narration, is chosen while a game is created from the **Experiences** block of the setup wizard, and declares which built-in systems it replaces — anything left undeclared stays built-in, so an ordinary game is unchanged. Supporting host changes: packages holding `prompt-context` can now contribute to each turn's system prompt (the permission previously had no consumer), the resource facade gained optional write methods for the player persona and lorebooks, and the asset manifest is re-scanned after packages activate so art a package installs is visible without a second restart (#4526).
 - Added portable character-gallery image references: `card://self/gallery/<filename>` in a greeting or message resolves to whichever character is speaking, so gallery images embedded in a card keep working after export and import (character ids are regenerated on import, which broke id-based links). The character gallery gains a **Copy image reference** button that produces the portable form, editor field previews resolve it for the edited character, group-chat replies resolve `self` per speaker segment, and the native-export importer now preserves gallery filenames (sanitized, collision-safe) instead of renaming every image, which is the fix that makes the references survive the round trip. Documented in the Character Galleries and Sending & Streaming guides.
 - Added the **Hindi** documentation language pack, covering all 124 in-app guides (developer docs included) in natural Hindi, with English UI control names preserved for following instructions against the interface and Hindi sidebar category labels in the docs viewer. Select it under **Settings → General → Documentation Language** via **Download & Replace** (#4471).
 - Taught the docs viewer to render right-to-left documentation, ahead of the planned Arabic pack: each guide follows its served language's reading direction (untranslated English fallbacks stay left-to-right), code spans and fences keep their left-to-right order inside RTL prose, and lists/tables/panels use direction-aware styling. Three deliberate refinements are visible today: search highlights lose their slight inset so they can no longer sever cursive letter joining, sidebars whose category headers use non-Latin scripts (Japanese, Korean, Chinese, Hindi) drop the small-caps letter-spacing that misfit them, and the "Last updated" dates now follow the app's language instead of the browser's. Everything else renders identically for existing packs (#4489).
+- Added optional prompt-preset targeting to regex scripts and refreshed the existing character target picker so scoped regexes follow the selected preset or characters without clipped controls (#4446).
+
+### Changed
+
+- Advanced the stable release identity to v2.4.1 across the Engine, PWA manifest, Windows installer, Android bootstrap APK, update checks, Home page, and release references. Android uses `versionName` `2.4.1` with `versionCode` `42` so it updates over every previously published APK.
 
 ### Fixed
 
@@ -22,24 +29,13 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 - Sent Noodle image instructions to the timeline model, and stopped the default Noodle Post Image template from appending them to the image-generation prompt, so directions like "mention build, clothing, pose, lighting" now shape the generated image description instead of reaching ComfyUI as literal prompt text. Custom templates that still reference `{{userInstructions}}` continue to append it verbatim. Raw style tokens belong in an image style profile, which applies to every Noodle image.
 - Stripped label text and language-model framing from the character personality and image-habit blocks in the Noodle image prompt, so the image model receives the descriptive values instead of sentences written for an LLM.
 - Dropped the `Character appearance notes:` header from the shared illustrator appearance block, which every caller appends directly to an image prompt, so diffusion models stop receiving the label as drawable text.
-
-## [2.4.1]
-
-### Added
-
-- Added optional prompt-preset targeting to regex scripts and refreshed the existing character target picker so scoped regexes follow the selected preset or characters without clipped controls (#4446).
-
-### Changed
-
-- Advanced the stable release identity to v2.4.1 across the Engine, PWA manifest, Windows installer, Android bootstrap APK, update checks, Home page, and release references. Android uses `versionName` `2.4.1` with `versionCode` `42` so it updates over every previously published APK.
-
-### Fixed
-
 - Let Characters, Personas, Lorebooks, Agents, Presets, and Connections sidebar labels use the full desktop row width beneath hover actions, and made Conversation Call clip-length rows size to their panel instead of clipping labels beside fixed-width fields (#4449).
 - Removed accumulated duplicate built-in **Default** settings profiles during startup normalization while preserving one stable profile and active selection per chat mode (#4442).
 - Kept `/scene` chats and standalone conversions out of Conversation branch groups so original conversations remain visible in the Conversation sidebar (#4443).
 - Taught Professor Mari the supported custom `image_prompt` agent configuration, including marker activation and the image-generation capability, so she creates requested image agents instead of falsely refusing them (#4444).
 - Kept Google Gemini API keys in the `x-goog-api-key` header when fetching models instead of duplicating them in the URL, preventing compatible proxies from rejecting the query token with HTTP 401 (#4448).
+- Preserved the reader's pre-keyboard scroll position in mobile Roleplay instead of snapping the transcript to the newest message when the composer receives focus (#4589).
+- Kept Characters and Personas library artwork flush with the full height of mobile cards, made Character Chat actions match the compact Copy and Delete controls on desktop and mobile, and kept folder counts clear of Delete actions across Characters, Personas, Presets, Lorebooks, Connections, and Agents.
 
 ## [2.4.0]
 
