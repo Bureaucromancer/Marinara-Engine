@@ -80,7 +80,7 @@ import { admissionModeForRequest, isConnectionAdmissionFailure } from "../servic
 import { generateNoodlerStageProfileDraft } from "../services/noodle/noodle-stage-profile-draft.service.js";
 import { canViewNoodlerPost, isNoodlerHiddenFromViewer } from "../services/noodle/noodler-access.js";
 import { createNoodlerNoodleImagesService } from "../services/noodle/noodle-noodler-images.service.js";
-import { claimNoodleOperation, isNoodleOperationActive } from "../services/noodle/noodle-operation-lock.js";
+import { claimNoodleOperation } from "../services/noodle/noodle-operation-lock.js";
 import {
   NOODLER_MEDIA_URL_PREFIX,
   noodlerPostMediaUrlForPersona,
@@ -1029,17 +1029,20 @@ export async function noodleRoutes(app: FastifyInstance) {
   app.put("/refresh-schedule", async (req, reply) => {
     const parsed = noodleRescheduleRefreshSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    if (isNoodleOperationActive("identity")) {
-      return reply.code(409).send({ error: NOODLE_IDENTITY_LOCK_BUSY });
-    }
+    // Hold the lock across the read-modify-write: a bare check leaves a window for a refresh
+    // to claim in between and have its schedule overwritten.
+    const releaseOperation = claimNoodleOperation("identity");
+    if (!releaseOperation) return reply.code(409).send({ error: NOODLE_IDENTITY_LOCK_BUSY });
     const at = new Date();
-    const schedule = await noodle.ensureRefreshSchedule(at);
     try {
+      const schedule = await noodle.ensureRefreshSchedule(at);
       const rescheduled = rescheduleNoodleRefreshTime(schedule, parsed.data.scheduledTime, parsed.data.time, at);
       await noodle.saveRefreshSchedule(rescheduled);
       return noodleRefreshSchedulerStatus(rescheduled, at);
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : "Could not reschedule refresh." });
+    } finally {
+      releaseOperation();
     }
   });
 
