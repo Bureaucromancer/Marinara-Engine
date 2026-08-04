@@ -20,7 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { createPortal } from "react-dom";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   NOODLER_POST_CONTENT_MAX_LENGTH,
@@ -42,6 +42,7 @@ import type {
   NoodlerStageProfile,
   Persona,
 } from "@marinara-engine/shared";
+import { countNoodlerPostsSince } from "@marinara-engine/shared";
 import {
   useCreateNoodlerPost,
   useCreateNoodlerInteraction,
@@ -60,7 +61,9 @@ import {
   useNoodlerEligibleAccounts,
   useNoodlerPosts,
   useNoodlerSubscribers,
+  useNoodleUnseenCount,
   useNoodlerViewer,
+  usePatchNoodleAccountSettings,
   useRemoveNoodlerInteraction,
   useToggleNoodlerFollow,
   useToggleNoodlerSubscription,
@@ -98,6 +101,7 @@ import { NoodlerOnboardingWizard } from "./NoodlerBulkCreatePanel";
 import {
   Avatar,
   getNoodleAccentStyle,
+  NewSinceLastVisitDivider,
   NoodleShell,
   ProfileInitial,
   NOODLE_PERSONA_SWITCHER_PAGE_SIZE,
@@ -399,6 +403,31 @@ export function NoodlerHome({ navigation, onNavigate }: NoodlerHomeProps) {
   const [feedTab, setFeedTab] = useState<"following" | "all">("following");
   const [onboardingMode, setOnboardingMode] = useState<"first-run" | null>(null);
   const viewerQuery = useNoodlerViewer(viewerPersonaId, enabled);
+  const patchAccountSettings = usePatchNoodleAccountSettings();
+  const noodleUnseenCount = useNoodleUnseenCount(shellPersonaAccount, enabled);
+  // The stored timestamp advances as soon as the feed is shown, which would erase the divider
+  // out from under the reader. Freeze the value the divider uses per persona at that moment,
+  // and keep advancing the stored one so the next visit measures from here.
+  const [frozenFeedSeenAt, setFrozenFeedSeenAt] = useState<Record<string, string | null>>({});
+  const feedShownForAccountRef = useRef<string | null>(null);
+  const markFeedShown = () => {
+    const scope = viewerQuery.data;
+    if (!scope || feedShownForAccountRef.current === scope.viewer.id) return;
+    feedShownForAccountRef.current = scope.viewer.id;
+    setFrozenFeedSeenAt((current) => ({
+      ...current,
+      [scope.viewer.id]: scope.viewer.settings.social.noodlerFeedSeenAt ?? null,
+    }));
+    patchAccountSettings.mutate(
+      { id: scope.viewer.id, subtree: "social", patch: { noodlerFeedSeenAt: new Date().toISOString() } },
+      {
+        // Best-effort ambient state: a failure means the counter stays up, which is
+        // recoverable on the next visit and not worth interrupting the user for.
+        onError: (error: unknown) => console.warn("[noodler] Could not record the feed visit", error),
+        onSuccess: () => void viewerQuery.refetch(),
+      },
+    );
+  };
   const toggleFollow = useToggleNoodlerFollow();
   const toggleSubscription = useToggleNoodlerSubscription();
   const unlockPost = useUnlockNoodlerPost();
@@ -921,6 +950,13 @@ export function NoodlerHome({ navigation, onNavigate }: NoodlerHomeProps) {
           ? ("search" as const)
           : ("noodler" as const),
     homeActive: navigation.mode === "noodler" && navigation.view === "hub" && !discoveryOpen,
+    noodlerUnseenCount: countNoodlerPostsSince(
+      viewerQuery.data,
+      viewerQuery.data?.viewer.settings.social.noodlerFeedSeenAt,
+    ),
+    // The Noodle count matters most from here: this is where the user is while the public
+    // timeline is the one filling up unwatched.
+    noodleUnseenCount,
     accent: NOODLE_PINK,
     enableNoodler: enabled,
     personaAccount: shellPersonaAccount,
@@ -1434,6 +1470,8 @@ export function NoodlerHome({ navigation, onNavigate }: NoodlerHomeProps) {
         personasError={personasQuery.isError}
         onRetryPersonas={() => void personasQuery.refetch()}
         scope={viewerQuery.data}
+        newSinceAt={viewerQuery.data ? (frozenFeedSeenAt[viewerQuery.data.viewer.id] ?? null) : null}
+        onFeedShown={markFeedShown}
         isLoading={viewerQuery.isLoading}
         isError={viewerQuery.isError}
         onRetry={() => void viewerQuery.refetch()}
@@ -2806,12 +2844,21 @@ function ViewerHub({
   guidePending,
   onToggleSubscription,
   togglePending,
+  newSinceAt,
+  onFeedShown,
 }: {
   personas: Persona[];
   personasLoading: boolean;
   personasError: boolean;
   onRetryPersonas: () => void;
   scope: ReturnType<typeof useNoodlerViewer>["data"];
+  /**
+   * Frozen at the moment this persona's feed was first shown, so advancing the stored
+   * timestamp does not make the divider vanish under the reader while they are still on it.
+   */
+  newSinceAt: string | null;
+  /** Called once the feed is actually on screen — entering NoodleR is not the same as seeing it. */
+  onFeedShown: () => void;
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
@@ -2846,6 +2893,15 @@ function ViewerHub({
   togglePending: boolean;
 }) {
   const { t: localizeUi } = useUiTranslation();
+  // The visit counts once the feed itself is on screen and loaded — not on app entry, and not
+  // while discovery search has replaced it. Declared above the early returns so hook order
+  // stays stable across the empty and error states below.
+  // A search-filtered list is not the feed either, so it does not count as having seen it.
+  const feedIsOnScreen =
+    tab === "all" && Boolean(scope) && !isLoading && !isError && !discoveryOpen && !search.trim();
+  useEffect(() => {
+    if (feedIsOnScreen) onFeedShown();
+  }, [feedIsOnScreen, onFeedShown]);
   // "Create a persona" is a claim about the user's data, so it waits for the personas query to
   // actually succeed instead of speaking for a cold or failed load.
   if (personas.length === 0) {
@@ -2902,6 +2958,18 @@ function ViewerHub({
         creator.profile.handle.toLowerCase().includes(searchTerm) ||
         creator.profile.displayName.toLowerCase().includes(searchTerm)),
   );
+  // The feed is newest-first, so the divider goes after the *last* new post — the viewer's own
+  // posts sitting in that run are not news themselves but must not cut it short. Shown only
+  // when there is something on both sides: with no older posts it would sit at the bottom
+  // labelling nothing, and with no new ones it says nothing. A search-filtered list is not the
+  // feed, so no boundary marker there either.
+  const newSince = newSinceAt ? new Date(newSinceAt).getTime() : NaN;
+  const isNewToViewer = ({ post, creator }: (typeof feed)[number]) =>
+    !Number.isNaN(newSince) &&
+    creator.profile.noodleAccountId !== scope?.viewer.id &&
+    new Date(post.createdAt).getTime() > newSince;
+  const lastNewIndex = searchTerm ? -1 : feed.findLastIndex(isNewToViewer);
+  const dividerIndex = lastNewIndex >= 0 && lastNewIndex < feed.length - 1 ? lastNewIndex + 1 : -1;
   const renderFeedPost = ({ post, creator }: (typeof searchResults)[number]) =>
     post.locked ? (
       <LockedNoodlerPostCard
@@ -3176,7 +3244,14 @@ function ViewerHub({
                   : localizeUi("ui.noodle.viewerhub.noPostsYet")}
             </p>
           ) : (
-            <div>{feed.map(renderFeedPost)}</div>
+            <div>
+              {feed.map((item, index) => (
+                <Fragment key={item.post.id}>
+                  {index === dividerIndex && <NewSinceLastVisitDivider />}
+                  {renderFeedPost(item)}
+                </Fragment>
+              ))}
+            </div>
           )}
         </>
       ) : (

@@ -81,7 +81,9 @@ import { generateNoodlerStageProfileDraft } from "../services/noodle/noodle-stag
 import { canViewNoodlerPost, isNoodlerHiddenFromViewer } from "../services/noodle/noodler-access.js";
 import { createNoodlerNoodleImagesService } from "../services/noodle/noodle-noodler-images.service.js";
 import {
+  NOODLER_MEDIA_URL_PREFIX,
   noodlerPostMediaUrlForPersona,
+  readNoodlerLockedTeaser,
   readNoodlerMediaPath,
   removeNoodlerAccountMedia,
   resolveNoodlerMediaAbsolutePath,
@@ -367,14 +369,17 @@ export async function noodleRoutes(app: FastifyInstance) {
             authorAccountId: post.authorAccountId,
             access: post.access,
             locked,
-            // Titles and engagement counts are public teaser data. Protected media is not:
-            // a browser-side blur would still disclose the original image bytes.
+            // Titles and engagement counts are public teaser data.
             title: post.title,
             content: locked ? null : post.content,
-            // Locked posts disclose that media exists (so the teaser can render a
-            // placeholder) but never the bytes or a URL that could fetch them.
+            // Locked posts keep their media URL: the access-checked media route answers a
+            // locked viewer with a server-blurred teaser, never the original bytes. Media
+            // stored outside the NoodleR namespace has no such derivative, so it is withheld.
             hasImage: post.imageUrl !== null,
-            imageUrl: locked ? null : noodlerPostMediaUrlForPersona(post.imageUrl, viewer.entityId),
+            imageUrl:
+              locked && !post.imageUrl?.startsWith(NOODLER_MEDIA_URL_PREFIX)
+                ? null
+                : noodlerPostMediaUrlForPersona(post.imageUrl, viewer.entityId),
             imagePrompt: locked ? null : post.imagePrompt,
             metadata: locked ? null : post.metadata,
             createdAt: post.createdAt,
@@ -403,7 +408,7 @@ export async function noodleRoutes(app: FastifyInstance) {
     const post = viewer ? await noodle.getNoodlerPostById(postId) : null;
     const creator = post ? await noodle.getNoodlerAccountById(post.authorAccountId) : null;
     if (!viewer || !post || !creator || isNoodlerHiddenFromViewer(creator, viewer.id)) return null;
-    if (creator.noodleAccountId === viewer.id) return { viewer, post, creator };
+    if (creator.noodleAccountId === viewer.id) return { viewer, post, creator, locked: false };
     const [subscriptions, unlocks] = await Promise.all([
       noodle.listSubscriptionsForViewer(viewer.id),
       noodle.listPostUnlocksForViewer(viewer.id),
@@ -414,15 +419,16 @@ export async function noodleRoutes(app: FastifyInstance) {
       subscribed,
       unlockedPostIds: new Set(unlocks.map((item) => item.postId)),
     });
-    if (locked) return null;
-    return { viewer, post, creator };
+    // Locked is reported rather than refused: the media route still owes a locked viewer a
+    // blurred teaser. Every caller that needs the post's protected content checks it.
+    return { viewer, post, creator, locked };
   }
 
   async function resolveGatedNoodlerPost(personaId: string, postId: string) {
     const readable = await resolveReadableNoodlerPost(personaId, postId);
     // A viewer persona linked to the creator's own public account may read its posts, but
     // is not an audience member and must not persist self-interactions.
-    if (!readable || readable.creator.noodleAccountId === readable.viewer.id) return null;
+    if (!readable || readable.locked || readable.creator.noodleAccountId === readable.viewer.id) return null;
     return readable;
   }
 
@@ -436,13 +442,19 @@ export async function noodleRoutes(app: FastifyInstance) {
     if (!settings.enableNoodler) return reply.code(404).send({ error: "Not Found" });
     const { id } = req.params as { id: string };
     const personaId = (req.query as { personaId?: string }).personaId;
-    const post = personaId
-      ? (await resolveReadableNoodlerPost(personaId, id))?.post
-      : await noodle.getNoodlerPostById(id);
+    const readable = personaId ? await resolveReadableNoodlerPost(personaId, id) : null;
+    const post = personaId ? readable?.post : await noodle.getNoodlerPostById(id);
     if (!post) return reply.code(404).send({ error: "Not Found" });
     const mediaPath = readNoodlerMediaPath(post);
     const absolute = mediaPath ? resolveNoodlerMediaAbsolutePath(mediaPath) : null;
     if (!absolute || !existsSync(absolute)) return reply.code(404).send({ error: "Not Found" });
+    // A locked viewer gets the blurred derivative, never the original bytes. If it cannot be
+    // built the frame stays empty rather than falling back to the protected image.
+    if (readable?.locked) {
+      const teaser = await readNoodlerLockedTeaser(absolute);
+      if (!teaser) return reply.code(404).send({ error: "Not Found" });
+      return reply.header("Cache-Control", "private, no-store").type("image/jpeg").send(teaser);
+    }
     return reply.header("Cache-Control", "private, no-store").sendFile(basename(absolute), dirname(absolute));
   });
 
