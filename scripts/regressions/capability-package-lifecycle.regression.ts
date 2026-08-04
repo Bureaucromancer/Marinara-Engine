@@ -359,8 +359,8 @@ try {
   );
   assert.match(
     chatSettingsSource,
-    /modeSettingsSurfaces\.agentSettingsSurface === "conversation"[\s\S]{0,1800}ltmPackage &&[\s\S]{0,900}setLtmEnabledForChat/u,
-    "Conversation chat settings must expose the installed Long-Term Memory toggle",
+    /callsPackage \? [\s\S]{0,2200}ltmPackage \? [\s\S]{0,1800}setLtmEnabledForChat/u,
+    "Conversation chat settings must place Long-Term Memory below Calls with its activation control",
   );
   assert.match(
     chatSettingsSource,

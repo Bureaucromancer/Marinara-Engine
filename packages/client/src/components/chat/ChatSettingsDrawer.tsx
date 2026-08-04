@@ -5797,22 +5797,6 @@ export function ChatSettingsDrawer({
               )}
             >
               <div className="space-y-3">
-                {ltmPackage && (
-                  <SettingsSwitch
-                    label={localizeUi("ui.chat.chatsettingsdrawer.longTermMemory")}
-                    description={localizeUi("ui.chat.chatsettingsdrawer.enableLongTermMemoryForThisConversation")}
-                    checked={metadata.enableAgents === true && activeAgentIds.includes(ltmPackage.id)}
-                    onChange={(enabled) => void setLtmEnabledForChat(enabled)}
-                    labelPosition="start"
-                    className={cn(
-                      "justify-between rounded-lg px-3 py-2.5 text-left",
-                      metadata.enableAgents === true && activeAgentIds.includes(ltmPackage.id)
-                        ? "bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30"
-                        : "bg-[var(--secondary)] hover:bg-[var(--accent)]",
-                    )}
-                    labelClassName="text-xs font-medium"
-                  />
-                )}
                 {hasConversationCommands && (
                   <div className="space-y-3">
                     <SettingsSwitch
@@ -6030,6 +6014,53 @@ export function ChatSettingsDrawer({
                           className="block"
                         />
                       </div>
+                    ) : null}
+
+                    {ltmPackage ? (
+                      <AgentSettingsCard
+                        icon={<Brain size="0.75rem" className="mt-0.5 text-[var(--primary)]" />}
+                        title={localizeUi("ui.chat.chatsettingsdrawer.longTermMemory")}
+                        description={localizeUi("ui.chat.chatsettingsdrawer.enableLongTermMemoryForThisConversation")}
+                      >
+                        <SettingsSwitch
+                          label={localizeUi("ui.chat.chatsettingsdrawer.longTermMemory")}
+                          description={localizeUi("ui.chat.chatsettingsdrawer.enableLongTermMemoryForThisConversation")}
+                          checked={metadata.enableAgents === true && activeAgentIds.includes(ltmPackage.id)}
+                          onChange={(enabled) => void setLtmEnabledForChat(enabled)}
+                          labelPosition="start"
+                          className={cn(
+                            "justify-between rounded-lg px-3 py-2.5 text-left",
+                            metadata.enableAgents === true && activeAgentIds.includes(ltmPackage.id)
+                              ? "bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30"
+                              : "bg-[var(--background)]/75 ring-1 ring-[var(--border)] hover:bg-[var(--accent)]",
+                          )}
+                          labelClassName="text-xs font-medium"
+                        />
+                        <CapabilityElement
+                          packageId={ltmPackage.id}
+                          view="settings"
+                          capabilityProps={{
+                            chatId: chat.id,
+                            enabledForChat: metadata.enableAgents === true && activeAgentIds.includes(ltmPackage.id),
+                            chatSettings: {
+                              longTermMemoryRecallStyle: metadata.longTermMemoryRecallStyle,
+                              longTermMemoryBudgetTokens: metadata.longTermMemoryBudgetTokens,
+                              longTermMemoryMaxChunks: metadata.longTermMemoryMaxChunks,
+                            },
+                            onEnabledForChatChange: setLtmEnabledForChat,
+                            onChatSettingsChange: async (patch: Record<string, unknown>) => {
+                              await updateMeta.mutateAsync({ id: chat.id, ...patch });
+                            },
+                            onOpenAgentSettings: () => {
+                              void requestClose().then((closed) => {
+                                if (closed) useUIStore.getState().openAgentDetail("long-term-memory");
+                              });
+                            },
+                            onDirtyChange: setEditorDirty,
+                          }}
+                          className="block overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--background)]/45"
+                        />
+                      </AgentSettingsCard>
                     ) : null}
 
                     {/* Schedule generation preferences — free-form authorial guidance */}
