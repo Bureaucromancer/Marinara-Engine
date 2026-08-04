@@ -4800,7 +4800,10 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
             <div className="min-h-full">
               <div className="sticky top-0 z-20 border-b border-[var(--noodle-divider)] bg-[var(--background)]/95 backdrop-blur">
                 <div className="flex min-h-14 items-center gap-3 px-3 py-2">
-                  <MobileTimelineBackButton onClick={openMobileHomeTimeline} />
+                  <MobileTimelineBackButton
+                    onClick={closeProfile}
+                    label={profileReturnToSettings ? localizeUi("ui.noodle.ambientProfiles.backToSettings") : undefined}
+                  />
                   <button
                     type="button"
                     onClick={() => openProfileConnection(null)}

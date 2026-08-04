@@ -1,38 +1,41 @@
 import { AMBIENT_NOODLE_ENTITY_IDS, type NoodleAccount } from "@marinara-engine/shared";
 import { createNoodleStorage } from "../storage/noodle.storage.js";
 
-export const AMBIENT_NOODLE_PROFILES = [
-  {
-    entityId: "random_user:thread-countess",
+/** Seed copy for the shared ambient roster. Keyed by entity ID so a roster change fails to compile here. */
+const AMBIENT_NOODLE_SEED_COPY: Record<
+  (typeof AMBIENT_NOODLE_ENTITY_IDS)[number],
+  { displayName: string; bio: string }
+> = {
+  "random_user:thread-countess": {
     displayName: "Thread Countess",
     bio: "Chronically online textile hobbyist who treats every Noodle argument like court gossip.",
   },
-  {
-    entityId: "random_user:packet-soup",
+  "random_user:packet-soup": {
     displayName: "Packet Soup",
     bio: "Friendly lurker, recipe collector, and accidental drama amplifier.",
   },
-  {
-    entityId: "random_user:orbit-notice",
+  "random_user:orbit-notice": {
     displayName: "Orbit Notice",
     bio: "Posts vague observations, likes too quickly, and follows anyone with interesting chaos.",
   },
-  {
-    entityId: "random_user:glass-bulletin",
+  "random_user:glass-bulletin": {
     displayName: "Glass Bulletin",
     bio: "Local rumor account with polished manners and questionable sources.",
   },
-  {
-    entityId: "random_user:moth-hour",
+  "random_user:moth-hour": {
     displayName: "Moth Hour",
     bio: "Night-scroller who replies with eerie encouragement and niche memes.",
   },
-  {
-    entityId: "random_user:brine-index",
+  "random_user:brine-index": {
     displayName: "Brine Index",
     bio: "Overconfident commentator who keeps a spreadsheet of everyone else's scandals.",
   },
-] as const;
+};
+
+export const AMBIENT_NOODLE_PROFILES = AMBIENT_NOODLE_ENTITY_IDS.map((entityId) => ({
+  entityId,
+  ...AMBIENT_NOODLE_SEED_COPY[entityId],
+}));
 
 const AMBIENT_NOODLE_ENTITY_ID_SET = new Set<string>(AMBIENT_NOODLE_ENTITY_IDS);
 let ambientSeedQueue: Promise<void> = Promise.resolve();

@@ -161,7 +161,13 @@ export async function rerollAmbientNoodleProfiles(input: {
     debugMode: input.debugMode,
     responseFormat: noodleResponseFormat(input.connection.model, "profiles"),
   });
-  const parsed = parseNoodleGeneratedProfiles(parseGameJsonish(result.content ?? ""));
+  // A wholly malformed response throws; report it per account instead of failing the whole request.
+  let parsed: ReturnType<typeof parseNoodleGeneratedProfiles> = { profiles: [], rejected: [] };
+  try {
+    parsed = parseNoodleGeneratedProfiles(parseGameJsonish(result.content ?? ""));
+  } catch (error) {
+    logger.warn(error, "[noodle] Ambient profile reroll returned an unusable response");
+  }
   if (parsed.rejected.length > 0) {
     logger.warn("[noodle] Skipped %d invalid Ambient profile row(s)", parsed.rejected.length);
   }
