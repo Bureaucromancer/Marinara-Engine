@@ -94,11 +94,16 @@ export function createLibraryFoldersStorage(db: DB) {
     },
 
     async moveItems(scope: LibraryFolderScope, input: MoveLibraryItemsInput) {
-      const rows = await listRows(scope);
-      if (input.folderId !== null && !rows.some((folder) => folder.id === input.folderId)) return false;
       const movingIds = new Set(input.itemIds);
       const timestamp = now();
-      await db.transaction(async (tx) => {
+      return db.transaction(async (tx) => {
+        const rows = await tx
+          .select()
+          .from(libraryFolders)
+          .where(eq(libraryFolders.scope, scope))
+          .orderBy(libraryFolders.sortOrder);
+        if (input.folderId !== null && !rows.some((folder) => folder.id === input.folderId)) return false;
+
         for (const folder of rows) {
           const currentIds = parseItemIds(folder.itemIds);
           const nextIds = currentIds.filter((id) => !movingIds.has(id));
@@ -109,8 +114,8 @@ export function createLibraryFoldersStorage(db: DB) {
             .set({ itemIds: JSON.stringify(nextIds), updatedAt: timestamp })
             .where(eq(libraryFolders.id, folder.id));
         }
+        return true;
       });
-      return true;
     },
 
     async migrate(scope: LibraryFolderScope, input: MigrateLibraryFoldersInput) {

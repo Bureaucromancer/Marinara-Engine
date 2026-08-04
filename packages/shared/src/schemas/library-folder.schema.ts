@@ -53,9 +53,23 @@ export const migrateLibraryFolderSchema = z.object({
   itemIds: libraryFolderItemIdsSchema,
 });
 
-export const migrateLibraryFoldersSchema = z.object({
-  folders: z.array(migrateLibraryFolderSchema).max(1_000),
-});
+export const migrateLibraryFoldersSchema = z
+  .object({
+    folders: z.array(migrateLibraryFolderSchema).max(1_000),
+  })
+  .superRefine(({ folders }, ctx) => {
+    const seen = new Set<string>();
+    folders.forEach((folder, index) => {
+      if (seen.has(folder.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["folders", index, "id"],
+          message: "Folder IDs must be unique",
+        });
+      }
+      seen.add(folder.id);
+    });
+  });
 
 export type LibraryFolderScope = z.infer<typeof libraryFolderScopeSchema>;
 export type CreateLibraryFolderInput = z.infer<typeof createLibraryFolderSchema>;

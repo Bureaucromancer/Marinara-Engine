@@ -20,6 +20,7 @@ export type LibraryFolder = {
 };
 
 const STORAGE_KEY = "marinara-library-folders-v1";
+const MAX_MIGRATION_FOLDERS = 1_000;
 
 type LegacyLibraryFolder = MigrateLibraryFolderInput & {
   scope: LibraryFolderScope;
@@ -68,6 +69,12 @@ function migrateLegacyFolders(scope: LibraryFolderScope) {
     const allLegacyFolders = readLegacyFolders();
     const scopedFolders = allLegacyFolders.filter((folder) => folder.scope === scope);
     if (scopedFolders.length === 0) return;
+    if (scopedFolders.length > MAX_MIGRATION_FOLDERS) {
+      console.warn(
+        `Skipping legacy ${scope} folder migration because it exceeds the ${MAX_MIGRATION_FOLDERS}-folder limit.`,
+      );
+      return;
+    }
 
     await api.post(`/library-folders/${scope}/migrate`, {
       folders: scopedFolders.map(({ id, name, collapsed, sortOrder, itemIds }) => ({
@@ -78,8 +85,12 @@ function migrateLegacyFolders(scope: LibraryFolderScope) {
         itemIds,
       })),
     });
-    const remainingFolders = readLegacyFolders().filter((folder) => folder.scope !== scope);
-    writeLegacyFolders(remainingFolders);
+    try {
+      const remainingFolders = readLegacyFolders().filter((folder) => folder.scope !== scope);
+      writeLegacyFolders(remainingFolders);
+    } catch (error) {
+      console.warn("Legacy library folders migrated, but local cleanup failed.", error);
+    }
   })().catch((error) => {
     migrationPromises.delete(scope);
     throw error;
