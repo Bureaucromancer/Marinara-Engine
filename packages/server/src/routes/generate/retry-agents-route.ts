@@ -1227,7 +1227,17 @@ async function resolveRetryAgents(args: {
       .filter((agentType) => isAgentAvailableInChatMode(chatMode, agentType))
       .filter((agentType) => activeAgentTypeSet.has(agentType)),
   );
-  const configs = (await agentsStore.list()).filter(
+  const allConfigs = await agentsStore.list();
+  const skippedImportedConfigs = args.allowExternalAgentImports
+    ? []
+    : allConfigs.filter((config) => isExternallyImportedAgent(config.type, config.settings));
+  if (skippedImportedConfigs.length > 0) {
+    logger.debug(
+      "[agents] Retry skipped %d externally imported Agent configurations because custom imports are disabled",
+      skippedImportedConfigs.length,
+    );
+  }
+  const configs = allConfigs.filter(
     (config) => args.allowExternalAgentImports || !isExternallyImportedAgent(config.type, config.settings),
   );
   const deletedBuiltInTypes = new Set(

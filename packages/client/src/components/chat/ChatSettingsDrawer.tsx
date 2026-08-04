@@ -225,6 +225,7 @@ import {
   AGENT_COST_HIGH_TOKENS,
   CONVERSATION_COMMAND_AGENT_IDS,
   CONVERSATION_COMMAND_KEYS,
+  CHAT_SUMMARY_OUTPUT_TOKENS,
   getDefaultBuiltInAgentSettings,
   isAgentManifestAvailableInChatMode,
   isAgentConfigDeleted,
@@ -935,6 +936,11 @@ export function ChatSettingsDrawer({
       ),
     [isGame, sidecarModelDisplayName, sidecarModelDownloaded, textConnectionsList],
   );
+  const conversationSummaryConnectionId =
+    typeof metadata.summaryConnectionId === "string" ? metadata.summaryConnectionId : "";
+  const conversationSummaryConnectionMissing =
+    conversationSummaryConnectionId.length > 0 &&
+    !chatGenerationConnectionsList.some((connection) => connection.id === conversationSummaryConnectionId);
   const illustratorPromptConnectionsList = useMemo(() => {
     const options: Array<{ id: string; name: string; model?: string | null }> = [];
     for (const connection of chatGenerationConnectionsList) {
@@ -5986,6 +5992,7 @@ export function ChatSettingsDrawer({
                           capabilityProps={{
                             chatId: chat.id,
                             metadata,
+                            connections: textConnectionsList,
                             updateMetadata: (patch: Record<string, unknown>) =>
                               updateMeta.mutate({ id: chat.id, ...patch }),
                           }}
@@ -8564,6 +8571,65 @@ export function ChatSettingsDrawer({
                   </div>
                   <Pencil size="0.875rem" className="shrink-0 text-[var(--muted-foreground)]" />
                 </button>
+
+                <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--secondary)]/35 p-2.5">
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium">
+                      {localizeUi("ui.chat.summarypopover.summaryConnection_febe5c4")}
+                    </span>
+                    <select
+                      value={conversationSummaryConnectionId}
+                      onChange={(event) =>
+                        updateMeta.mutate({
+                          id: chat.id,
+                          summaryConnectionId: event.target.value || null,
+                        })
+                      }
+                      className="w-full rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs outline-none ring-1 ring-transparent transition-shadow focus:ring-[var(--primary)]/40"
+                      aria-label={localizeUi("ui.chat.summarypopover.summaryConnection_febe5c4")}
+                    >
+                      <option value="">{localizeUi("chat.summary.connection.agentDefaultFallback")}</option>
+                      {conversationSummaryConnectionMissing && (
+                        <option value={conversationSummaryConnectionId}>
+                          {localizeUi("chat.summary.connection.missing", {
+                            id: conversationSummaryConnectionId,
+                          })}
+                        </option>
+                      )}
+                      {chatGenerationConnectionsList.map((connection) => (
+                        <option key={connection.id} value={connection.id}>
+                          {connection.name}
+                          {connection.model ? localizeUi("ui.chat.datablock.value1", { value1: connection.model }) : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[0.625rem] text-[var(--muted-foreground)]">
+                      {localizeUi("ui.chat.summarypopover.chooseTheModelConnectionUsedForManualAndAutomatic")}
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium">
+                      {localizeUi("ui.chat.summarypopover.maximumOutputSize")}
+                    </span>
+                    <DraftNumberInput
+                      value={
+                        typeof metadata.summaryMaxTokens === "number"
+                          ? metadata.summaryMaxTokens
+                          : CHAT_SUMMARY_OUTPUT_TOKENS.DEFAULT
+                      }
+                      min={CHAT_SUMMARY_OUTPUT_TOKENS.MIN}
+                      max={CHAT_SUMMARY_OUTPUT_TOKENS.MAX}
+                      onCommit={(value) =>
+                        updateMeta.mutate({
+                          id: chat.id,
+                          summaryMaxTokens: value,
+                        })
+                      }
+                      ariaLabel={localizeUi("ui.chat.summarypopover.summaryMaximumOutputSize")}
+                      className="w-full rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs outline-none ring-1 ring-transparent transition-shadow focus:ring-[var(--primary)]/40"
+                    />
+                  </div>
+                </div>
 
                 {/* Day rollover hour */}
                 <div className="space-y-1.5">

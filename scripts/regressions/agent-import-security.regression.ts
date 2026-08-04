@@ -7,6 +7,7 @@ import {
   normalizeAgentImportEntry,
 } from "../../packages/client/src/lib/agent-transfer.js";
 import { collectFolderPackageEntries } from "../../packages/client/src/lib/folder-package-transfer.js";
+import { resolveCustomAgentImportsEnabled } from "../../packages/server/src/services/agents/custom-agent-import-policy.service.js";
 import {
   CUSTOM_AGENT_PERMISSIONS_EXPLICIT_SETTING,
   customAgentHasCapability,
@@ -88,6 +89,21 @@ assert.equal(
   false,
   "locally authored custom Agents must not be mistaken for imports",
 );
+assert.equal(
+  isExternallyImportedAgent("custom-import-helper-locally-authored", {}),
+  false,
+  "a local Agent named Import Helper must not be mistaken for a file import by slug alone",
+);
+assert.equal(
+  isExternallyImportedAgent("custom-import-helper-imported", { customAgentImportSource: "file" }),
+  true,
+  "explicit file-import provenance must remain authoritative",
+);
+
+assert.equal(resolveCustomAgentImportsEnabled(undefined), true, "upgrades with no saved policy must stay enabled");
+assert.equal(resolveCustomAgentImportsEnabled(null), true, "fresh storage reads must default to enabled");
+assert.equal(resolveCustomAgentImportsEnabled("true"), true);
+assert.equal(resolveCustomAgentImportsEnabled("false"), false, "an explicit user disable must remain authoritative");
 
 const builtInCollision = normalizeAgentImportEntry({
   type: "spotify",

@@ -54,7 +54,6 @@ import { getTranscriptRenderWindow, TRANSCRIPT_RENDER_WINDOW_STEP } from "../../
 import { useUIStore } from "../../stores/ui.store";
 import { useChatStore } from "../../stores/chat.store";
 import { useGameStateStore } from "../../stores/game-state.store";
-import { useThrottledStreamBuffer } from "../../hooks/use-throttled-stream-buffer";
 import { useChatComposerFocused, useChatKeyboardOpen } from "../../hooks/use-visual-viewport-chat-bottom";
 import { useActiveLorebookEntries, useLorebooks } from "../../hooks/use-lorebooks";
 import { usePresetFull, usePresets } from "../../hooks/use-presets";
@@ -295,6 +294,45 @@ function CrossfadeBackground({
   );
 }
 
+function RoleplayLiveStreamText({ chatId, emptyLabel }: { chatId: string; emptyLabel: string }) {
+  const textRef = useRef<HTMLSpanElement>(null);
+  const emptyRef = useRef<HTMLSpanElement>(null);
+
+  useLayoutEffect(() => {
+    let frame: number | null = null;
+    const readBuffer = () => {
+      const state = useChatStore.getState();
+      return state.streamBuffers.get(chatId) ?? (state.activeChatId === chatId ? state.streamBuffer : "");
+    };
+    const apply = () => {
+      frame = null;
+      const next = readBuffer();
+      if (textRef.current && textRef.current.textContent !== next) textRef.current.textContent = next;
+      if (emptyRef.current) emptyRef.current.hidden = next.length > 0;
+    };
+    const schedule = () => {
+      if (frame === null) frame = requestAnimationFrame(apply);
+    };
+
+    apply();
+    const unsubscribe = useChatStore.subscribe(
+      (state) => state.streamBuffers.get(chatId) ?? (state.activeChatId === chatId ? state.streamBuffer : ""),
+      schedule,
+    );
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      unsubscribe();
+    };
+  }, [chatId]);
+
+  return (
+    <>
+      <span ref={emptyRef}>{emptyLabel}</span>
+      <span ref={textRef} />
+    </>
+  );
+}
+
 function StreamingIndicator({
   activeChatId,
   chatCharIds,
@@ -315,7 +353,6 @@ function StreamingIndicator({
   expressionAvatarResolver?: ExpressionAvatarResolver;
 }) {
   const { t } = useTranslation();
-  const streamBuffer = useThrottledStreamBuffer();
   const thinkingBuffer = useChatStore((s) => s.thinkingBuffer);
   const streamingCharacterId = useChatStore((s) => s.streamingCharacterId);
 
@@ -327,7 +364,7 @@ function StreamingIndicator({
           chatId: activeChatId,
           role: "assistant",
           characterId: streamingCharacterId ?? chatCharIds[0] ?? null,
-          content: streamBuffer || t("chat.message.thinking"),
+          content: "",
           activeSwipeIndex: 0,
           extra: {
             displayText: null,
@@ -339,6 +376,7 @@ function StreamingIndicator({
           createdAt: new Date().toISOString(),
         }}
         isStreaming
+        streamingContent={<RoleplayLiveStreamText chatId={activeChatId} emptyLabel={t("chat.message.thinking")} />}
         characterMap={characterMap}
         personaInfo={personaInfo}
         chatMode={chatMode}
@@ -358,7 +396,6 @@ function RegeneratingMessageContent({
   msg: MessageWithSwipes;
 } & Omit<ComponentProps<typeof ChatMessage>, "message" | "isStreaming">) {
   const { t } = useTranslation();
-  const streamBuffer = useThrottledStreamBuffer();
   const thinkingBuffer = useChatStore((s) => s.thinkingBuffer);
   // Strip old-swipe attachments so a previous illustration doesn't linger
   // while the new swipe's text is streaming in. The same applies to old
@@ -368,8 +405,9 @@ function RegeneratingMessageContent({
   const cleanExtra = { ...parsedExtra, attachments: null, thinking: thinkingBuffer || null };
   return (
     <ChatMessage
-      message={{ ...msg, extra: cleanExtra, content: streamBuffer || t("chat.message.thinking") }}
+      message={{ ...msg, extra: cleanExtra, content: "" }}
       isStreaming
+      streamingContent={<RoleplayLiveStreamText chatId={msg.chatId} emptyLabel={t("chat.message.thinking")} />}
       {...rest}
     />
   );
