@@ -28,6 +28,7 @@ import { GAME_ASSETS_DIR, buildAssetManifest, getAssetManifest } from "../servic
 import { folderContainsBundledGameAssets, isBundledGameAsset } from "../services/game/native-game-assets.js";
 import { requirePrivilegedAccess } from "../middleware/privileged-gate.js";
 import { assertInsideDir } from "../utils/security.js";
+import { getSharp } from "../utils/sharp.js";
 import { openFolderInFileManager } from "../lib/open-folder-in-file-manager.js";
 import { parseThumbnailWidth, resolveThumbPath } from "../services/image/image-thumbnail.js";
 
@@ -56,38 +57,6 @@ function loadMeta(): Record<string, FolderMeta> {
  */
 function saveMeta(meta: Record<string, FolderMeta>) {
   atomicWriteText(META_PATH, JSON.stringify(meta, null, 2));
-}
-
-// sharp can fail to load on Android/Termux because it has no native Android
-// prebuild. Lazy-load it so metadata enrichment can degrade without blocking
-// server startup.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SharpFn = any;
-let cachedSharp: SharpFn | null = null;
-let sharpLoadFailed = false;
-let sharpLoadPromise: Promise<SharpFn | null> | null = null;
-async function getSharp(): Promise<SharpFn | null> {
-  if (cachedSharp) return cachedSharp;
-  if (sharpLoadFailed) return null;
-  if (sharpLoadPromise) return sharpLoadPromise;
-
-  sharpLoadPromise = (async () => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore - optional native dep, may not load on some platforms
-      const mod = await import("sharp");
-      cachedSharp = (mod.default ?? mod) as SharpFn;
-      return cachedSharp;
-    } catch (error) {
-      sharpLoadFailed = true;
-      logger.debug(error, "[game-assets] Image metadata unavailable because sharp could not be loaded");
-      return null;
-    } finally {
-      sharpLoadPromise = null;
-    }
-  })();
-
-  return sharpLoadPromise;
 }
 
 const MIME_MAP: Record<string, string> = {

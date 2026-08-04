@@ -1,9 +1,10 @@
-import { existsSync, rmSync, unlinkSync } from "fs";
+import { existsSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import type { NoodlerManagedPost } from "@marinara-engine/shared";
 import { logger } from "../../lib/logger.js";
 import { DATA_DIR } from "../../utils/data-dir.js";
 import { assertInsideDir } from "../../utils/security.js";
+import { getSharp } from "../../utils/sharp.js";
 import { stageImageToDisk } from "../image/image-generation.js";
 
 // NoodleR-owned media lives under the gallery data dir but in a namespace whose
@@ -24,7 +25,7 @@ export function noodlerPostMediaUrl(postId: string): string {
   return `/api/noodle/noodler/posts/${encodeURIComponent(postId)}/media`;
 }
 
-const NOODLER_MEDIA_URL_PREFIX = "/api/noodle/noodler/posts/";
+export const NOODLER_MEDIA_URL_PREFIX = "/api/noodle/noodler/posts/";
 
 /**
  * Bind a stored NoodleR media URL to the persona it is being served to. The media route
@@ -65,6 +66,38 @@ export async function persistNoodlerPostWithUploadedMedia<T>(
   }
 }
 
+// A locked post shows a blurred teaser, not a grey frame — that is what the onboarding
+// wizard teaches users to recognise. The blur has to happen server-side: shipping the
+// original bytes and blurring in CSS discloses the image to anyone who opens devtools.
+// Downscaling to a handful of pixels before blurring makes the original unrecoverable
+// rather than merely hidden.
+const TEASER_WIDTH = 24;
+const TEASER_SUFFIX = ".teaser.jpg";
+
+/**
+ * Blurred, unrecoverable teaser bytes for a locked post's media, cached next to the
+ * original. Null where `sharp` is unavailable (no Android prebuild) or the source cannot be
+ * decoded — callers must fail closed and serve nothing rather than the original.
+ */
+export async function readNoodlerLockedTeaser(absolutePath: string): Promise<Buffer | null> {
+  const teaserPath = `${absolutePath}${TEASER_SUFFIX}`;
+  if (existsSync(teaserPath)) return readFileSync(teaserPath);
+  const sharp = await getSharp();
+  if (!sharp) return null;
+  try {
+    const teaser: Buffer = await sharp(absolutePath)
+      .resize({ width: TEASER_WIDTH, withoutEnlargement: true })
+      .blur(2)
+      .jpeg({ quality: 60 })
+      .toBuffer();
+    writeFileSync(teaserPath, teaser);
+    return teaser;
+  } catch (error) {
+    logger.warn(error, "[noodler] Failed to build locked teaser for %s", absolutePath);
+    return null;
+  }
+}
+
 export function readNoodlerMediaPath(post: Pick<NoodlerManagedPost, "metadata">): string | null {
   const value = (post.metadata as Record<string, unknown> | null | undefined)?.noodlerMediaPath;
   return typeof value === "string" && value.startsWith(NOODLER_MEDIA_PREFIX) ? value : null;
@@ -87,6 +120,8 @@ export function unlinkNoodlerMedia(relativePath: string | null): void {
   if (!absolute) return;
   try {
     if (existsSync(absolute)) unlinkSync(absolute);
+    // The cached teaser is a derivative of the same bytes and must not outlive them.
+    if (existsSync(`${absolute}${TEASER_SUFFIX}`)) unlinkSync(`${absolute}${TEASER_SUFFIX}`);
   } catch (error) {
     logger.warn(error, "[noodler] Failed to remove NoodleR media file %s", relativePath);
   }

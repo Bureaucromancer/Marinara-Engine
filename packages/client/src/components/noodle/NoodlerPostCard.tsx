@@ -101,7 +101,8 @@ export function LockedNoodlerPostCard({
   const replyCount = post.replyCount ?? 0;
   const openProfile = onOpenProfile ? () => onOpenProfile(profile.id) : undefined;
   const revealed = Boolean(demo && demoUnlocked);
-  // Locked posts report hasImage without a URL: the frame renders, the bytes stay server-side.
+  // A locked post's URL resolves to a server-blurred teaser, not the original bytes. Where no
+  // teaser can be built the server sends nothing and only the frame renders.
   const mediaSrc = (revealed && demo?.unlockedImageUrl) || post.imageUrl || null;
   return (
     <article
@@ -159,8 +160,10 @@ export function LockedNoodlerPostCard({
                 }
                 className={cn(
                   "h-full w-full object-cover transition-[filter,transform] duration-500 motion-reduce:transition-none",
-                  // The demo teaser ships pre-blurred, so a full blur-xl on top turns it to mush.
-                  revealed ? "scale-100 blur-0" : cn("scale-110", demo ? "blur-sm" : "blur-xl"),
+                  // Locked images arrive already blurred (the demo teaser ships that way, real
+                  // ones are blurred server-side), so this is presentation on top, not the
+                  // protection — a heavier blur would only turn them to mush.
+                  revealed ? "scale-100 blur-0" : "scale-110 blur-sm",
                 )}
               />
             ) : (
