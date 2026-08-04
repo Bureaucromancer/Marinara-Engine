@@ -14,6 +14,7 @@ const promptSchema = z.object({
   chatId: z.string().min(1),
   message: z.string().min(1),
   connectionId: z.string().optional().nullable(),
+  existingUserMessageId: z.string().min(1).optional(),
   attachments: z
     .array(
       z.object({
@@ -138,6 +139,7 @@ export async function professorMariWorkspaceRoutes(app: FastifyInstance) {
         text: body.message,
         connectionId: body.connectionId ?? null,
         attachments: body.attachments,
+        existingUserMessageId: body.existingUserMessageId,
         onEvent: send,
       });
       send({ type: "done", data: { ok: true } });

@@ -62,6 +62,7 @@ import { useTTSConfig } from "../../hooks/use-tts";
 import { buildTTSVoiceRequests, normalizeTTSCharacterName, withTTSVoiceRequestCacheKeys } from "../../lib/tts-dialogue";
 import { DIALOGUE_QUOTE_PATTERN_SOURCE, HTML_SAFE_DIALOGUE_QUOTE_PATTERN_SOURCE } from "../../lib/dialogue-quotes";
 import { resolveMessageRewriteVersions } from "../../lib/message-rewrite-versions";
+import { convertChatHtmlNewlines } from "../../lib/chat-html-newlines";
 import DOMPurify from "dompurify";
 import type { CharacterMap, ExpressionAvatarResolver, MessageSelectionToggle, PersonaInfo } from "./chat-area.types";
 import {
@@ -1065,22 +1066,7 @@ function renderContent(
 
   const { html: strippedWithoutStyleBlocks, css: rawStyleBlocks } = extractChatStyleBlocks(stripped);
 
-  // Convert newlines to <br> with compact spacing for HTML content,
-  // but preserve newlines inside <svg> blocks — injecting <br> into SVG
-  // foreign content breaks the HTML parser's namespace handling.
-  // Also skip newlines that sit between HTML tags (source formatting only).
-  // First, protect newlines inside attribute values (e.g. multi-line style="")
-  // by temporarily replacing them with a placeholder.
-  const ATTR_NL_PLACEHOLDER = "\x00ATTRNL\x00";
-  const attrProtected = strippedWithoutStyleBlocks.replace(
-    /(<[^>]*?)("[^"]*"|'[^']*')([^>]*>)/g,
-    (_m, before: string, attr: string, after: string) => before + attr.replace(/\n/g, ATTR_NL_PLACEHOLDER) + after,
-  );
-  const withBreaks = attrProtected
-    .replace(/(<svg[\s\S]*?<\/svg>)|(>\s*)\n(\s*<)|\n/gi, (_m, svgBlock, pre, post) =>
-      svgBlock ? svgBlock : pre ? `${pre}${post}` : '<br style="display:block;margin:0.2em 0">',
-    )
-    .replace(new RegExp(ATTR_NL_PLACEHOLDER, "g"), "\n");
+  const withBreaks = convertChatHtmlNewlines(strippedWithoutStyleBlocks);
 
   // Convert markdown images to <img> before sanitization so DOMPurify validates them.
   // Keep tags minimal (no class, only loading/decoding attrs) — styling is via .mari-message-content img in CSS

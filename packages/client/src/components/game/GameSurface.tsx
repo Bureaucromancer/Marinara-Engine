@@ -21,6 +21,7 @@ import { useShallow } from "zustand/react/shallow";
 import { toast } from "sonner";
 import { useGameModeStore } from "../../stores/game-mode.store";
 import { useGameAssetStore } from "../../stores/game-asset.store";
+import { NewGameExperienceChooser } from "./NewGameExperienceChooser";
 import {
   gameAssetKeys,
   useGameAssetManifest,
@@ -76,6 +77,7 @@ import {
 } from "../../hooks/use-chats";
 import { useConnections } from "../../hooks/use-connections";
 import { useAgentConfigs } from "../../hooks/use-agents";
+import { selectGameExperiencePackages, useInstalledCapabilityPackages } from "../../hooks/use-capability-packages";
 import { useGenerate } from "../../hooks/use-generate";
 import { useBackdropDismiss } from "../../hooks/use-backdrop-dismiss";
 import { useGenerateSpatialMapDraft, useSpatialContext } from "../../hooks/use-spatial-context";
@@ -317,6 +319,18 @@ const GAME_MOBILE_ACTION_MENU = cn(ROLEPLAY_POPOVER_SHELL, "flex w-72 max-w-[cal
 const GAME_MOBILE_FLOATING_PANEL =
   "fixed z-[9999] h-[min(42rem,calc(100dvh-4.75rem))] w-[min(42rem,calc(100vw-4.75rem))]";
 const GAME_MOBILE_FLOATING_MENU = "fixed z-[9999] max-h-[min(32rem,calc(100dvh-4.75rem))] overflow-y-auto";
+const EXPERIENCE_UNDERLAY_LAYER = "underlay" as const;
+const EMPTY_SPEAKER_AVATARS: ReadonlyMap<string, { url: string }> = new Map();
+/** Classic chrome an experience declares it replaces; anything left undeclared stays Classic. */
+type ExperienceChromeDeclaration = {
+  providesInventory?: boolean;
+  providesCombat?: boolean;
+  /** Hides the narration's text input: the experience drives turns through its own menus. */
+  providesPlayerInput?: boolean;
+  /** The experience offers the turn's choices itself, so Classic choice cards stay out of its way and the
+   *  in-flow anchor it portals into stays mounted even on a turn the narration emitted choices for. */
+  providesChoices?: boolean;
+};
 const GAME_ACTION_MENU_ITEM =
   "marinara-chat-popover__item flex items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--marinara-chat-chrome-panel-text)] transition-colors hover:bg-[var(--marinara-chat-chrome-highlight-bg-hover)] hover:text-[var(--marinara-chat-chrome-highlight-text)] disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent";
 function getGameMobileFloatingPanelStyle(anchor: ChatToolbarFloatingPanelAnchor): CSSProperties {
@@ -2148,6 +2162,30 @@ function GameSurfaceComponent({
     chatMeta.enableAgents === true &&
     Array.isArray(chatMeta.activeAgentIds) &&
     (chatMeta.activeAgentIds as string[]).includes(STORYBOARD_AGENT_ID);
+  // A package contributing the `game-surface` slot provides this game's mode: its own HUD, menus and
+  // combat over the shared narration. Picked at creation and fixed for the game's lifetime, since an
+  // experience owns the whole run. Resolved from the MANIFEST, so no package id appears here.
+  const gameExperienceId = typeof chatMeta.gameExperienceId === "string" ? chatMeta.gameExperienceId : null;
+  const { data: installedCapabilityPackages, isPending: installedCapabilityPackagesPending } =
+    useInstalledCapabilityPackages(gameExperienceId !== null);
+  const experienceSurfacePackage = useMemo(() => {
+    if (!gameExperienceId) return null;
+    return selectGameExperiencePackages(installedCapabilityPackages).find((pkg) => pkg.id === gameExperienceId) ?? null;
+  }, [gameExperienceId, installedCapabilityPackages]);
+  const experienceSurfaceId = experienceSurfacePackage?.id ?? null;
+  /** Class the manifest asks the host to stamp on the game area, so the package can restyle the shared
+   *  chrome that renders outside its element. Declared rather than pushed, so it applies on first paint. */
+  const experienceSurfaceClass = experienceSurfacePackage?.manifest.contributions?.gameSurface?.surfaceClass ?? null;
+  const experienceSurfaceActive = experienceSurfaceId !== null;
+  /** Whether an experience owns this game, which is what every built-in-chrome gate tests. Broader than
+   *  `experienceSurfaceActive`, but only while the installed-packages query is in flight: on a cold cache
+   *  that is false for a moment even though the chat already says an experience owns the run, and the
+   *  built-in HUD would flash before the surface replaces it. Once the query settles this follows the
+   *  surface, so a game whose package was uninstalled gets the built-in chrome back instead of losing
+   *  both. Mounting the capability element stays on `experienceSurfaceActive` — that one needs the
+   *  package to actually be there. */
+  const experienceOwnsGame =
+    experienceSurfaceActive || (gameExperienceId !== null && installedCapabilityPackagesPending);
   const { data: agentConfigs } = useAgentConfigs(storyboardAgentActive);
   const storyboardAgentConfig = useMemo(
     () => agentConfigs?.find((config) => config.type === STORYBOARD_AGENT_ID) ?? null,
@@ -2550,6 +2588,7 @@ function GameSurfaceComponent({
     onCloseSettings();
   }, [onCloseSettings, resetGalleryState]);
   const [activeChoices, setActiveChoices] = useState<string[] | null>(null);
+  const [experienceChoiceSlotEl, setExperienceChoiceSlotEl] = useState<HTMLDivElement | null>(null);
   const [activeQte, setActiveQte] = useState<{ actions: string[]; timer: number } | null>(null);
   const [queuedQte, setQueuedQte] = useState<{ qte: { actions: string[]; timer: number }; messageId: string } | null>(
     null,
@@ -2940,6 +2979,10 @@ function GameSurfaceComponent({
     recentSpotifyTrackHistoryRef.current = normalizeRecentSpotifyTrackHistory(chatMeta.gameRecentSpotifyTracks);
     setPartyDialogue([]);
     setPartyChatMessageId(null);
+    // Choices belong to the turn that offered them, and nothing else clears them on a scope change, so
+    // they survived into the next game — answerable there, against a GM that never asked.
+    setActiveChoices(null);
+    setActiveQte(null);
     setQueuedQte(null);
     setQueuedEncounter(null);
     setQueuedCombatGeneration(null);
@@ -3356,6 +3399,58 @@ function GameSurfaceComponent({
     spriteQueries,
   ]);
 
+  // Speaker-avatar seam: an experience whose cast has no engine character cards pushes a name→url map
+  // here, so its speakers still get an avatar in the narration.
+  const [experienceAvatars, setExperienceAvatars] = useState<{
+    speakerAvatars: ReadonlyMap<string, { url: string }>;
+    playerAvatarUrl?: string;
+  } | null>(null);
+  /** Seam setter: replaces the pushed portrait map, or clears it when the map is empty or null. */
+  const setExperienceSpeakerAvatars = useCallback(
+    (value: { speakerAvatars: ReadonlyMap<string, { url: string }>; playerAvatarUrl?: string } | null) => {
+      // NORMALIZED on the way in, because the value comes from the package and is iterated during render:
+      // a `size` check alone would accept any object carrying that property and then throw mid-render.
+      // Storing a real Map (empty when the push has none) keeps the consumer from having to re-check.
+      // A player avatar on its own is a valid push: an experience may have nothing to say about its
+      // speakers and still want the player's own dialogue to carry a face.
+      const speakers = value?.speakerAvatars;
+      const validSpeakers = speakers instanceof Map && speakers.size > 0 ? speakers : null;
+      const playerAvatarUrl =
+        typeof value?.playerAvatarUrl === "string" && value.playerAvatarUrl.trim() !== ""
+          ? value.playerAvatarUrl
+          : undefined;
+      setExperienceAvatars(
+        validSpeakers || playerAvatarUrl
+          ? { speakerAvatars: validSpeakers ?? EMPTY_SPEAKER_AVATARS, playerAvatarUrl }
+          : null,
+      );
+    },
+    [],
+  );
+  // Honored only while the surface is mounted, so a stale map can't leak into a Classic chat.
+  const activeExperienceAvatars = experienceSurfaceActive ? experienceAvatars : null;
+
+  // Chrome the experience DECLARES it replaces; nothing is inferred from which package is running.
+  // `providesPlayerInput` changes DURING play, so this is a live declaration, not a one-shot at mount.
+  const [experienceChrome, setExperienceChromeState] = useState<ExperienceChromeDeclaration | null>(null);
+  /** Seam setter: records the chrome declaration, keeping the previous object when nothing changed. */
+  const setExperienceChrome = useCallback((value: ExperienceChromeDeclaration | null) => {
+    setExperienceChromeState((previous) => {
+      const next = value && typeof value === "object" ? value : null;
+      // Same declaration → keep the previous object so the props memo doesn't churn every turn.
+      if (
+        previous?.providesInventory === next?.providesInventory &&
+        previous?.providesCombat === next?.providesCombat &&
+        previous?.providesPlayerInput === next?.providesPlayerInput &&
+        previous?.providesChoices === next?.providesChoices
+      ) {
+        return previous;
+      }
+      return next;
+    });
+  }, []);
+  const activeExperienceChrome = experienceSurfaceActive ? experienceChrome : null;
+
   const librarySpeakerAvatars = useMemo(() => {
     const map = new Map<
       string,
@@ -3379,8 +3474,24 @@ function GameSurfaceComponent({
         map.set(normalizeTextForMatch(alias), avatarInfo);
       }
     }
+    // Real library cards (added above) win; the player name is handled via personaInfo.
+    const extra = activeExperienceAvatars?.speakerAvatars;
+    if (extra?.size) {
+      const playerKey = personaInfo?.name ? normalizeTextForMatch(personaInfo.name) : "";
+      for (const [key, info] of extra) {
+        if (!key || key === playerKey || map.has(key)) continue;
+        map.set(key, info);
+      }
+    }
     return map;
-  }, [characterMap, speakingLibraryCharacters]);
+  }, [characterMap, speakingLibraryCharacters, activeExperienceAvatars, personaInfo?.name]);
+
+  // Fallback avatar for the player persona when it has none, so the player's dialogue shows one too.
+  const effectivePersonaInfo = useMemo(() => {
+    const url = activeExperienceAvatars?.playerAvatarUrl;
+    if (url && personaInfo && !personaInfo.avatarUrl) return { ...personaInfo, avatarUrl: url };
+    return personaInfo;
+  }, [activeExperienceAvatars, personaInfo]);
 
   const fullBodyTarget = useMemo(() => {
     if (gameState === "combat" && combatSpriteSuggestion) {
@@ -3476,7 +3587,10 @@ function GameSurfaceComponent({
   const sidecarFailedRuntimeVariant = useSidecarStore((s) => s.failedRuntimeVariant);
   const openSidecarModal = useSidecarStore((s) => s.setShowDownloadModal);
   const refreshSidecarStatus = useSidecarStore((s) => s.fetchStatus);
-  const sceneAnalysisEnabled = chatMeta.enableAgents === true || chatMeta.enableAgents === "true";
+  // Scene analysis is part of the agent feature set, but an experience is the game's mode, not an
+  // enabled agent — without this it would silently lose the per-segment scenery it supplies.
+  const sceneAnalysisEnabled =
+    chatMeta.enableAgents === true || chatMeta.enableAgents === "true" || experienceSurfaceActive;
 
   // Process GM tags from the latest assistant message
   const latestAssistantMsg = useMemo(() => {
@@ -6336,6 +6450,74 @@ function GameSurfaceComponent({
     [activeChatId, chatMeta.gameSessionStatus, generate, quoteFormat],
   );
 
+  // Background seam: the experience pushes a background and we render it behind the narration, so it
+  // doesn't have to draw an opaque layer of its own.
+  const [experienceBackgroundUrl, setExperienceBackgroundUrl] = useState<string | null>(null);
+  /** Seam setter: resolves a pushed tag or asset path to a URL, or clears the override when given null. */
+  const pushExperienceBackground = useCallback(
+    (value: string | null) => {
+      // A package pushes a ready asset path (it knows its own bundled art); a tag is looked up as well.
+      setExperienceBackgroundUrl(value ? (scopedAssetMap?.[value]?.path ?? value) : null);
+    },
+    [scopedAssetMap],
+  );
+
+  // Seam state belongs to the game that pushed it, and this component stays mounted across chat
+  // switches. Without this the previous game's background, avatars and chrome survive into the next
+  // one — including `providesPlayerInput`, which would leave the player with no way to send a turn.
+  const experienceSeamScopeKey = `${sceneRuntimeScopeKey}:${experienceSurfaceId ?? ""}`;
+  const experienceSeamScopeRef = useRef(experienceSeamScopeKey);
+  useEffect(() => {
+    if (experienceSeamScopeRef.current === experienceSeamScopeKey) return;
+    experienceSeamScopeRef.current = experienceSeamScopeKey;
+    setExperienceAvatars(null);
+    setExperienceChromeState(null);
+    setExperienceBackgroundUrl(null);
+  }, [experienceSeamScopeKey]);
+
+  /** The send handed to the experience. Wrapped so a turn it drives leaves the same state behind as one
+   *  the player types: pending choices, QTEs and queued encounters belong to the turn that offered them,
+   *  and the built-in send clears them through this same helper. */
+  const sendExperienceMessage = useCallback(
+    (...args: Parameters<typeof sendMessage>) => {
+      clearPendingInteractiveCommands();
+      return sendMessage(...args);
+    },
+    [clearPendingInteractiveCommands, sendMessage],
+  );
+
+  // Engine state handed to the slot, recomputed per turn so the surface tracks streaming and new
+  // messages. Builds nothing unless the surface is mounted, so a Classic game never pays for it.
+  const experienceSurfaceProps = useMemo(
+    () => (!experienceSurfaceActive ? undefined : {
+      chatId: activeChatId,
+      chatMeta,
+      messages,
+      latestAssistant: latestAssistantMsg,
+      isStreaming,
+      scopedAssetMap,
+      sendMessage: sendExperienceMessage,
+      setExperienceBackgroundTag: pushExperienceBackground,
+      setExperienceSpeakerAvatars,
+      setExperienceChrome,
+      // Who is speaking RIGHT NOW, as the narration plays. Deriving it from the turn text instead yields
+      // only the LAST speaker of the turn, which leaves a VN sprite stuck on whoever spoke last.
+      activeSpeaker: activeSpeaker ? { name: activeSpeaker.name, expression: activeSpeaker.expression ?? null } : null,
+      experienceChoiceSlotEl,
+      // Per-turn state, so the surface can hold its menu until the narration finishes.
+      narrationDone,
+      latestNarrationText,
+      scenePreparing,
+      directionsPlaying,
+      assetGenerationBlocksScene,
+      replayActive,
+      sessionInteractive: (chatMeta.gameSessionStatus as string) !== "concluded",
+      // The host's sprite-size setting, so the player's slider keeps working in this mode.
+      spriteScale: gameFullBodySpriteScale,
+    }),
+    [experienceSurfaceActive, activeChatId, chatMeta, messages, latestAssistantMsg, isStreaming, scopedAssetMap, sendExperienceMessage, pushExperienceBackground, setExperienceSpeakerAvatars, setExperienceChrome, activeSpeaker, experienceChoiceSlotEl, narrationDone, latestNarrationText, scenePreparing, directionsPlaying, assetGenerationBlocksScene, replayActive, gameFullBodySpriteScale],
+  );
+
   // Game mutations
   const createGame = useCreateGame();
   const gameSetup = useGameSetup();
@@ -7680,11 +7862,14 @@ function GameSurfaceComponent({
     if (gameTutorialDisabled) return;
     if (isSetupActive) return;
     if (partyMembers.length === 0) return;
+    // This tour spotlights built-in chrome an experience replaces. Suppressed, NOT consumed:
+    // `gameTutorialDisabled` is untouched, so a later Classic game still gets the tour on its first turn.
+    if (experienceOwnsGame) return;
     tutorialAutoTriggeredRef.current = true;
     // Small delay so the UI has time to mount/layout before the tooltip measures rects
     const t = window.setTimeout(() => setTutorialOpen(true), 600);
     return () => window.clearTimeout(t);
-  }, [gameTutorialDisabled, isSetupActive, partyMembers.length]);
+  }, [gameTutorialDisabled, isSetupActive, partyMembers.length, experienceOwnsGame]);
 
   const handleCloseTutorial = useCallback(() => {
     setTutorialOpen(false);
@@ -8172,6 +8357,11 @@ function GameSurfaceComponent({
     setCombatGenerationError(null);
     generateCombatStateForMessage(messageId);
   }, [combatGenerationPending, combatUiActive, generateCombatStateForMessage, latestAssistantMsg?.id, localizeUi]);
+
+  // The narration renders these buttons only when the props are supplied, so withholding them beats
+  // hiding: no dead button, and no way to reach the Classic flow underneath the surface.
+  const classicInventoryOpener = activeExperienceChrome?.providesInventory ? undefined : () => setInventoryOpen(true);
+  const classicCombatStarter = activeExperienceChrome?.providesCombat ? undefined : handleRequestManualCombatStart;
 
   useEffect(() => {
     if (!queuedQte || !latestAssistantMsg?.id) return;
@@ -9851,10 +10041,20 @@ function GameSurfaceComponent({
   }, [sceneRuntimeScopeKey, resolvedBackground, scenePreparing]);
 
   const displayedBackground =
+    // A pushed background wins over the Classic resolution, but only while the surface is mounted, so
+    // the last one pushed can't stay stuck on screen afterwards.
+    (experienceSurfaceActive ? experienceBackgroundUrl : null) ??
     resolvedBackground ??
     (scenePreparing && lastResolvedBackgroundRef.current.scopeKey === sceneRuntimeScopeKey
       ? lastResolvedBackgroundRef.current.url
       : undefined);
+
+  // Carries the RESOLVED background so an experience can post-process the scene it draws over. It cannot
+  // derive this itself — the host's scene analysis may have chosen the background rather than the seam.
+  const experienceUnderlayProps = useMemo(
+    () => ({ layer: EXPERIENCE_UNDERLAY_LAYER, backgroundUrl: displayedBackground ?? null }),
+    [displayedBackground],
+  );
 
   // ONLY gate on the first turn — once a playable GM turn has been received,
   // the game is in-progress and the "adventure begins" screen should never reappear.
@@ -9909,7 +10109,32 @@ function GameSurfaceComponent({
 
   // Setup wizard — show when explicitly active, when game needs creation, or when status is still "setup" (e.g. previous setup failed)
   if (shouldShowSetupWizard) {
-    return (
+    // Shared with an experience's own setup, so closing either one behaves identically.
+    /** Closes setup from either wizard: no-op while a launch is pending, and drops an empty chat. */
+    const dismissSetupWizard = () => {
+      if (
+        createGame.isPending ||
+        gameSetup.isPending ||
+        generateSetupMapDraft.isPending ||
+        updateChat.isPending ||
+        updateChatMetadata.isPending ||
+        activePendingSharedWorldSetupApply
+      ) return;
+      useGameModeStore.getState().setSetupActive(false);
+      if (canAutoDeleteEmptySetupChat) {
+        deleteChat.mutate(activeChatId, {
+          onSuccess: () => useChatStore.getState().setActiveChatId(null),
+        });
+        return;
+      }
+      setDismissedSetupWizardChatId(activeChatId);
+      if (needsCreation || sessionStatus === "setup") {
+        toast.info(localizeUi("ui.game.gamesurfacecomponent.gameSetupDismissedTheCampaignWasKept"));
+      }
+    };
+
+    /** Renders the built-in wizard with the given Experiences block injected into its first step. */
+    const classicSetup = (experiencesSlot: ReactNode) => (
       <>
         <Suspense
           fallback={
@@ -9919,6 +10144,7 @@ function GameSurfaceComponent({
           }
         >
           <GameSetupWizard
+            experiencesSlot={experiencesSlot}
             onComplete={(config, preferences, conns, wizardGameName, mapPlan) => {
               const queueSetupMapPlan = (chatId: string) => {
                 if (activeChatIdRef.current !== chatId) return false;
@@ -10018,27 +10244,7 @@ function GameSurfaceComponent({
                 runSetup(activeChatId);
               }
             }}
-            onCancel={() => {
-              if (
-                createGame.isPending ||
-                gameSetup.isPending ||
-                generateSetupMapDraft.isPending ||
-                updateChat.isPending ||
-                updateChatMetadata.isPending ||
-                activePendingSharedWorldSetupApply
-              ) return;
-              useGameModeStore.getState().setSetupActive(false);
-              if (canAutoDeleteEmptySetupChat) {
-                deleteChat.mutate(activeChatId, {
-                  onSuccess: () => useChatStore.getState().setActiveChatId(null),
-                });
-                return;
-              }
-              setDismissedSetupWizardChatId(activeChatId);
-              if (needsCreation || sessionStatus === "setup") {
-                toast.info(localizeUi("ui.game.gamesurfacecomponent.gameSetupDismissedTheCampaignWasKept"));
-              }
-            }}
+            onCancel={dismissSetupWizard}
             isLoading={
               createGame.isPending ||
               gameSetup.isPending ||
@@ -10100,12 +10306,25 @@ function GameSurfaceComponent({
             />
           ) : null}
         </Suspense>
+        {imagePromptReviewModal}
+      </>
+    );
+    // The chooser renders the built-in wizard until an experience is activated, then hands it the body.
+    return (
+      <>
+        <NewGameExperienceChooser
+          activeChatId={activeChatId}
+          onCancelSetup={dismissSetupWizard}
+          onSetupError={handleJsonRepairError}
+          renderClassicWizard={(experiencesSlot) => classicSetup(experiencesSlot)}
+        />
+        {/* Mounted OUTSIDE the chooser so it is reachable from both setup paths — an experience draws its
+            own wizard body, and a malformed-JSON opening has to stay repairable there too. */}
         <GameJsonRepairModal
           request={jsonRepairRequest}
           onClose={() => setJsonRepairRequest(null)}
           onApplied={handleJsonRepairApplied}
         />
-        {imagePromptReviewModal}
       </>
     );
   }
@@ -10333,6 +10552,8 @@ function GameSurfaceComponent({
             </div>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-1 pt-0.5">
+            {/* Hidden for an experience game: it opens a tour of chrome that isn't on screen. */}
+            {!experienceOwnsGame ? (
             <button
               type="button"
               onClick={() => setTutorialOpen(true)}
@@ -10342,6 +10563,7 @@ function GameSurfaceComponent({
             >
               <CircleHelp size={14} />
             </button>
+            ) : null}
             <button
               type="button"
               onClick={() => setSessionPanelOpen(false)}
@@ -10721,6 +10943,17 @@ function GameSurfaceComponent({
           }}
         >
           {!replayActive && renderStoryboardBackgroundVisual()}
+
+          {/* Underlay mount — the part of the surface that belongs BEHIND the narration, such as a
+              standing sprite. The main layer is stacked above it, where a sprite would cover the box. */}
+          {experienceSurfaceActive ? (
+            <CapabilityElement
+              packageId={experienceSurfaceId}
+              view="surface"
+              capabilityProps={experienceUnderlayProps}
+              className="pointer-events-none absolute inset-0"
+            />
+          ) : null}
 
           {/* Full-body VN sprite — active speaker only */}
           <div
@@ -11274,14 +11507,32 @@ function GameSurfaceComponent({
               <div
                 ref={hudSurfaceRef}
                 data-chat-resource-drop-surface
-                className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+                className={cn(
+                  "relative flex min-h-0 flex-1 flex-col overflow-hidden",
+                  experienceSurfaceClass,
+                )}
               >
+                {/* Main mount. pointer-events-none lets clicks fall through empty regions to the
+                    narration underneath; the package sets pointer-events-auto on its own chrome. */}
+                {experienceSurfaceActive ? (
+                  <CapabilityElement
+                    packageId={experienceSurfaceId}
+                    view="surface"
+                    capabilityProps={experienceSurfaceProps}
+                    className="pointer-events-none absolute inset-0 z-30"
+                  />
+                ) : null}
+
                 {/* Top-left: Map + Party portraits side by side */}
                 <div
                   className={cn(
                     "pointer-events-auto absolute left-3 right-14 z-20 flex min-w-0 items-start gap-2 md:right-auto",
                     tacticalCombatActive ? "top-14" : topOverlayOffsetClass,
                     replayActive && "hidden",
+                    // The package draws its own header and party bar, so the built-in ones would collide.
+                    // Gated on ownership rather than the mount, so they do not flash while the package
+                    // is still being resolved.
+                    experienceOwnsGame && "hidden",
                   )}
                 >
                   {/* Mobile: map icon button that opens modal */}
@@ -11454,7 +11705,10 @@ function GameSurfaceComponent({
 
                   // Mobile widget slot — rendered inside GameNarration to sit above the narration box
                   const mobileWidgetSlot =
-                    !combatUiActive && hudWidgets.length > 0 && !(compactHudWidgets && choicesVisible) ? (
+                    !combatUiActive &&
+                    !experienceOwnsGame &&
+                    hudWidgets.length > 0 &&
+                    !(compactHudWidgets && choicesVisible) ? (
                       <div
                         data-component="GameSurface.MobileWidgetTray"
                         className={cn(
@@ -11467,10 +11721,13 @@ function GameSurfaceComponent({
                       </div>
                     ) : undefined;
 
-                  // Choice cards slot — rendered inside GameNarration above the narration box
+                  // Choice cards slot — rendered inside GameNarration above the narration box.
+                  // An experience that declares `providesChoices` is checked FIRST: it offers the turn's
+                  // choices through its own menu, so the Classic cards would double up, and letting them
+                  // win would unmount the anchor its menu is portaled into.
                   const choicesSlot =
-                    activeChoices && narrationDone ? (
-                      compactHudWidgets && !combatUiActive && hudWidgets.length > 0 ? (
+                    activeChoices && narrationDone && !activeExperienceChrome?.providesChoices ? (
+                      compactHudWidgets && !combatUiActive && !experienceOwnsGame && hudWidgets.length > 0 ? (
                         <div
                           data-component="GameSurface.MobileChoiceStage"
                           className={cn(
@@ -11518,6 +11775,19 @@ function GameSurfaceComponent({
                           />
                         </div>
                       )
+                    ) : // An in-flow anchor the experience portals its own choice menu into, so it lands
+                    // where the Classic cards go instead of floating over the narration. Collapses to zero
+                    // height when empty; Classic never takes this branch.
+                    experienceSurfaceActive && narrationDone ? (
+                      <div
+                        data-component="GameSurface.ExperienceChoiceSlot"
+                        ref={setExperienceChoiceSlotEl}
+                        className={cn(
+                          // Mirrors the Classic choice wrapper, so a tall menu scrolls instead of overflowing.
+                          "pointer-events-auto mb-2 flex min-h-0 w-full shrink justify-center overflow-hidden md:max-h-[min(52dvh,32rem)]",
+                          GAME_MOBILE_CHOICE_STAGE_HEIGHT,
+                        )}
+                      />
                     ) : undefined;
 
                   const skillCheckSlot = pendingSkillCheck ? (
@@ -11543,7 +11813,7 @@ function GameSurfaceComponent({
                           sessionNumber={replaySessionNumber}
                           characterMap={characterMap}
                           activeCharacterIds={characterIds}
-                          personaInfo={personaInfo}
+                          personaInfo={effectivePersonaInfo}
                           spriteMap={spriteMap}
                           speakerAvatarMap={librarySpeakerAvatars}
                           gameVoiceVolume={effectiveGameVoiceVolume}
@@ -11644,7 +11914,7 @@ function GameSurfaceComponent({
                           isStreaming={isStreaming}
                           characterMap={characterMap}
                           activeCharacterIds={characterIds}
-                          personaInfo={personaInfo}
+                          personaInfo={effectivePersonaInfo}
                           spriteMap={spriteMap}
                           speakerAvatarMap={librarySpeakerAvatars}
                           onActiveSpeakerChange={handleActiveSpeakerChange}
@@ -11680,9 +11950,9 @@ function GameSurfaceComponent({
                           choicesSlot={choicesSlot}
                           diceResultSlot={diceResultSlot}
                           skillCheckSlot={skillCheckSlot}
-                          onOpenInventory={() => setInventoryOpen(true)}
+                          onOpenInventory={classicInventoryOpener}
                           inventoryCount={inventoryItems.length}
-                          onRequestCombatStart={handleRequestManualCombatStart}
+                          onRequestCombatStart={classicCombatStarter}
                           combatStarting={combatStarting}
                           combatGenerationFailed={combatGenerationFailedAtGate}
                           onRetryCombatGeneration={retryCombatGeneration}
@@ -11707,6 +11977,7 @@ function GameSurfaceComponent({
                           nextActionToken={nextActionToken}
                           onMaxNavOffsetChange={handleMaxNavOffsetChange}
                           inputSlot={
+                            activeExperienceChrome?.providesPlayerInput ? undefined : (
                             <GameInput
                               onSend={handleSendGameTurn}
                               onRollDice={handleRollDice}
@@ -11723,6 +11994,7 @@ function GameSurfaceComponent({
                               spatialCapabilityEnabled={hierarchicalMapsActive}
                               interruptMode={pendingInterruptMode}
                             />
+                            )
                           }
                         />
                       </GameTravelView>
@@ -11734,7 +12006,7 @@ function GameSurfaceComponent({
                       isStreaming={isStreaming}
                       characterMap={characterMap}
                       activeCharacterIds={characterIds}
-                      personaInfo={personaInfo}
+                      personaInfo={effectivePersonaInfo}
                       spriteMap={spriteMap}
                       speakerAvatarMap={librarySpeakerAvatars}
                       onActiveSpeakerChange={handleActiveSpeakerChange}
@@ -11769,9 +12041,9 @@ function GameSurfaceComponent({
                       choicesSlot={choicesSlot}
                       diceResultSlot={diceResultSlot}
                       skillCheckSlot={skillCheckSlot}
-                      onOpenInventory={() => setInventoryOpen(true)}
+                      onOpenInventory={classicInventoryOpener}
                       inventoryCount={inventoryItems.length}
-                      onRequestCombatStart={handleRequestManualCombatStart}
+                      onRequestCombatStart={classicCombatStarter}
                       combatStarting={combatStarting}
                       combatGenerationFailed={combatGenerationFailedAtGate}
                       onRetryCombatGeneration={retryCombatGeneration}
@@ -11795,7 +12067,10 @@ function GameSurfaceComponent({
                       onSetReviewOffset={setMessageOffset}
                       nextActionToken={nextActionToken}
                       onMaxNavOffsetChange={handleMaxNavOffsetChange}
+                      // Withheld while the experience drives the turn through its own menus. The
+                      // declaration is dynamic, so the input returns when it has no action to offer.
                       inputSlot={
+                        activeExperienceChrome?.providesPlayerInput ? undefined : (
                         <GameInput
                           onSend={handleSendGameTurn}
                           onRollDice={handleRollDice}
@@ -11812,6 +12087,7 @@ function GameSurfaceComponent({
                           spatialCapabilityEnabled={hierarchicalMapsActive}
                           interruptMode={pendingInterruptMode}
                         />
+                        )
                       }
                     />
                   );
@@ -11982,8 +12258,10 @@ function GameSurfaceComponent({
                 />
               )}
 
-              {/* First-game spotlight tutorial (auto-opens once; (?) button re-opens) */}
-              <GameTutorial open={tutorialOpen} onClose={handleCloseTutorial} />
+              {/* First-game spotlight tutorial (auto-opens once; (?) button re-opens). The experience
+                  check is repeated here because the effect guard only stops it from being SCHEDULED,
+                  and could never close one that had already opened. */}
+              <GameTutorial open={tutorialOpen && !experienceOwnsGame} onClose={handleCloseTutorial} />
 
               {/* Inventory notifications */}
               {inventoryNotifications.length > 0 && (
@@ -12005,7 +12283,8 @@ function GameSurfaceComponent({
               )}
 
               {/* HUD Widgets - Left & Right, tops aligned */}
-              {!replayActive && !combatUiActive && hudWidgets.length > 0 && !compactHudWidgets && (
+              {/* Hidden while the package owns the game — it draws its own HUD. */}
+              {!replayActive && !combatUiActive && !experienceOwnsGame && hudWidgets.length > 0 && !compactHudWidgets && (
                 <>
                   {/* Desktop: full widget cards */}
                   <div className="pointer-events-none absolute inset-x-3 bottom-24 z-30 hidden items-end justify-between md:flex">

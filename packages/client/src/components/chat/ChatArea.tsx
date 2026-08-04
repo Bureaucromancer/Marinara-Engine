@@ -3051,6 +3051,7 @@ export function ChatArea() {
                     {/* In-app documentation */}
                     <button
                       type="button"
+                      data-tour="home-documentation"
                       onClick={() => useUIStore.getState().openModal("docs-viewer")}
                       className="mari-chrome-control mari-chrome-control--small text-xs"
                       title={t("home.actions.documentationHelp")}

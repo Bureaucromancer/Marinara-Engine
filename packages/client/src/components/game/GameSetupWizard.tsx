@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────
 // Game: Setup Wizard (initial game setup modal)
 // ──────────────────────────────────────────────
-import { lazy, Suspense, useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent } from "react";
+import { lazy, Suspense, useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { toast } from "sonner";
@@ -100,6 +100,8 @@ function normalizeCapabilitySetupSelectionKind(
 }
 
 interface GameSetupWizardProps {
+  /** Optional block rendered with the other pre-start choices, used to offer installed game experiences. */
+  experiencesSlot?: ReactNode;
   onComplete: (
     config: GameSetupConfig,
     preferences: string,
@@ -428,6 +430,7 @@ function normalizeGameLanguage(language: string): string {
 }
 
 export function GameSetupWizard({
+  experiencesSlot,
   onComplete,
   onCancel,
   isLoading,
@@ -1257,6 +1260,9 @@ export function GameSetupWizard({
                 </p>
               )}
             </div>
+
+            {/* Absent when nothing provides an experience, leaving this step exactly as it was. */}
+            {experiencesSlot}
 
             <div>
               <label className={GAME_SETUP_FIELD_LABEL}>{localizeUi("ui.game.gamesetupwizard.gameName")}</label>
