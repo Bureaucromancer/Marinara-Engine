@@ -92,6 +92,7 @@ import { ExpandedTextarea } from "../ui/ExpandedTextarea";
 import { Modal } from "../ui/Modal";
 import { DraftNumberInput } from "../ui/DraftNumberInput";
 import {
+  AGENT_SETTINGS_SURFACE_CLASS,
   AgentCategorySection,
   AgentDefaultStatus,
   AgentSettingsCard,
@@ -5783,7 +5784,7 @@ export function ChatSettingsDrawer({
                         "justify-between rounded-lg px-3 py-2.5 text-left",
                         conversationCommandsEnabled
                           ? "bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30"
-                          : "bg-[var(--secondary)] hover:bg-[var(--accent)]",
+                          : cn(AGENT_SETTINGS_SURFACE_CLASS, "hover:bg-[var(--accent)]"),
                       )}
                       labelClassName="text-xs font-medium"
                     />
@@ -5812,7 +5813,7 @@ export function ChatSettingsDrawer({
                                 "h-full min-h-[4.125rem] items-center justify-between rounded-lg px-3 py-2.5 text-left",
                                 enabled
                                   ? "bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30"
-                                  : "bg-[var(--secondary)] hover:bg-[var(--accent)]",
+                                  : cn(AGENT_SETTINGS_SURFACE_CLASS, "hover:bg-[var(--accent)]"),
                               )}
                               labelClassName="text-[0.6875rem] font-medium"
                             />
@@ -5824,8 +5825,10 @@ export function ChatSettingsDrawer({
                     {illustratorInstalled && (
                       <div
                         className={cn(
-                          "mari-chat-option-field space-y-3 rounded-lg px-3 py-2.5 transition-all",
-                          selfieFeatureEnabled && "mari-chat-option-field--active",
+                          "space-y-3 rounded-xl px-3 py-2.5 transition-all",
+                          selfieFeatureEnabled
+                            ? "border border-[var(--primary)]/30 bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30"
+                            : AGENT_SETTINGS_SURFACE_CLASS,
                         )}
                       >
                         <div className="flex items-start gap-2">
