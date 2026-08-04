@@ -1,6 +1,26 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { resolveChatSummaryTemperatureOptions } from "../../packages/server/src/services/chat-summary/connection-resolution.js";
 import { generateMissingConversationSummaries } from "../../packages/server/src/services/conversation/auto-summary.service.js";
+
+assert.deepEqual(
+  resolveChatSummaryTemperatureOptions({
+    temperature: 0.42,
+    enabledParameters: { temperature: false, topP: false, reasoningEffort: false },
+  }),
+  {
+    temperature: 0.42,
+    enabledParameters: { temperature: true, topP: false, reasoningEffort: false },
+  },
+);
+assert.deepEqual(
+  resolveChatSummaryTemperatureOptions({
+    enabledParameters: { temperature: true, topP: false, reasoningEffort: false },
+  }),
+  {
+    enabledParameters: { temperature: false, topP: false, reasoningEffort: false },
+  },
+);
 
 const requestedMaxTokens: number[] = [];
 const provider = {
