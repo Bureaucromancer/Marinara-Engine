@@ -1671,12 +1671,20 @@ export async function generateRoutes(app: FastifyInstance) {
           .filter((agentId) => isAgentAvailableInChatMode(chatMode, agentId))
           .filter((agentId) => !(gameSpotifyMusicEnabled && agentId === "spotify"));
         const customAgentImportsEnabled = (await getCustomAgentImportPolicy(app.db)).enabled;
-        const configuredPromptAgents =
-          chatEnableAgents && rawChatActiveAgentIds.length > 0
-            ? (await agentsStore.list()).filter(
-                (agent) => !isExternallyImportedAgent(agent.type, agent.settings) || customAgentImportsEnabled,
-              )
-            : [];
+        const allConfiguredPromptAgents =
+          chatEnableAgents && rawChatActiveAgentIds.length > 0 ? await agentsStore.list() : [];
+        const skippedImportedPromptAgents = customAgentImportsEnabled
+          ? []
+          : allConfiguredPromptAgents.filter((agent) => isExternallyImportedAgent(agent.type, agent.settings));
+        if (skippedImportedPromptAgents.length > 0) {
+          logger.debug(
+            "[agents] Skipping %d externally imported Agent configurations because custom imports are disabled",
+            skippedImportedPromptAgents.length,
+          );
+        }
+        const configuredPromptAgents = allConfiguredPromptAgents.filter(
+          (agent) => !isExternallyImportedAgent(agent.type, agent.settings) || customAgentImportsEnabled,
+        );
         const deletedBuiltInAgentTypes = new Set(
           configuredPromptAgents
             .filter((agent) => BUILT_IN_AGENTS.some((builtIn) => builtIn.id === agent.type))
@@ -1773,6 +1781,10 @@ export async function generateRoutes(app: FastifyInstance) {
           idleDuration: promptIdleDuration,
           timeZone: promptTimeZone,
         });
+        const conversationMacroFieldsByCharacterId = new Map<
+          string,
+          NonNullable<MacroContext["convoFields"]>
+        >();
         const historyMacroProfilesById = (await resolveCharacterMacroData(app.db, allCharacterIds)).profilesById;
         const resolveHistoryMessageMacros = <T extends { content: string; characterId?: string | null }>(
           messages: T[],
@@ -2319,6 +2331,16 @@ export async function generateRoutes(app: FastifyInstance) {
               postHistoryInstructions: "",
             });
           }
+          const personaProfile = profileParticipants.find((participant) => participant.isPersona);
+          for (const participant of profileParticipants) {
+            if (participant.isPersona) continue;
+            conversationMacroFieldsByCharacterId.set(participant.id, {
+              charDisplayName: participant.displayName,
+              charAbout: participant.aboutMe ?? "",
+              personaAbout: personaProfile?.aboutMe ?? "",
+              convoBehavior: participant.behavior?.instruction ?? "",
+            });
+          }
           const convoProfileBlocks = buildConversationProfileBlocks({
             participants: profileParticipants,
             primaryCharacterId: input.forCharacterId ?? convoCharInfo[0]?.charId ?? null,
@@ -2356,7 +2378,7 @@ export async function generateRoutes(app: FastifyInstance) {
             // filled in later; the decode pass below evaluates them (#3448).
             {
               deferConditionalOperand: isRelocationConditionOperand,
-              ...(deferCharacterMacros ? { deferCharacterMacros: "names" as const } : {}),
+              ...(deferCharacterMacros ? { deferCharacterMacros: "all" as const } : {}),
             },
           );
           // Mark each relocation macro a deferred conditional actually references
@@ -5291,10 +5313,17 @@ export async function generateRoutes(app: FastifyInstance) {
             targetScopedMessagesForGen,
             ownerSpatialProjection,
           );
+          const responderMacroContext = targetCharId
+            ? {
+                ...promptMacroContext,
+                convoFields:
+                  conversationMacroFieldsByCharacterId.get(targetCharId) ?? promptMacroContext.convoFields,
+              }
+            : promptMacroContext;
           const macroScopedMessagesForGen = spatiallyScopedMessagesForGen.map((message) => ({
             ...message,
             content: (deferredTargetCharacterProfile
-              ? resolveDeferredCharacterMacros(message.content, deferredTargetCharacterProfile, promptMacroContext)
+              ? resolveDeferredCharacterMacros(message.content, deferredTargetCharacterProfile, responderMacroContext)
               : message.content
             ).replace(/\n([ \t]*\n){2,}/g, "\n\n"),
           }));
@@ -5302,8 +5331,8 @@ export async function generateRoutes(app: FastifyInstance) {
           // earlier, but guide/system/depth blocks can be appended afterward; a
           // last scoped pass prevents raw identity macros from escaping (#3704).
           const providerMacroContext = targetCharacterProfile
-            ? scopePromptMacroContextToCharacter(promptMacroContext, targetCharacterProfile)
-            : promptMacroContext;
+            ? scopePromptMacroContextToCharacter(responderMacroContext, targetCharacterProfile)
+            : responderMacroContext;
           const preparedMessagesForGen = resolvePromptMessageMacros(
             macroScopedMessagesForGen,
             providerMacroContext,

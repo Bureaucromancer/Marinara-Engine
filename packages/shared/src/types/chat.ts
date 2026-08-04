@@ -492,6 +492,8 @@ export interface ChatMetadata {
   conversationCharactersCanCall?: boolean;
   /** Ask call models to include TTS/video voice cues in bracket tags. Default: true. */
   conversationCallVoiceCues?: boolean;
+  /** Text connection used to summarize completed calls. Null/omitted uses the Agent default, then chat. */
+  conversationCallSummaryConnectionId?: string | null;
   /** Chat-scoped generated schedules for conversation characters. */
   characterSchedules?: Record<string, unknown>;
   /** Chat-scoped manual status overrides for conversation characters. */
