@@ -645,7 +645,7 @@ export function GameSetupWizard({
         id: string;
         name: string;
         avatarPath?: string | null;
-        avatarCrop?: string | null;
+        avatarCrop?: AvatarCrop | string | null;
         comment?: string;
       }>) ?? [],
     [personasList],

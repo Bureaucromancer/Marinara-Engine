@@ -48,6 +48,7 @@ assert.match(indexDts, /utils\/avatar-crop\.js/u, "shared barrel must re-export 
 
 // ── 2. normalizeAvatarCrop — supported shapes ──
 const currentCrop = { srcX: 0.25, srcY: 0.1, srcWidth: 0.5, srcHeight: 0.5 };
+const toleranceCrop = { srcX: 0.001, srcY: 0.001, srcWidth: 1, srcHeight: 1 };
 const legacyCrop = { zoom: 2, offsetX: -10, offsetY: 5, fullImage: true };
 const legacyCropWithoutFullImage = { zoom: 1.5, offsetX: 2, offsetY: -3 };
 for (const [input, expected] of [
@@ -97,7 +98,7 @@ for (const value of malformedCrops) {
   assert.equal(normalizeAvatarCrop(value), null, `malformed crop ${JSON.stringify(value)} must normalize to null`);
 }
 // ── 4. avatarCropSchema — strict request semantics ──
-for (const crop of [currentCrop, legacyCrop]) {
+for (const crop of [currentCrop, toleranceCrop, legacyCrop]) {
   assert.deepEqual(avatarCropSchema.parse(crop), crop);
 }
 for (const crop of [
@@ -109,21 +110,20 @@ for (const crop of [
   { zoom: 1.5, offsetX: 0, offsetY: 0, fullImage: "yes" },
   { ...currentCrop, srcX: "0.25" },
   { ...currentCrop, srcX: NaN },
+  { srcX: -2, srcY: 0, srcWidth: 0.5, srcHeight: 0.5 },
+  { srcX: 0, srcY: -2, srcWidth: 0.5, srcHeight: 0.5 },
+  { srcX: 0.9, srcY: 0, srcWidth: 0.2, srcHeight: 0.5 },
+  { srcX: 0, srcY: 0.9, srcWidth: 0.5, srcHeight: 0.2 },
 ]) {
   assert.equal(avatarCropSchema.safeParse(crop).success, false, `schema must reject ${JSON.stringify(crop)}`);
 }
-assert.equal(
-  avatarCropSchema.safeParse({ srcX: -2, srcY: 3, srcWidth: 2, srcHeight: 4 }).success,
-  true,
-  "the shared request schema must preserve Noodle's historical finite/positive-size geometry contract",
-);
 
 // ── 5. Noodle request schemas use the strict shared crop schema ──
 assert.equal(
   noodleAccountProfileSettingsSchema.safeParse({ avatarCrop: { srcX: -2, srcY: 3, srcWidth: 2, srcHeight: 4 } })
     .success,
-  true,
-  "Noodle requests must retain their historical finite/positive-size geometry contract",
+  false,
+  "Noodle requests must reject source rectangles outside normalized bounds",
 );
 assert.equal(
   noodleAccountProfileSettingsSchema.safeParse({
@@ -147,12 +147,11 @@ assert.equal(
 );
 
 // ── 6. Noodle tolerant stored reads (both formats, null on malformed) ──
-const tolerantCrop = { srcX: -2, srcY: 3, srcWidth: 2, srcHeight: 4 };
 for (const [input, expected] of [
   [currentCrop, currentCrop],
+  [toleranceCrop, toleranceCrop],
   ['{"srcX":0.25,"srcY":0.1,"srcWidth":0.5,"srcHeight":0.5}', currentCrop],
   [legacyCrop, legacyCrop],
-  [{ ...tolerantCrop, extra: true }, tolerantCrop],
 ] as const) {
   assert.deepEqual(parseNoodleAvatarCrop(input), expected);
 }
@@ -169,20 +168,25 @@ for (const value of [
   assert.equal(parseNoodleAvatarCrop(value), null, "Noodle stored reads must fall back to null on malformed values");
 }
 assert.deepEqual(
-  normalizeNoodleAccountSettings({
-    profile: { avatarCrop: { srcX: -2, srcY: 3, srcWidth: 2, srcHeight: 4, extra: true } },
-  }).profile.avatarCrop,
-  { srcX: -2, srcY: 3, srcWidth: 2, srcHeight: 4 },
-  "Noodle settings normalization must keep tolerant stored geometry while projecting extra keys",
+  normalizeNoodleAccountSettings({ profile: { avatarCrop: currentCrop } }).profile.avatarCrop,
+  currentCrop,
+  "Noodle settings normalization must keep valid current stored crops",
 );
-assert.equal(
-  "avatarCrop" in
-    normalizeNoodleAccountSettings({
-      profile: { avatarCrop: { srcX: 0, srcY: 0, srcWidth: 0, srcHeight: 0 } },
-    }).profile,
-  false,
-  "Noodle settings normalization must omit malformed stored crops",
+assert.deepEqual(
+  normalizeNoodleAccountSettings({ profile: { avatarCrop: legacyCrop } }).profile.avatarCrop,
+  legacyCrop,
+  "Noodle settings normalization must keep valid legacy stored crops",
 );
+for (const avatarCrop of [
+  { srcX: -2, srcY: 3, srcWidth: 2, srcHeight: 4, extra: true },
+  { srcX: 0, srcY: 0, srcWidth: 0, srcHeight: 0 },
+]) {
+  assert.equal(
+    "avatarCrop" in normalizeNoodleAccountSettings({ profile: { avatarCrop } }).profile,
+    false,
+    "Noodle settings normalization must omit malformed stored crops",
+  );
+}
 assert.equal(
   normalizeNoodleAccountSettings({ profile: { avatarCrop: null } }).profile.avatarCrop,
   null,
@@ -301,12 +305,12 @@ assert.match(
 );
 
 // ── 11. Removed names stay gone from packages and regression scripts ──
-function collectTsFiles(dir: string): string[] {
+function collectSourceFiles(dir: string): string[] {
   const results: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
-    if (entry.isDirectory()) results.push(...collectTsFiles(full));
-    else if (/\.(ts|tsx)$/u.test(entry.name)) results.push(full);
+    if (entry.isDirectory()) results.push(...collectSourceFiles(full));
+    else if (/\.(?:[jt]sx?)$/u.test(entry.name)) results.push(full);
   }
   return results;
 }
@@ -314,9 +318,9 @@ const sourceFiles: string[] = [];
 for (const pkg of readdirSync(join(repoRoot, "packages"), { withFileTypes: true })) {
   if (!pkg.isDirectory()) continue;
   const srcDir = join(repoRoot, "packages", pkg.name, "src");
-  if (existsSync(srcDir)) sourceFiles.push(...collectTsFiles(srcDir));
+  if (existsSync(srcDir)) sourceFiles.push(...collectSourceFiles(srcDir));
 }
-sourceFiles.push(...collectTsFiles(join(repoRoot, "scripts", "regressions")));
+sourceFiles.push(...collectSourceFiles(join(repoRoot, "scripts", "regressions")));
 // This regression itself must name the banned identifiers to ban them, so the
 // running file is exempt from the scan; every other package/script source is not.
 const thisFile = fileURLToPath(import.meta.url);
