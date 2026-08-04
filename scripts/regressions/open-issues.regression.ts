@@ -9,7 +9,7 @@ import { chatModeSchema } from "../../packages/shared/src/schemas/chat.schema.js
 import playwrightConfig from "../../playwright.config.js";
 import { resolveDevSharedBuildScript } from "../dev-shared-build.mjs";
 import { validatePullRequestTriage } from "../validate-pr-triage.mjs";
-import { characterCardVersions, characters, chatPresets, chats, messages } from "../../packages/server/src/db/schema/index.js";
+import { characterCardVersions, characterGroups, characters, chatPresets, chats, messages } from "../../packages/server/src/db/schema/index.js";
 import { eq } from "../../packages/server/src/db/file-query.js";
 import { parseBuildMeta, resolveBuildBranch } from "../../packages/server/src/config/build-info.js";
 
@@ -1508,6 +1508,46 @@ try {
     },
     "character.update must preserve every omitted Character Card field through the real merge and persistence path",
   );
+
+  const characterFolderTimestamp = "2026-08-04T12:00:00.000Z";
+  await db.insert(characterGroups).values({
+    id: "character-folder-source",
+    name: "Source Folder",
+    description: "",
+    characterIds: JSON.stringify([characterId]),
+    createdAt: characterFolderTimestamp,
+    updatedAt: characterFolderTimestamp,
+  });
+  await db.insert(characterGroups).values({
+    id: "character-folder-target",
+    name: "Target Folder",
+    description: "",
+    characterIds: "[]",
+    createdAt: characterFolderTimestamp,
+    updatedAt: characterFolderTimestamp,
+  });
+
+  const folderListResult = await mariDb.executeAction({ action: "character.folder.list" });
+  assert.equal(folderListResult.ok, true, "Professor Mari must be able to list character folders");
+  assert.deepEqual(
+    (folderListResult.output as Array<{ id: string }>).map((folder) => folder.id),
+    ["character-folder-source", "character-folder-target"],
+  );
+
+  const folderMoveResult = await mariDb.executeAction({
+    action: "character.moveToFolder",
+    characterId,
+    folderName: "Target Folder",
+    reason: "Regression coverage for issue #4568",
+    apply: true,
+  });
+  assert.equal(folderMoveResult.ok, true, "Professor Mari must be able to move a character into a named folder");
+
+  const foldersAfterMove = await db.select().from(characterGroups);
+  const sourceFolder = foldersAfterMove.find((folder) => folder.id === "character-folder-source");
+  const targetFolder = foldersAfterMove.find((folder) => folder.id === "character-folder-target");
+  assert.deepEqual(JSON.parse(sourceFolder?.characterIds ?? "[]"), []);
+  assert.deepEqual(JSON.parse(targetFolder?.characterIds ?? "[]"), [characterId]);
 
   for (const approval of mariDb.getPendingApprovals()) {
     await mariDb.keepAppliedReview(approval.id);
