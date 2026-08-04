@@ -1497,6 +1497,7 @@ function CompactMariMessage({
   onDelete,
   onEdit,
   onRegenerate,
+  canRegenerate = false,
   onRemoveAttachment,
 }: {
   message: Message;
@@ -1504,6 +1505,7 @@ function CompactMariMessage({
   onDelete?: (messageId: string) => void;
   onEdit?: (messageId: string, content: string) => void;
   onRegenerate?: (messageId: string) => void;
+  canRegenerate?: boolean;
   onRemoveAttachment?: (messageId: string, attachmentIndex: number) => void;
 }) {
   const { t: localizeUi } = useUiTranslation();
@@ -1532,10 +1534,13 @@ function CompactMariMessage({
             />
             <div className="mt-1 flex gap-2">
               <button
+                type="button"
+                disabled={!editContent.trim()}
                 onClick={() => { onEdit?.(message.id, editContent); setIsEditing(false); }}
-                className="rounded bg-[var(--primary)] px-2 py-1 text-xs text-[var(--primary-foreground)]"
+                className="rounded bg-[var(--primary)] px-2 py-1 text-xs text-[var(--primary-foreground)] disabled:cursor-not-allowed disabled:opacity-50"
               >{localizeUi("ui.noodle.noodlehome.save")}</button>
               <button
+                type="button"
                 onClick={() => setIsEditing(false)}
                 className="rounded px-2 py-1 text-xs text-[var(--muted-foreground)] hover:bg-[var(--accent)]"
               >{localizeUi("ui.chat.homeprofessormarichat.cancelSelection")}</button>
@@ -1583,9 +1588,9 @@ function CompactMariMessage({
     return (
       <div className="group">
         <WorkspaceTimelineList items={timelineItemsFromTrace(workspaceTrace, message)} active={false} openReasoning />
-        {(onDelete || onRegenerate) && (
+        {(onDelete || (onRegenerate && canRegenerate)) && (
           <div className={MARI_MESSAGE_ACTIONS_CLASS}>
-            {onRegenerate && (
+            {onRegenerate && canRegenerate && (
               <button
                 type="button"
                 onClick={() => onRegenerate(message.id)}
@@ -1620,9 +1625,9 @@ function CompactMariMessage({
         marker={<MariAvatar />}
       >
         <CompactMarkdown content={content} />
-        {(onDelete || onRegenerate) && (
+        {(onDelete || (onRegenerate && canRegenerate)) && (
           <div className={MARI_MESSAGE_ACTIONS_CLASS}>
-            {onRegenerate && (
+            {onRegenerate && canRegenerate && (
               <button
                 type="button"
                 onClick={() => onRegenerate(message.id)}
@@ -3508,6 +3513,9 @@ export function HomeProfessorMariChat({
       );
       if (!received) throw new Error("Professor Mari did not return a regenerated response");
       await loadMessages(chatId);
+      useChatStore.getState().clearStreamBuffer(chatId);
+      useChatStore.getState().clearThinkingBuffer(chatId);
+      setWorkspaceTimeline([]);
     } catch {
       await loadMessages(chatId).catch(() => undefined);
       toast.error(localizeUi("ui.chat.homeprofessormarichat.professorMariCouldNotRegenerateThatResponse"));
@@ -3599,6 +3607,24 @@ export function HomeProfessorMariChat({
     }
   };
 
+  const renderDisplayMessage = (message: Message) => {
+    const canManageMessage = message.id !== PROFESSOR_MARI_WELCOME_MESSAGE_ID;
+    return (
+      <CompactMariMessage
+        key={message.id}
+        message={message}
+        thinking={message.role === "assistant" ? getMessageThinking(message) : null}
+        onDelete={canManageMessage ? handleDeleteMessage : undefined}
+        onEdit={canManageMessage ? handleEditMessage : undefined}
+        onRegenerate={canManageMessage ? handleRegenerateMessage : undefined}
+        canRegenerate={
+          canManageMessage && !isBusy && message.id === messages[messages.length - 1]?.id
+        }
+        onRemoveAttachment={canManageMessage ? handleRemoveAttachment : undefined}
+      />
+    );
+  };
+
   const renderFloatingChatBody = () => (
     <>
       <div
@@ -3610,17 +3636,7 @@ export function HomeProfessorMariChat({
           <LoadingHistoryState />
         ) : (
           <>
-            {displayMessages.map((message) => (
-              <CompactMariMessage
-                key={message.id}
-                message={message}
-                thinking={message.role === "assistant" ? getMessageThinking(message) : null}
-                onDelete={message.id === PROFESSOR_MARI_WELCOME_MESSAGE_ID ? undefined : handleDeleteMessage}
-                onEdit={message.id === PROFESSOR_MARI_WELCOME_MESSAGE_ID ? undefined : handleEditMessage}
-                onRegenerate={message.id === PROFESSOR_MARI_WELCOME_MESSAGE_ID ? undefined : handleRegenerateMessage}
-                onRemoveAttachment={message.id === PROFESSOR_MARI_WELCOME_MESSAGE_ID ? undefined : handleRemoveAttachment}
-              />
-            ))}
+            {displayMessages.map(renderDisplayMessage)}
             {workspaceTimeline.length === 0 && workspaceTimelineActive && !showDottoreSupport && (
               <WorkspaceStatusEvent content={workspaceActivity ?? "Thinking..."} />
             )}
@@ -4262,17 +4278,7 @@ export function HomeProfessorMariChat({
                           <LoadingHistoryState />
                         ) : (
                           <>
-                            {displayMessages.map((message) => (
-                              <CompactMariMessage
-                                key={message.id}
-                                message={message}
-                                thinking={message.role === "assistant" ? getMessageThinking(message) : null}
-                                onDelete={message.id === PROFESSOR_MARI_WELCOME_MESSAGE_ID ? undefined : handleDeleteMessage}
-                                onEdit={message.id === PROFESSOR_MARI_WELCOME_MESSAGE_ID ? undefined : handleEditMessage}
-                                onRegenerate={message.id === PROFESSOR_MARI_WELCOME_MESSAGE_ID ? undefined : handleRegenerateMessage}
-                                onRemoveAttachment={message.id === PROFESSOR_MARI_WELCOME_MESSAGE_ID ? undefined : handleRemoveAttachment}
-                              />
-                            ))}
+                            {displayMessages.map(renderDisplayMessage)}
                             {workspaceTimeline.length === 0 && workspaceTimelineActive && !showDottoreSupport && (
                               <WorkspaceStatusEvent content={workspaceActivity ?? "Thinking..."} />
                             )}
