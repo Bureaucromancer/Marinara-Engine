@@ -359,7 +359,7 @@ try {
   );
   assert.match(
     chatSettingsSource,
-    /callsPackage \? [\s\S]{0,2200}ltmPackage \? [\s\S]{0,1800}setLtmEnabledForChat/u,
+    /callsPackage \?\s[\s\S]{0,2200}ltmPackage \?\s[\s\S]{0,1800}setLtmEnabledForChat/u,
     "Conversation chat settings must place Long-Term Memory below Calls with its activation control",
   );
   assert.match(

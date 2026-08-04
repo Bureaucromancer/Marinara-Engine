@@ -5998,7 +5998,17 @@ export function ChatSettingsDrawer({
                           label={localizeUi("ui.chat.chatsettingsdrawer.longTermMemory")}
                           description={localizeUi("ui.chat.chatsettingsdrawer.enableLongTermMemoryForThisConversation")}
                           checked={metadata.enableAgents === true && activeAgentIds.includes(ltmPackage.id)}
-                          onChange={(enabled) => void setLtmEnabledForChat(enabled)}
+                          onChange={(enabled) => {
+                            void setLtmEnabledForChat(enabled).catch((error) => {
+                              void showAlertDialog({
+                                title: localizeUi("ui.chat.chatsettingsdrawer.longTermMemory"),
+                                message:
+                                  error instanceof Error
+                                    ? error.message
+                                    : localizeUi("ui.chat.chatsettingsdrawer.failedToUpdateLongTermMemory"),
+                              });
+                            });
+                          }}
                           labelPosition="start"
                           className={cn(
                             "justify-between rounded-lg px-3 py-2.5 text-left",

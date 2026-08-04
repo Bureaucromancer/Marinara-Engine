@@ -8704,7 +8704,7 @@ test("Conversation Chat Settings exposes and persists Long-Term Memory activatio
         });`,
       });
     });
-    await page.route("**/api/capability-packages/conversation-calls/client?*", async (route) => {
+    await page.route("**/api/capability-packages/conversation-calls/client*", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/javascript",
@@ -8737,18 +8737,24 @@ test("Conversation Chat Settings exposes and persists Long-Term Memory activatio
     await openSettings();
     const drawer = page.locator(".mari-chat-settings-drawer");
     await openAgentsSection(drawer);
-    const toggle = drawer.getByRole("checkbox", { name: "Long-Term Memory" }).last();
+    const agentsSection = drawer.locator('[data-chat-settings-section="conversation-agents"]');
+    const toggle = agentsSection.getByRole("checkbox", { name: "Long-Term Memory", exact: true });
     await expect(toggle).toBeVisible();
     await expect(toggle).not.toBeChecked();
     const calls = drawer.locator("marinara-capability-conversation-calls");
     const ltm = drawer.locator("marinara-capability-long-term-memory");
+    await expect(calls).toBeVisible();
     await expect(ltm).toBeVisible();
-    expect((await ltm.boundingBox())?.y).toBeGreaterThan((await calls.boundingBox())?.y ?? 0);
+    const callsBox = await calls.boundingBox();
+    const ltmBox = await ltm.boundingBox();
+    expect(callsBox).not.toBeNull();
+    expect(ltmBox).not.toBeNull();
+    expect(ltmBox!.y).toBeGreaterThan(callsBox!.y);
     await expect(drawer.locator('[data-ltm-control="select"]')).toBeVisible();
     await expect(drawer.locator('[data-ltm-control="budget"]')).toBeVisible();
     await expect(drawer.locator('[data-ltm-control="max-chunks"]')).toBeVisible();
 
-    await toggle.locator("xpath=..").locator("label").click();
+    await toggle.check();
     await expect
       .poll(readMetadata)
       .toMatchObject({ enableAgents: true, activeAgentIds: ["sibling-agent", "long-term-memory"] });
@@ -8758,10 +8764,12 @@ test("Conversation Chat Settings exposes and persists Long-Term Memory activatio
     await openSettings();
     const reloadedDrawer = page.locator(".mari-chat-settings-drawer");
     await openAgentsSection(reloadedDrawer);
-    const reloadedToggle = reloadedDrawer.getByRole("checkbox", { name: "Long-Term Memory" }).last();
+    const reloadedAgentsSection = reloadedDrawer.locator('[data-chat-settings-section="conversation-agents"]');
+    const reloadedToggle = reloadedAgentsSection.getByRole("checkbox", { name: "Long-Term Memory", exact: true });
     await expect(reloadedToggle).toBeChecked();
-    await reloadedToggle.locator("xpath=..").locator("label").click();
+    await reloadedToggle.uncheck();
     await expect.poll(readMetadata).toMatchObject({ enableAgents: true, activeAgentIds: ["sibling-agent"] });
+    await expect(reloadedToggle).not.toBeChecked();
   } finally {
     if (chatId) await request.delete(`/api/chats/${chatId}`);
   }

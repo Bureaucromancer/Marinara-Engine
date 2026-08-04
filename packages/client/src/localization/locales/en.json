@@ -2570,6 +2570,7 @@
   "ui.chat.chatsettingsdrawer.failedToGenerateSchedules": "Failed to generate schedules.",
   "ui.chat.chatsettingsdrawer.failedToSaveProseGuardianChanges": "Failed to save Prose Guardian changes.",
   "ui.chat.chatsettingsdrawer.failedToUpdateGameWidgets": "Failed to update game widgets.",
+  "ui.chat.chatsettingsdrawer.failedToUpdateLongTermMemory": "Failed to update Long-Term Memory.",
   "ui.chat.chatsettingsdrawer.finalGenerationPrompts": "Final Generation Prompts",
   "ui.chat.chatsettingsdrawer.floatingKeepsTheDraggableStoryboardPanelBackgroundPlacesThe": "Floating keeps the draggable storyboard panel. Background places the active storyboard frame behind the game UI and disables generated location backgrounds.",
   "ui.chat.chatsettingsdrawer.flowTheSelectedPlannerCreatesEachKeyframePlanStoryboard": "Flow: the selected planner creates each keyframe plan, Storyboard Illustration Prompt formats the image request, and Storyboard Video Prompt formats the animation request when videos are enabled.",
