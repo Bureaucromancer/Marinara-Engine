@@ -575,6 +575,13 @@ export function ScenarioEditor() {
                   onChange={(next) => updateSetting({ potentialConflicts: next })}
                   placeholder={localizeUi("ui.scenarios.scenarioeditor.addStoryHooksCommaSeparated")}
                 />
+                {/*
+                  Deliberately the last and lightest block in this tab. Key
+                  locations are a convenience for a scenario used on its own; a
+                  linked lorebook is the better home for anything substantial,
+                  because entries there surface when they are relevant instead
+                  of being carried every turn.
+                */}
                 <div className="mari-editor-panel">
                   <div className="mb-2 flex items-center justify-between">
                     <label className="text-[0.6875rem] text-[var(--muted-foreground)]">{localizeUi("ui.scenarios.scenarioeditor.keyLocations")}</label>
@@ -586,6 +593,7 @@ export function ScenarioEditor() {
                     >
                       <Plus size="0.6875rem" />{localizeUi("ui.characters.metadatatab.add")}</button>
                   </div>
+                  <p className="mb-2 text-[0.625rem] leading-relaxed text-[var(--muted-foreground)]">{localizeUi("ui.scenarios.scenarioeditor.aFewLandmarksToAnchorTheSettingForA")}</p>
                   <div className="flex flex-col gap-2">
                     {setting.keyLocations.map((location, index) => (
                       <div key={index} className="flex gap-2">

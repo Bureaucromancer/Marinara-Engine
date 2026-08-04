@@ -7508,6 +7508,7 @@
   "ui.scenarios.scenarioeditor.addTagsCommaSeparated": "Add tags, comma separated",
   "ui.scenarios.scenarioeditor.addThemesCommaSeparated": "Add themes, comma separated",
   "ui.scenarios.scenarioeditor.addTraitsCommaSeparated": "Add traits, comma separated",
+  "ui.scenarios.scenarioeditor.aFewLandmarksToAnchorTheSettingForA": "A few landmarks to anchor the setting. For a world with real depth, link a lorebook instead — its entries surface when they are relevant rather than loading every turn.",
   "ui.scenarios.scenarioeditor.alternateGreetings": "Alternate greetings",
   "ui.scenarios.scenarioeditor.appearanceOptional": "Appearance (optional)",
   "ui.scenarios.scenarioeditor.aShortPreviewShownOnLibraryCards": "A short preview shown on library cards.",
