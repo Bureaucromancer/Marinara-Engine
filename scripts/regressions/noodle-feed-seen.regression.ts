@@ -51,6 +51,14 @@ try {
     "one persona's visit must not clear another's counter",
   );
 
+  // Both surfaces record a visit on mount, so two patches can be in flight at once and arrive
+  // out of order. An older timestamp must not win, or a cleared counter comes back.
+  const rewound = await noodle.patchAccountSettings(viewerA.id, {
+    subtree: "social",
+    patch: { noodlerFeedSeenAt: "2026-08-04T09:00:00.000Z" },
+  });
+  assert.equal(rewound?.settings.social.noodlerFeedSeenAt, seenAt, "a stale visit must not rewind the timestamp");
+
   // ── Counting rules ──
   const post = (id: string, createdAt: string) => ({ id, createdAt }) as NoodlerViewerScope["creators"][number]["posts"][number];
   const scope = {

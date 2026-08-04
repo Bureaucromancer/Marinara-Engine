@@ -627,7 +627,8 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
     // Strip data URL prefix if present
     const base64Match = data.match(/^data:[^;]+;base64,(.+)$/);
     const rawBase64 = base64Match ? base64Match[1]! : data;
-    let buffer = Buffer.from(rawBase64, "base64");
+    // Widened on purpose: sharp's toBuffer() below returns Buffer<ArrayBufferLike>.
+    let buffer: Buffer = Buffer.from(rawBase64, "base64");
 
     const ext = extname(filename).toLowerCase();
     const isTextFile = TEXT_EXTS.has(ext);

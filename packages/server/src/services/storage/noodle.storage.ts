@@ -1536,7 +1536,17 @@ export function createNoodleStorage(db: DB) {
         const current = normalizeNoodleAccountSettings(row.settings);
         let next: NoodleAccountSettings;
         if (input.subtree === "social") {
-          next = { ...current, social: { ...current.social, ...input.patch } };
+          // Feed-visit timestamps only ever move forward. Two visits can be in flight at once
+          // (both surfaces record on mount), and the later request is not always the later
+          // timestamp — an out-of-order write would resurrect an already-cleared counter.
+          const social = { ...current.social, ...input.patch };
+          for (const field of ["noodleFeedSeenAt", "noodlerFeedSeenAt"] as const) {
+            const stored = current.social[field];
+            if (stored && social[field] && !(Date.parse(social[field]) > (Date.parse(stored) || 0))) {
+              social[field] = stored;
+            }
+          }
+          next = { ...current, social };
         } else if (input.subtree === "scheduler") {
           const currentAuto = current.scheduler.autoPosting ?? defaultAutoPostingSettings();
           const patchAuto = input.patch.autoPosting;
