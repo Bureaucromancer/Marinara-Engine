@@ -3912,6 +3912,15 @@ export async function chatsRoutes(app: FastifyInstance) {
       );
     }
     const { provider, model } = resolvedSummaryConnection;
+    const summaryTemperatureOptions =
+      typeof resolvedSummaryConnection.temperature === "number"
+        ? {
+            temperature: resolvedSummaryConnection.temperature,
+            enabledParameters: { temperature: true },
+          }
+        : {
+            enabledParameters: { temperature: false },
+          };
 
     if (requestedSummaryEntryIds.length >= 2) {
       const currentEntries = normalizeChatSummaryEntries(chatMeta.summaryEntries, {
@@ -3963,7 +3972,7 @@ export async function chatsRoutes(app: FastifyInstance) {
         ],
         {
           model,
-          temperature: 0.5,
+          ...summaryTemperatureOptions,
           maxTokens: effectiveSummaryMaxTokens,
         },
       );
@@ -4102,7 +4111,7 @@ export async function chatsRoutes(app: FastifyInstance) {
 
     const result = await provider.chatComplete(messages, {
       model,
-      temperature: 0.5,
+      ...summaryTemperatureOptions,
       maxTokens: summaryMaxTokens,
     });
 

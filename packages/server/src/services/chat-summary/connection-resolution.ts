@@ -4,6 +4,7 @@ import type { BaseLLMProvider } from "../llm/base-provider.js";
 import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../llm/local-sidecar.js";
 import { createLLMProvider } from "../llm/provider-registry.js";
 import { withConnectionFallbackProvider } from "../llm/connection-fallback-provider.js";
+import { resolveStoredChatOptions } from "../generation/generation-parameters.js";
 
 type ConnectionsStorage = ReturnType<typeof createConnectionsStorage>;
 type ConnectionWithKey = NonNullable<Awaited<ReturnType<ConnectionsStorage["getWithKey"]>>>;
@@ -22,6 +23,7 @@ export type ResolvedChatSummaryConnection =
       connectionId: string;
       source: SummaryConnectionSource;
       warnings: string[];
+      temperature?: number;
     }
   | {
       ok: false;
@@ -121,6 +123,9 @@ export async function resolveChatSummaryConnection(args: {
       warnings.push(`Connection ${conn.id} has no base URL`);
       continue;
     }
+    const storedOptions = resolveStoredChatOptions(conn.defaultParameters, conn.provider, conn.model);
+    const temperature =
+      storedOptions.enabledParameters?.temperature === false ? undefined : storedOptions.temperature;
 
     return {
       ok: true,
@@ -142,6 +147,7 @@ export async function resolveChatSummaryConnection(args: {
       connectionId: conn.id,
       source: candidate.source,
       warnings,
+      ...(typeof temperature === "number" ? { temperature } : {}),
     };
   }
 

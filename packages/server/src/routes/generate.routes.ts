@@ -7117,6 +7117,15 @@ export async function generateRoutes(app: FastifyInstance) {
           }
           const summaryProvider = resolvedSummaryConnection.provider;
           const summaryModel = resolvedSummaryConnection.model;
+          const summaryTemperatureOptions =
+            typeof resolvedSummaryConnection.temperature === "number"
+              ? {
+                  temperature: resolvedSummaryConnection.temperature,
+                  enabledParameters: { temperature: true },
+                }
+              : {
+                  enabledParameters: { temperature: false },
+                };
 
           const chatLog = formatRoleplaySummaryChatLog(selectedMessages);
           const previousSummary = typeof chatMeta.summary === "string" ? chatMeta.summary.trim() : "";
@@ -7139,7 +7148,7 @@ export async function generateRoutes(app: FastifyInstance) {
             ],
             {
               model: summaryModel,
-              temperature: 0.5,
+              ...summaryTemperatureOptions,
               maxTokens: summaryMaxTokens,
               signal: abortController.signal,
             },
