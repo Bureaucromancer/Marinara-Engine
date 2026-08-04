@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  getRoleplayTypewriterRevealCharsPerSecond,
   getStreamingCharsPerSecond,
   getTypewriterFrameBudget,
   isGenerationSendBlocked,
@@ -82,6 +83,18 @@ const chatRoleplaySurfaceSource = readFileSync(
   new URL("../../packages/client/src/components/chat/ChatRoleplaySurface.tsx", import.meta.url),
   "utf8",
 );
+const pageActivitySource = readFileSync(
+  new URL("../../packages/client/src/hooks/use-page-activity.ts", import.meta.url),
+  "utf8",
+);
+const appShellSource = readFileSync(
+  new URL("../../packages/client/src/components/layout/AppShell.tsx", import.meta.url),
+  "utf8",
+);
+const peekPromptModalSource = readFileSync(
+  new URL("../../packages/client/src/components/chat/PeekPromptModal.tsx", import.meta.url),
+  "utf8",
+);
 const chatAreaSource = readFileSync(
   new URL("../../packages/client/src/components/chat/ChatArea.tsx", import.meta.url),
   "utf8",
@@ -143,6 +156,35 @@ const summaryPopoverSource = readFileSync(
   new URL("../../packages/client/src/components/chat/SummaryPopover.tsx", import.meta.url),
   "utf8",
 );
+assert.match(
+  chatRoleplaySurfaceSource,
+  /function RoleplayLiveStreamText[\s\S]*?textContent = next[\s\S]*?requestAnimationFrame\(apply\)/u,
+  "Roleplay live text should update one text node at animation-frame cadence",
+);
+assert.doesNotMatch(
+  chatRoleplaySurfaceSource,
+  /useThrottledStreamBuffer/u,
+  "Roleplay streaming should not rebuild ChatMessage from the growing buffer",
+);
+assert.doesNotMatch(pageActivitySource, /document\.hasFocus|addEventListener\(\s*["'](?:blur|focus)["']/u);
+assert.match(pageActivitySource, /document\.visibilityState === "visible"/u);
+const activeContextLinksButtonSource =
+  chatRoleplaySurfaceSource.match(/function ActiveContextLinksButton[\s\S]*?\nfunction SummaryButton/u)?.[0] ?? "";
+assert.match(
+  summaryPopoverSource,
+  /className="fixed z-\[9999\]"[\s\S]*?return createPortal\(content, document\.body\)/u,
+  "the Roleplay Chat Summary panel should portal above independent floating-panel stacking contexts",
+);
+assert.match(
+  activeContextLinksButtonSource,
+  /desktopAnchor &&[\s\S]*?createPortal\([\s\S]*?data-component="RoleplayActiveContextPanel"[\s\S]*?fixed z-\[9999\][\s\S]*?document\.body/u,
+  "the desktop Roleplay Active Context panel should portal above independent floating-panel stacking contexts",
+);
+assert.doesNotMatch(
+  activeContextLinksButtonSource,
+  /absolute right-0 top-full/u,
+  "the desktop Roleplay Active Context panel must not remain trapped in the toolbar stacking context",
+);
 const spatialTransitionEventSource =
   useGenerateSource.match(/case "spatial_transition_committed": \{[\s\S]*?case "token":/u)?.[0] ?? "";
 assert.match(
@@ -183,11 +225,6 @@ assert.ok(
   generationCleanupSource.indexOf(missedSpatialRefreshBlock) < generationCleanupSource.indexOf(ownerCleanupBlock),
   "spatial reconciliation should be dispatched before generation-owner cleanup",
 );
-assert.doesNotMatch(
-  useGenerateSource,
-  /observedArrivalCharsPerSecond|pendingCharacters \/ ROLEPLAY_QUEUE_RESERVE_SECONDS/u,
-  "the visible typewriter cadence must not follow provider bursts or queue depth",
-);
 assert.match(
   useGenerateSource,
   /STREAM_TYPEWRITER_PREBUFFER_MS = 320/u,
@@ -195,8 +232,56 @@ assert.match(
 );
 assert.match(
   useGenerateSource,
-  /getStreamingCharsPerSecond\(speed, reducedMotionMedia\?\.matches === true\)/u,
-  "streaming speed and reduced-motion preference should be the only reveal-rate inputs",
+  /smoothRoleplayTypewriter = chatModeForGeneration === "roleplay"/u,
+  "queue-aware smoothing should remain scoped to Roleplay mode",
+);
+assert.match(
+  useGenerateSource,
+  /getRoleplayTypewriterRevealCharsPerSecond\(\{[\s\S]*?pendingCharacters: pendingText\.length/u,
+  "Roleplay streaming should preserve a reserve between provider bursts",
+);
+assert.match(
+  chatRoleplaySurfaceSource,
+  /WeatherEffectsConnected paused=\{weatherEffectsPaused\}/u,
+  "weather effects should keep animating while tracker agents generate",
+);
+assert.doesNotMatch(
+  chatRoleplaySurfaceSource,
+  /WeatherEffectsConnected paused=\{ambientVisualsPaused\}/u,
+  "tracker generation must not pause the last rendered weather effect",
+);
+assert.match(
+  echoChamberPanelSource,
+  /const HUD_EDGE_GAP = 24;[^\n]*native chat scrollbar/u,
+  "Echo Chamber should leave the native Roleplay scrollbar reachable",
+);
+assert.match(
+  echoChamberPanelSource,
+  /rightEdgeOffset =[\s\S]{0,420}Math\.max\(HUD_EDGE_GAP, Math\.round\(containerRect\.right - alignmentRect\.right\)\)/u,
+  "Echo Chamber alignment anchors must not pull it back across the scrollbar clearance",
+);
+assert.match(
+  appShellSource,
+  /right: \(rightPanelOpen \? liveRightPanelWidth : 0\) \+ CHAT_SCROLLBAR_CLEARANCE/u,
+  "the right-side Trackers Panel should leave the native Roleplay scrollbar reachable",
+);
+assert.doesNotMatch(
+  peekPromptModalSource.match(/<div\s+className="fixed inset-0 z-\[100\][^\n]*/u)?.[0] ?? "",
+  /backdrop-blur/u,
+  "Peek Prompt must not continuously repaint the animated scene through a full-screen backdrop filter",
+);
+const illustratorCadencePersistenceIndex = generateRouteSource.indexOf(
+  "Persist the agent decision before any background image work",
+);
+assert.notEqual(illustratorCadencePersistenceIndex, -1, "agent cadence decisions should be persisted eagerly");
+assert.ok(
+  illustratorCadencePersistenceIndex < generateRouteSource.indexOf("pendingIllustration =", illustratorCadencePersistenceIndex),
+  "Illustrator cadence must be persisted before background image generation begins",
+);
+assert.match(
+  generateRouteSource,
+  /const runCheckpoint = \{[\s\S]{0,180}runId: newId\(\)[\s\S]{0,700}agentsStore\.saveRun\(runCheckpoint\)[\s\S]{0,500}Failed to persist cadence checkpoint after retry[\s\S]{0,80}throw retryError/u,
+  "Illustrator cadence persistence should retry idempotently and fail closed when its checkpoint cannot be saved",
 );
 assert.match(
   echoChamberPanelSource,
@@ -549,7 +634,7 @@ assert.match(
 );
 assert.match(
   chatRoleplaySurfaceSource,
-  /<WeatherEffectsConnected paused=\{ambientVisualsPaused\} \/>/u,
+  /const weatherEffectsPaused =\s+isMobileToolbarViewport && \(keyboardOpen \|\| composerFocused \|\| hasMobileDraftInput\)/u,
   "mobile text input should suspend Roleplay weather rendering instead of competing for device resources",
 );
 assert.match(
@@ -734,6 +819,51 @@ assert.equal(
   getStreamingCharsPerSecond(30, true),
   Infinity,
   "reduced-motion preferences should disable the typewriter animation",
+);
+assert.ok(
+  Math.abs(
+    getRoleplayTypewriterRevealCharsPerSecond({
+      selectedCharsPerSecond: 90,
+      pendingCharacters: 45,
+      previousCharsPerSecond: null,
+      elapsedMs: 16,
+      streamComplete: false,
+    }) - 50,
+  ) < 0.001,
+  "Roleplay should turn the first provider burst into a buffered reveal rate",
+);
+const roleplayAcceleratedRate = getRoleplayTypewriterRevealCharsPerSecond({
+  selectedCharsPerSecond: 90,
+  pendingCharacters: 90,
+  previousCharsPerSecond: 20,
+  elapsedMs: 16,
+  streamComplete: false,
+});
+assert.ok(
+  roleplayAcceleratedRate > 20 && roleplayAcceleratedRate < 23,
+  "Roleplay should ease into a faster reveal instead of copying a provider burst",
+);
+const roleplayDeceleratedRate = getRoleplayTypewriterRevealCharsPerSecond({
+  selectedCharsPerSecond: 90,
+  pendingCharacters: 5,
+  previousCharsPerSecond: 60,
+  elapsedMs: 16,
+  streamComplete: false,
+});
+assert.ok(
+  roleplayDeceleratedRate > 52 && roleplayDeceleratedRate < 54,
+  "Roleplay should slow promptly as its buffered reserve shrinks",
+);
+assert.equal(
+  getRoleplayTypewriterRevealCharsPerSecond({
+    selectedCharsPerSecond: 90,
+    pendingCharacters: 5,
+    previousCharsPerSecond: 6,
+    elapsedMs: 16,
+    streamComplete: true,
+  }),
+  90,
+  "a completed Roleplay stream should drain at the selected speed",
 );
 assert.deepEqual(
   takeTypewriterCharacters("A👩‍🔬B", 2),

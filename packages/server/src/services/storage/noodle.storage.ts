@@ -1,15 +1,18 @@
 // ──────────────────────────────────────────────
 // Storage: Noodle Fake Social Media
 // ──────────────────────────────────────────────
-import { and, desc, eq, gt, inArray, isNull, lt } from "../../db/file-query.js";
+import { existsSync } from "node:fs";
+import { and, desc, eq, gt, inArray, isNull, lt, or } from "../../db/file-query.js";
 import {
   createNoodlePoll,
+  DEFAULT_NOODLER_CREATOR_REPLIES_PER_24_HOURS,
   DEFAULT_NOODLE_SETTINGS,
+  DEFAULT_NOODLE_WALLET_COINS,
   noodleAccountProfileSettingsSchema,
   noodleAccountPrivacySettingsSchema,
   noodleAccountSocialSettingsSchema,
-  noodleAutoPostingIntensitySchema,
   noodleSettingsSchema,
+  normalizeAvatarCrop,
   readNoodlePollFromMetadata,
   type NoodleAccount,
   type NoodleAccountKind,
@@ -19,8 +22,8 @@ import {
   type NoodleAccountSettingsPatchInput,
   type NoodleAccountSubscription,
   type NoodleAccountUpdateInput,
-  type NoodleAutoPostingIntensity,
-  type NoodleAvatarCrop,
+  type NoodlerReserveStatus,
+  type AvatarCrop,
   type NoodleAuthorSnapshot,
   type NoodleBootstrap,
   type NoodleCreateInteractionInput,
@@ -53,7 +56,7 @@ import type { DB } from "../../db/connection.js";
 import { isFileUniqueConstraintError } from "../../db/file-schema.js";
 import { logger } from "../../lib/logger.js";
 import { canViewNoodlerPost, isNoodlerHiddenFromViewer } from "../noodle/noodler-access.js";
-import { nextAutoPostRunAt } from "../noodle/noodle-autopost-cadence.js";
+import { noodlerPostMediaUrl, resolveNoodlerMediaAbsolutePath, unlinkNoodlerMedia } from "../noodle/noodle-noodler-media.js";
 import {
   noodleAccounts,
   noodleAccountSubscriptions,
@@ -62,6 +65,10 @@ import {
   noodlePosts,
   noodlePostUnlocks,
   noodleRefreshRuns,
+  noodlerCreatorReplyClaims,
+  noodlerAutomaticAttempts,
+  noodlerPreparedPosts,
+  noodlerReserveState,
 } from "../../db/schema/index.js";
 import { newId, now } from "../../utils/id-generator.js";
 import { createAppSettingsStorage } from "./app-settings.storage.js";
@@ -76,6 +83,93 @@ import {
 const NOODLE_SETTINGS_KEY = "noodle.settings";
 const NOODLE_REFRESH_SCHEDULE_KEY = "noodle.refresh-schedule";
 const NOODLE_CARRYOVER_TARGETS: NoodleCarryoverTarget[] = ["conversation", "roleplay", "game"];
+export const NOODLER_UNLOCK_COST = 1;
+export const NOODLER_SUBSCRIPTION_COST = 5;
+const NOODLER_RESERVE_STATE_ID = "noodler-reserve";
+const ROLLING_DAY_MS = 24 * 60 * 60 * 1000;
+const MANUAL_POST_INVALIDATION_MS = 60 * 60 * 1000;
+/**
+ * The reserve poll runs every minute, so a slot this far past its publish time means the server
+ * was down or paused. Publishing it now would backdate it, and a long outage would release the
+ * whole missed run at once, so an elapsed slot is retired instead.
+ */
+const ELAPSED_PREPARED_SLOT_MS = 60 * 60 * 1000;
+/** How long published/discarded prepared rows are kept for crash recovery before pruning. */
+const TERMINAL_PREPARED_POST_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+export type NoodlerPreparedPostPayload = {
+  title: string | null;
+  content: string;
+  access: NoodlePostAccess;
+  imagePrompt: string | null;
+  metadata: Record<string, unknown>;
+};
+
+export type NoodlerPreparedPostState = "prepared" | "published" | "discarded";
+export type NoodlerPreparedImageState = "none" | "pending" | "generating" | "attached" | "rejected" | "closed";
+
+export function noodlerReservePolicyFingerprint(
+  account: NoodleAccount,
+  settings?: Pick<
+    NoodleSettings,
+    | "imageGenerationConnectionId"
+    | "imageGenerationPrompt"
+    | "imageGenerationUseAvatarReferences"
+    | "imageGenerationIncludeDescriptions"
+    | "includeCharacterSchedules"
+    | "noodlerNightQuiet"
+  >,
+  sourceUpdatedAt?: string | null,
+): string {
+  // Pick the policy fields explicitly: callers pass the whole settings object, and
+  // serializing it wholesale would invalidate every prepared post on any unrelated
+  // NoodleR setting change (onboarding state, refresh cadence, …).
+  const mediaPolicy = settings
+    ? {
+        imageGenerationConnectionId: settings.imageGenerationConnectionId,
+        imageGenerationPrompt: settings.imageGenerationPrompt,
+        imageGenerationUseAvatarReferences: settings.imageGenerationUseAvatarReferences,
+        imageGenerationIncludeDescriptions: settings.imageGenerationIncludeDescriptions,
+        includeCharacterSchedules: settings.includeCharacterSchedules,
+        noodlerNightQuiet: settings.noodlerNightQuiet,
+      }
+    : null;
+  return JSON.stringify({
+    sourceId: account.noodleAccountId,
+    sourceUpdatedAt: sourceUpdatedAt ?? null,
+    stageProfileUpdatedAt: account.updatedAt,
+    disclosure: account.settings.privacy.identityDisclosure ?? "secret",
+    stagePersonality: account.settings.privacy.stagePersonality ?? "",
+    access: account.settings.privacy.access,
+    scheduler: account.settings.scheduler.autoPosting,
+    mediaPolicy,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  });
+}
+
+/**
+ * Rewrite the linked-source ID inside a stored reserve fingerprint. Profile import can rename a
+ * colliding account, and the fingerprint carries that ID, so without this every restored prepared
+ * post fails its own policy check on the next reconcile and is discarded. Lives here because this
+ * module owns the fingerprint format.
+ */
+export function remapNoodlerReservePolicyFingerprint(
+  fingerprint: unknown,
+  accountMap: ReadonlyMap<string, string>,
+): unknown {
+  if (typeof fingerprint !== "string") return fingerprint;
+  try {
+    const parsed = JSON.parse(fingerprint) as { sourceId?: unknown };
+    if (typeof parsed?.sourceId !== "string") return fingerprint;
+    const remapped = accountMap.get(parsed.sourceId);
+    if (!remapped || remapped === parsed.sourceId) return fingerprint;
+    // Re-serialized from the parsed object, so key order (and therefore the comparison) is
+    // preserved exactly as the original writer produced it.
+    return JSON.stringify({ ...parsed, sourceId: remapped });
+  } catch {
+    return fingerprint;
+  }
+}
 
 type AccountRow = typeof noodleAccounts.$inferSelect;
 type PostRow = typeof noodlePosts.$inferSelect;
@@ -116,11 +210,16 @@ type NoodlerPostPersistenceInput = {
   content: string;
   source?: NoodlePostSource;
   access?: NoodlePostAccess;
-  ppvPrice?: number | null;
   metadata?: Record<string, unknown>;
   imageUrl?: string | null;
   imagePrompt?: string | null;
 };
+
+export type NoodlerCreatorReplyClaimResult =
+  | { status: "claimed"; claimId: string; creator: NoodleAccount; post: NoodlerManagedPost; parent: NoodleInteraction; viewer: NoodleAccount }
+  | { status: "duplicate"; interaction: NoodleInteraction | null }
+  | { status: "exhausted" }
+  | { status: "ineligible" };
 
 function parseRecord(value: unknown): Record<string, unknown> {
   if (!value) return {};
@@ -140,27 +239,22 @@ function emptyNoodleAccountSettings(): NoodleAccountSettings {
     profile: {},
     social: {},
     scheduler: { autoPosting: defaultAutoPostingSettings() },
-    privacy: { access: { hiddenFromAccountIds: [], subscriptionIncludesPpv: false } },
+    privacy: { access: { hiddenFromAccountIds: [] } },
+    wallet: { coins: DEFAULT_NOODLE_WALLET_COINS },
   };
 }
 
 function defaultAutoPostingSettings(): NonNullable<NoodleAccountSchedulerSettings["autoPosting"]> {
-  return { enabled: false, intensity: 1, imagesEnabled: false, nextRunAt: null };
+  return { enabled: false, imagesEnabled: false };
 }
 
 export function normalizeScheduler(value: unknown): NoodleAccountSchedulerSettings {
-  // Normalize each field independently so one malformed value (e.g. a bad intensity)
-  // doesn't discard the other valid persisted fields.
   const defaults = defaultAutoPostingSettings();
   const raw = parseRecord(parseRecord(value).autoPosting);
-  const intensity = noodleAutoPostingIntensitySchema.safeParse(raw.intensity);
-  const nextRunAtValid = typeof raw.nextRunAt === "string" && !Number.isNaN(Date.parse(raw.nextRunAt));
   return {
     autoPosting: {
       enabled: typeof raw.enabled === "boolean" ? raw.enabled : defaults.enabled,
-      intensity: intensity.success ? intensity.data : defaults.intensity,
       imagesEnabled: typeof raw.imagesEnabled === "boolean" ? raw.imagesEnabled : defaults.imagesEnabled,
-      nextRunAt: raw.nextRunAt === null ? null : nextRunAtValid ? (raw.nextRunAt as string) : defaults.nextRunAt,
     },
   };
 }
@@ -173,6 +267,11 @@ function normalizePersistedBoolean(value: unknown): boolean | undefined {
   if (value === true || value === "true") return true;
   if (value === false || value === "false") return false;
   return undefined;
+}
+
+export function normalizePersistedInteger(value: unknown): number | undefined {
+  const parsed = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(parsed) && Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function validProfileField(key: string, value: unknown): NoodleAccountSettings["profile"] {
@@ -188,7 +287,7 @@ function validSocialField(key: string, value: unknown): NoodleAccountSettings["s
 }
 
 function validPrivacyField(key: string, value: unknown): NoodleAccountSettings["privacy"] {
-  const empty = { access: { hiddenFromAccountIds: [], subscriptionIncludesPpv: false } };
+  const empty = { access: { hiddenFromAccountIds: [] } };
   if (value === undefined) return empty;
   const parsed = noodleAccountPrivacySettingsSchema.safeParse({ [key]: value });
   return parsed.success ? parsed.data : empty;
@@ -199,6 +298,7 @@ export function normalizeNoodleAccountSettings(value: unknown): NoodleAccountSet
   const rawProfile = parseRecord(raw.profile);
   const rawSocial = parseRecord(raw.social);
   const rawPrivacy = parseRecord(raw.privacy);
+  const rawWallet = parseRecord(raw.wallet);
   const rawAvatarCrop = nestedOrLegacy(rawProfile, raw, "avatarCrop");
   const rawBannerUrl = nestedOrLegacy(rawProfile, raw, "bannerUrl");
   const rawLocation = nestedOrLegacy(rawProfile, raw, "location");
@@ -207,14 +307,15 @@ export function normalizeNoodleAccountSettings(value: unknown): NoodleAccountSet
   const rawFollowingAccountIds = nestedOrLegacy(rawSocial, raw, "followingAccountIds");
   const rawFollowingAccountTimestamps = nestedOrLegacy(rawSocial, raw, "followingAccountTimestamps");
   const rawNotificationsReadAt = nestedOrLegacy(rawSocial, raw, "notificationsReadAt");
+  const rawNoodlerFeedSeenAt = nestedOrLegacy(rawSocial, raw, "noodlerFeedSeenAt");
+  const rawNoodleFeedSeenAt = nestedOrLegacy(rawSocial, raw, "noodleFeedSeenAt");
   const rawIdentityDisclosure = nestedOrLegacy(rawPrivacy, raw, "identityDisclosure");
   const rawStagePersonality = nestedOrLegacy(rawPrivacy, raw, "stagePersonality");
   const rawAccess = parseRecord(rawPrivacy.access);
-  const normalizedAvatarCrop = rawAvatarCrop === null ? null : parseNoodleAvatarCrop(rawAvatarCrop);
+  const normalizedAvatarCrop = rawAvatarCrop === null ? null : normalizeAvatarCrop(rawAvatarCrop);
   const profile = {
     ...(rawAvatarCrop !== undefined &&
-      (rawAvatarCrop === null || normalizedAvatarCrop !== null) &&
-      validProfileField("avatarCrop", normalizedAvatarCrop)),
+      (rawAvatarCrop === null || normalizedAvatarCrop !== null) && { avatarCrop: normalizedAvatarCrop }),
     ...(rawBannerUrl !== undefined && validProfileField("bannerUrl", rawBannerUrl)),
     ...(rawLocation !== undefined && validProfileField("location", rawLocation)),
     ...(rawProfileGenerated !== undefined &&
@@ -234,13 +335,14 @@ export function normalizeNoodleAccountSettings(value: unknown): NoodleAccountSet
     ...(rawFollowingAccountTimestamps !== undefined &&
       validSocialField("followingAccountTimestamps", followingAccountTimestamps)),
     ...(rawNotificationsReadAt !== undefined && validSocialField("notificationsReadAt", rawNotificationsReadAt)),
+    ...(rawNoodlerFeedSeenAt !== undefined && validSocialField("noodlerFeedSeenAt", rawNoodlerFeedSeenAt)),
+    ...(rawNoodleFeedSeenAt !== undefined && validSocialField("noodleFeedSeenAt", rawNoodleFeedSeenAt)),
   };
   const privacy = {
     ...(rawIdentityDisclosure !== undefined && validPrivacyField("identityDisclosure", rawIdentityDisclosure)),
     ...(rawStagePersonality !== undefined && validPrivacyField("stagePersonality", rawStagePersonality)),
     access: {
       hiddenFromAccountIds: parseStringArray(rawAccess.hiddenFromAccountIds),
-      subscriptionIncludesPpv: normalizePersistedBoolean(rawAccess.subscriptionIncludesPpv) ?? false,
     },
   };
   return {
@@ -248,6 +350,7 @@ export function normalizeNoodleAccountSettings(value: unknown): NoodleAccountSet
     social,
     scheduler: normalizeScheduler(raw.scheduler),
     privacy,
+    wallet: { coins: normalizePersistedInteger(rawWallet.coins) ?? DEFAULT_NOODLE_WALLET_COINS },
   };
 }
 
@@ -288,38 +391,8 @@ function parseRefreshAttempts(value: unknown): NoodleRefreshAttempt[] {
   });
 }
 
-export function parseNoodleAvatarCrop(value: unknown): NoodleAvatarCrop | null {
-  let parsed = value;
-  if (typeof parsed === "string") {
-    if (!parsed.trim()) return null;
-    try {
-      parsed = JSON.parse(parsed);
-    } catch {
-      return null;
-    }
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  const crop = parsed as Record<string, unknown>;
-  const finite = (entry: unknown): entry is number => typeof entry === "number" && Number.isFinite(entry);
-  if (
-    finite(crop.srcX) &&
-    finite(crop.srcY) &&
-    finite(crop.srcWidth) &&
-    finite(crop.srcHeight) &&
-    crop.srcWidth > 0 &&
-    crop.srcHeight > 0
-  ) {
-    return { srcX: crop.srcX, srcY: crop.srcY, srcWidth: crop.srcWidth, srcHeight: crop.srcHeight };
-  }
-  if (finite(crop.zoom) && finite(crop.offsetX) && finite(crop.offsetY) && crop.zoom > 0) {
-    return {
-      zoom: crop.zoom,
-      offsetX: crop.offsetX,
-      offsetY: crop.offsetY,
-      ...(crop.fullImage === true ? { fullImage: true } : {}),
-    };
-  }
-  return null;
+export function parseNoodleAvatarCrop(value: unknown): AvatarCrop | null {
+  return normalizeAvatarCrop(value);
 }
 
 function parseStringArray(value: unknown): string[] {
@@ -351,7 +424,7 @@ function parseAuthorSnapshot(value: unknown): NoodleAuthorSnapshot | null {
     handle,
     displayName,
     avatarUrl: typeof parsed.avatarUrl === "string" && parsed.avatarUrl ? parsed.avatarUrl : null,
-    avatarCrop: parseNoodleAvatarCrop(parsed.avatarCrop),
+    avatarCrop: normalizeAvatarCrop(parsed.avatarCrop),
   };
 }
 
@@ -426,6 +499,9 @@ export function normalizeNoodleSettings(raw: unknown): NoodleSettings {
     maxImagesPerRefresh: migratedMaxImagesPerRefresh,
     noodlerGenerationGuidance: migratedNoodlerGenerationGuidance,
     imageCaptioningUseConnectionDefault: migratedImageCaptioningUseConnectionDefault,
+    noodlerOnboardingState:
+      rawRecord.noodlerOnboardingState ??
+      (rawRecord.noodlerOnboardingComplete === true ? "completed" : DEFAULT_NOODLE_SETTINGS.noodlerOnboardingState),
   };
   let parsed = noodleSettingsSchema.safeParse(candidate);
   if (!parsed.success) {
@@ -507,8 +583,7 @@ function mapPost(row: PostRow): NoodlePost {
     parentPostId: row.parentPostId ?? null,
     quotePostId: row.quotePostId ?? null,
     source: row.source === "generated" ? "generated" : "manual",
-    access: row.access === "subscriber" || row.access === "ppv" ? row.access : "public",
-    ppvPrice: typeof row.ppvPrice === "number" && Number.isFinite(row.ppvPrice) ? row.ppvPrice : null,
+    access: row.access === "public" ? "public" : "locked",
     metadata: parseRecord(row.metadata),
     authorSnapshot: parseAuthorSnapshot(row.authorSnapshot),
     createdAt: row.createdAt,
@@ -794,7 +869,7 @@ export function createNoodleStorage(db: DB) {
                   ),
                 );
         const unlockRows =
-          currentPostView.access === "ppv"
+          currentPostView.access === "locked"
             ? await tx
                 .select()
                 .from(noodlePostUnlocks)
@@ -810,7 +885,6 @@ export function createNoodleStorage(db: DB) {
             post: currentPostView,
             subscribed: subscriptionRows.length > 0,
             unlockedPostIds: new Set(unlockRows.map((unlock) => unlock.postId)),
-            subscriptionIncludesPpv: currentAuthor.settings.privacy.access.subscriptionIncludesPpv,
           })
         ) {
           return null;
@@ -860,6 +934,48 @@ export function createNoodleStorage(db: DB) {
     });
   };
 
+  /**
+   * Deleting a comment must take its creator reply with it: the reply is unreadable once its
+   * parent is gone, and the permanent claim row would keep consuming the rolling allowance
+   * and block the comment slot forever.
+   */
+  const deleteInteractionChildren = async (
+    tx: Parameters<Parameters<DB["transaction"]>[0]>[0],
+    parentId: string,
+  ): Promise<void> => {
+    const parent = (await tx.select().from(noodleInteractions).where(eq(noodleInteractions.id, parentId)))[0];
+    const rows = parent
+      ? await tx.select().from(noodleInteractions).where(eq(noodleInteractions.postId, parent.postId))
+      : [];
+    // The whole descendant subtree goes, not just the direct children (same closure as
+    // deleteInteractionById): a reply to a creator reply would otherwise survive its thread.
+    const removed = new Set([parentId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const row of rows) {
+        if (removed.has(row.id) || !row.parentInteractionId || !removed.has(row.parentInteractionId)) continue;
+        removed.add(row.id);
+        changed = true;
+      }
+    }
+    const removedIds = [...removed];
+    // Claims are keyed by either end of the pair, so a claim whose reply is going away must go
+    // too or it keeps consuming the rolling allowance forever.
+    await tx
+      .delete(noodlerCreatorReplyClaims)
+      .where(
+        or(
+          inArray(noodlerCreatorReplyClaims.parentInteractionId, removedIds),
+          inArray(noodlerCreatorReplyClaims.replyInteractionId, removedIds),
+        ),
+      );
+    const childIds = removedIds.filter((id) => id !== parentId);
+    if (childIds.length === 0) return;
+    await tx.delete(noodleActivityDigests).where(inArray(noodleActivityDigests.sourceInteractionId, childIds));
+    await tx.delete(noodleInteractions).where(inArray(noodleInteractions.id, childIds));
+  };
+
   const deleteStoredInteraction = async (
     postId: string,
     input: DeleteStoredInteractionCommand,
@@ -883,7 +999,10 @@ export function createNoodleStorage(db: DB) {
     if (!existing) return null;
 
     if (digestDeletionPolicy === "delete-directly") {
-      await db.delete(noodleInteractions).where(eq(noodleInteractions.id, existing.id));
+      await db.transaction(async (tx) => {
+        await deleteInteractionChildren(tx, existing.id);
+        await tx.delete(noodleInteractions).where(eq(noodleInteractions.id, existing.id));
+      });
       return mapInteraction(existing);
     }
 
@@ -902,6 +1021,7 @@ export function createNoodleStorage(db: DB) {
       return null;
     }
     await db.transaction(async (tx) => {
+      await deleteInteractionChildren(tx, existing.id);
       await tx.delete(noodleActivityDigests).where(eq(noodleActivityDigests.sourceInteractionId, existing.id));
       await tx.delete(noodleInteractions).where(eq(noodleInteractions.id, existing.id));
     });
@@ -927,6 +1047,24 @@ export function createNoodleStorage(db: DB) {
       const currentSchedule = await this.getRefreshSchedule();
       const reconciled = reconcileNoodleRefreshSchedule(currentSchedule, next.refreshesPerDay, new Date());
       await this.saveRefreshSchedule(clearNoodleRefreshFailure(reconciled));
+      if (!current.autoPostingScheduleEnabled && next.autoPostingScheduleEnabled) {
+        const timestamp = now();
+        const rows = await db.select().from(noodlerPreparedPosts);
+        const expired = rows.filter(
+          (row) => row.state === "prepared" && Date.parse(row.publishAt) <= Date.parse(timestamp),
+        );
+        if (expired.length > 0) {
+          await db.transaction(async (tx) =>
+            tx
+              .update(noodlerPreparedPosts)
+              .set({ state: "discarded", updatedAt: timestamp })
+              .where(inArray(noodlerPreparedPosts.id, expired.map((row) => row.id))),
+          );
+          for (const row of expired) {
+            unlinkNoodlerMedia(String(parseRecord(parseRecord(row.payload).metadata).noodlerMediaPath ?? "") || null);
+          }
+        }
+      }
       return this.getSettings();
     },
 
@@ -1150,7 +1288,7 @@ export function createNoodleStorage(db: DB) {
     async createNoodlerAccount(
       noodleAccountId: string,
       stageProfile: NoodleStageProfileInput,
-      defaultIntensity: NoodleAutoPostingIntensity = 1,
+      wizardExecutionId?: string,
     ): Promise<NoodleAccount | null> {
       const publicAccount = await this.getAccountById(noodleAccountId);
       if (!publicAccount || (publicAccount.kind !== "persona" && publicAccount.kind !== "character")) return null;
@@ -1159,13 +1297,12 @@ export function createNoodleStorage(db: DB) {
       const base = emptyNoodleAccountSettings();
       const accountSettings: NoodleAccountSettings = {
         ...base,
-        // Seed the creator's cadence with the configured default so first-enable via any
-        // path (wizard, schedule manager, profile toggle) applies it consistently.
-        scheduler: { autoPosting: { ...defaultAutoPostingSettings(), intensity: defaultIntensity } },
+        profile: wizardExecutionId ? { noodlerWizardExecutionId: wizardExecutionId } : base.profile,
+        scheduler: { autoPosting: defaultAutoPostingSettings() },
         privacy: {
           identityDisclosure: stageProfile.disclosureMode,
           stagePersonality: stageProfile.stagePersonality,
-          access: { hiddenFromAccountIds: [], subscriptionIncludesPpv: false },
+          access: { hiddenFromAccountIds: [] },
         },
       };
       await db.insert(noodleAccounts).values({
@@ -1225,7 +1362,7 @@ export function createNoodleStorage(db: DB) {
       entityId: string;
       displayName: string;
       avatarUrl?: string | null;
-      avatarCrop?: NoodleAvatarCrop | null;
+      avatarCrop?: AvatarCrop | null;
       bio?: string | null;
       invited?: boolean;
       /** Keep entity-owned identity fields current without replacing generated profile copy. */
@@ -1369,24 +1506,24 @@ export function createNoodleStorage(db: DB) {
         const current = normalizeNoodleAccountSettings(row.settings);
         let next: NoodleAccountSettings;
         if (input.subtree === "social") {
-          next = { ...current, social: { ...current.social, ...input.patch } };
+          // Feed-visit timestamps only ever move forward. Two visits can be in flight at once
+          // (both surfaces record on mount), and the later request is not always the later
+          // timestamp — an out-of-order write would resurrect an already-cleared counter.
+          const social = { ...current.social, ...input.patch };
+          for (const field of ["noodleFeedSeenAt", "noodlerFeedSeenAt"] as const) {
+            const stored = current.social[field];
+            if (stored && social[field] && !(Date.parse(social[field]) > (Date.parse(stored) || 0))) {
+              social[field] = stored;
+            }
+          }
+          next = { ...current, social };
         } else if (input.subtree === "scheduler") {
-          // Deep-merge autoPosting so the server-owned nextRunAt is never dropped by a
-          // client patch that only carries enabled/intensity. Clear nextRunAt whenever
-          // enable or intensity changes so the scheduler seeds a fresh first run.
           const currentAuto = current.scheduler.autoPosting ?? defaultAutoPostingSettings();
           const patchAuto = input.patch.autoPosting;
           const config = patchAuto
             ? {
                 enabled: patchAuto.enabled ?? currentAuto.enabled,
-                intensity: patchAuto.intensity ?? currentAuto.intensity,
-                // Image enablement/quota do not affect cadence, so they never reset nextRunAt.
                 imagesEnabled: patchAuto.imagesEnabled ?? currentAuto.imagesEnabled,
-                nextRunAt:
-                  (patchAuto.enabled !== undefined && patchAuto.enabled !== currentAuto.enabled) ||
-                  (patchAuto.intensity !== undefined && patchAuto.intensity !== currentAuto.intensity)
-                    ? null
-                    : currentAuto.nextRunAt,
               }
             : currentAuto;
           next = { ...current, scheduler: { autoPosting: config } };
@@ -1416,82 +1553,446 @@ export function createNoodleStorage(db: DB) {
     },
 
     /**
-     * Server-owned nextRunAt advance, done in one transaction so a run is claimed before
-     * provider work. Returns "seeded" when a freshly enabled creator had a null run and
-     * gets its first future slot (do not generate), "claimed" when a due run was advanced
-     * (caller should generate), or "skipped" when disabled/not-yet-due/missing.
+     * Latest real posting activity per creator: the newest published post or prepared slot.
+     * Account `updatedAt` moves on profile edits, which is not activity, so scheduling order
+     * must come from this instead.
      */
-    async advanceAutoPostRun(id: string, nowIso: string): Promise<"seeded" | "claimed" | "skipped"> {
+    async getNoodlerCreatorActivityTimes(): Promise<Map<string, string>> {
+      const [posts, prepared] = await Promise.all([
+        db.select().from(noodlePosts),
+        db.select().from(noodlerPreparedPosts),
+      ]);
+      const latest = new Map<string, string>();
+      const observe = (accountId: string, at: string) => {
+        const current = latest.get(accountId);
+        if (!current || at > current) latest.set(accountId, at);
+      };
+      for (const post of posts) observe(post.authorAccountId, post.createdAt);
+      for (const item of prepared) {
+        if (item.state !== "discarded") observe(item.creatorAccountId, item.publishAt);
+      }
+      return latest;
+    },
+
+    async ensureNoodlerReserveState(at = new Date()): Promise<{
+      lastObservedBudgetTime: string;
+      preparationNotBefore: string;
+    }> {
       return db.transaction(async (tx) => {
-        const row = (await tx.select().from(noodleAccounts).where(eq(noodleAccounts.id, id)))[0];
-        if (!row || row.platform !== "noodler") return "skipped";
-        const current = normalizeNoodleAccountSettings(row.settings);
-        const auto = current.scheduler.autoPosting;
-        if (!auto?.enabled) return "skipped";
-        let outcome: "seeded" | "claimed";
-        if (auto.nextRunAt === null) outcome = "seeded";
-        else if (Date.parse(auto.nextRunAt) <= Date.parse(nowIso)) outcome = "claimed";
-        else return "skipped";
-        // Derive the next slot from the transactionally-current intensity so a concurrent
-        // intensity change can't seed a run using a stale (pre-patch) cadence.
-        const next = nextAutoPostRunAt(auto.intensity, new Date(nowIso));
-        const nextSettings: NoodleAccountSettings = {
-          ...current,
-          scheduler: { autoPosting: { ...auto, nextRunAt: next } },
-        };
-        await tx
-          .update(noodleAccounts)
-          .set({ settings: JSON.stringify(nextSettings), updatedAt: now() })
-          .where(eq(noodleAccounts.id, id));
-        return outcome;
+        const existing = (await tx.select().from(noodlerReserveState).where(eq(noodlerReserveState.id, NOODLER_RESERVE_STATE_ID)))[0];
+        // Imported or hand-edited state can carry timestamps that do not parse. NaN would
+        // propagate into every budget and hold comparison, so an unreadable value resets to now.
+        const parsed = existing ? Date.parse(existing.lastObservedBudgetTime) : 0;
+        const observedMs = Math.max(at.getTime(), Number.isNaN(parsed) ? 0 : parsed);
+        if (existing) {
+          const observed = new Date(observedMs).toISOString();
+          const preparationNotBefore = Number.isNaN(Date.parse(existing.preparationNotBefore))
+            ? new Date(observedMs + ROLLING_DAY_MS).toISOString()
+            : existing.preparationNotBefore;
+          if (observed !== existing.lastObservedBudgetTime || preparationNotBefore !== existing.preparationNotBefore) {
+            await tx.update(noodlerReserveState).set({ lastObservedBudgetTime: observed, preparationNotBefore, updatedAt: at.toISOString() }).where(eq(noodlerReserveState.id, NOODLER_RESERVE_STATE_ID));
+          }
+          return { lastObservedBudgetTime: observed, preparationNotBefore };
+        }
+        const timestamp = at.toISOString();
+        const preparationNotBefore = new Date(at.getTime() + ROLLING_DAY_MS).toISOString();
+        await tx.insert(noodlerReserveState).values({
+          id: NOODLER_RESERVE_STATE_ID,
+          lastObservedBudgetTime: timestamp,
+          preparationNotBefore,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+        return { lastObservedBudgetTime: timestamp, preparationNotBefore };
       });
+    },
+
+    async claimNoodlerAutomaticAttempt(
+      kind: "text" | "image",
+      limit: number,
+      at = new Date(),
+    ): Promise<{ status: "claimed"; claimId: string; claimedAt: string } | { status: "exhausted" | "holding" }> {
+      return db.transaction(async (tx) => {
+        let state = (await tx.select().from(noodlerReserveState).where(eq(noodlerReserveState.id, NOODLER_RESERVE_STATE_ID)))[0];
+        if (!state) {
+          const timestamp = at.toISOString();
+          await tx.insert(noodlerReserveState).values({
+            id: NOODLER_RESERVE_STATE_ID,
+            lastObservedBudgetTime: timestamp,
+            preparationNotBefore: new Date(at.getTime() + ROLLING_DAY_MS).toISOString(),
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+          return { status: "holding" };
+        }
+        // Same NaN handling as ensureNoodlerReserveState: an unreadable stored timestamp resets
+        // to now instead of poisoning the comparison (and toISOString) with NaN.
+        const observed = Date.parse(state.lastObservedBudgetTime);
+        const effectiveMs = Math.max(at.getTime(), Number.isNaN(observed) ? 0 : observed);
+        const effectiveIso = new Date(effectiveMs).toISOString();
+        if (effectiveIso !== state.lastObservedBudgetTime) {
+          await tx.update(noodlerReserveState).set({ lastObservedBudgetTime: effectiveIso, updatedAt: at.toISOString() }).where(eq(noodlerReserveState.id, NOODLER_RESERVE_STATE_ID));
+          state = { ...state, lastObservedBudgetTime: effectiveIso };
+        }
+        const notBefore = Date.parse(state.preparationNotBefore);
+        // An unparseable hold must not read as "hold expired"; hold until it is repaired.
+        if (Number.isNaN(notBefore) || effectiveMs < notBefore) return { status: "holding" };
+        const cutoff = effectiveMs - ROLLING_DAY_MS;
+        // Prune claims that have left the rolling window, in the same transaction that
+        // counts them: they can never affect the budget again, and the ledger is scanned
+        // on every claim.
+        const cutoffIso = new Date(cutoff).toISOString();
+        await tx.delete(noodlerAutomaticAttempts).where(lt(noodlerAutomaticAttempts.claimedAt, cutoffIso));
+        const attempts = (await tx.select().from(noodlerAutomaticAttempts)).filter(
+          (row) => row.kind === kind && Date.parse(row.claimedAt) > cutoff,
+        );
+        if (attempts.length >= limit) return { status: "exhausted" };
+        const claimId = newId();
+        await tx.insert(noodlerAutomaticAttempts).values({
+          id: claimId,
+          kind,
+          claimedAt: effectiveIso,
+          outcome: "claimed",
+        });
+        return { status: "claimed", claimId, claimedAt: effectiveIso };
+      });
+    },
+
+    async completeNoodlerAutomaticAttempt(claimId: string, outcome: "completed" | "failed"): Promise<void> {
+      await db.update(noodlerAutomaticAttempts).set({ outcome }).where(eq(noodlerAutomaticAttempts.id, claimId));
+    },
+
+    async createNoodlerPreparedPost(input: {
+      creatorAccountId: string;
+      generatedAt: string;
+      publishAt: string;
+      payload: NoodlerPreparedPostPayload;
+      policyFingerprint: string;
+    }): Promise<string> {
+      const id = newId();
+      // In a transaction so the row lands durably on commit (noodler_prepared_posts is a
+      // durable-on-commit table): a direct insert rides the batched flush, and a crash inside
+      // that window loses the row while its promoted media file stays on disk.
+      await db.transaction(async (tx) => tx.insert(noodlerPreparedPosts).values({
+        id,
+        creatorAccountId: input.creatorAccountId,
+        generatedAt: input.generatedAt,
+        publishAt: input.publishAt,
+        payload: JSON.stringify(input.payload),
+        policyFingerprint: input.policyFingerprint,
+        state: "prepared",
+        publishedPostId: null,
+        imageState: input.payload.metadata.noodlerMediaPath ? "attached" : "none",
+        imageClaimToken: null,
+        imageClaimLeaseUntil: null,
+        updatedAt: input.generatedAt,
+      }));
+      return id;
+    },
+
+    async listNoodlerPreparedPosts(): Promise<Array<{
+      id: string;
+      creatorAccountId: string;
+      generatedAt: string;
+      publishAt: string;
+      payload: NoodlerPreparedPostPayload;
+      policyFingerprint: string;
+      state: NoodlerPreparedPostState;
+      publishedPostId: string | null;
+      imageState: NoodlerPreparedImageState;
+      imageClaimToken: string | null;
+      imageClaimLeaseUntil: string | null;
+      updatedAt: string;
+    }>> {
+      const rows = await db.select().from(noodlerPreparedPosts).orderBy(noodlerPreparedPosts.publishAt);
+      return rows.map((row) => ({
+        ...row,
+        state: (row.state === "prepared" || row.state === "published" ? row.state : "discarded") as NoodlerPreparedPostState,
+        imageState: (row.imageState === "pending" || row.imageState === "generating" || row.imageState === "attached" || row.imageState === "rejected" || row.imageState === "closed"
+          ? row.imageState
+          : "none") as NoodlerPreparedImageState,
+        payload: parseRecord(row.payload) as NoodlerPreparedPostPayload,
+      }));
     },
 
     /**
-     * Unconditional claim used by the global manual "Refresh NoodleR now" action: unlike
-     * `advanceAutoPostRun`, it does not require the slot to be due yet, since a manual
-     * refresh intentionally consumes a creator's near-future slot early. Still derives the
-     * next slot from the current cadence so the schedule's intent is preserved.
+     * Unlinking media before the discard is durable can leave a still-publishable row whose
+     * image bytes are gone, so the state is committed first and the file removed afterwards.
+     * A crash between the two leaks a file, which `sweepOrphanedNoodlerMedia` reclaims.
      */
-    async claimAutoPostRunNow(id: string, nowIso: string): Promise<"claimed" | "skipped"> {
-      return db.transaction(async (tx) => {
-        const row = (await tx.select().from(noodleAccounts).where(eq(noodleAccounts.id, id)))[0];
-        if (!row || row.platform !== "noodler") return "skipped";
-        const current = normalizeNoodleAccountSettings(row.settings);
-        const auto = current.scheduler.autoPosting;
-        if (!auto?.enabled) return "skipped";
-        const next = nextAutoPostRunAt(auto.intensity, new Date(nowIso));
-        const nextSettings: NoodleAccountSettings = {
-          ...current,
-          scheduler: { autoPosting: { ...auto, nextRunAt: next } },
-        };
-        await tx
-          .update(noodleAccounts)
-          .set({ settings: JSON.stringify(nextSettings), updatedAt: now() })
-          .where(eq(noodleAccounts.id, id));
-        return "claimed";
-      });
+    async discardNoodlerPreparedPost(id: string, at = new Date()): Promise<void> {
+      const current = (await db.select().from(noodlerPreparedPosts).where(eq(noodlerPreparedPosts.id, id)))[0];
+      await db.transaction(async (tx) =>
+        tx.update(noodlerPreparedPosts).set({ state: "discarded", updatedAt: at.toISOString() }).where(eq(noodlerPreparedPosts.id, id)),
+      );
+      if (current) unlinkNoodlerMedia(String(parseRecord(parseRecord(current.payload).metadata).noodlerMediaPath ?? "") || null);
     },
 
-    /** Server-owned reschedule of a creator's next automatic run (validated future by the caller). */
-    async rescheduleAutoPostRun(id: string, nextRunAt: string): Promise<NoodleAccount | null> {
-      return db.transaction(async (tx) => {
-        const row = (await tx.select().from(noodleAccounts).where(eq(noodleAccounts.id, id)))[0];
-        if (!row || row.platform !== "noodler") return null;
-        const current = normalizeNoodleAccountSettings(row.settings);
-        const auto = current.scheduler.autoPosting ?? defaultAutoPostingSettings();
-        const nextSettings: NoodleAccountSettings = {
-          ...current,
-          scheduler: { autoPosting: { ...auto, nextRunAt } },
-        };
-        await tx
-          .update(noodleAccounts)
-          .set({ settings: JSON.stringify(nextSettings), updatedAt: now() })
-          .where(eq(noodleAccounts.id, id));
-        const updated = (await tx.select().from(noodleAccounts).where(eq(noodleAccounts.id, id)))[0];
-        return updated ? mapAccount(updated) : null;
-      });
+    async discardPreparedPostsAfterManualPost(creatorAccountId: string, manualCreatedAt: string): Promise<number> {
+      const start = Date.parse(manualCreatedAt);
+      const end = start + MANUAL_POST_INVALIDATION_MS;
+      const rows = await db.select().from(noodlerPreparedPosts).where(eq(noodlerPreparedPosts.creatorAccountId, creatorAccountId));
+      const ids = rows
+        .filter((row) => row.state === "prepared" && Date.parse(row.publishAt) > start && Date.parse(row.publishAt) <= end)
+        .map((row) => row.id);
+      if (ids.length > 0) {
+        await db.transaction(async (tx) =>
+          tx.update(noodlerPreparedPosts).set({ state: "discarded", updatedAt: now() }).where(inArray(noodlerPreparedPosts.id, ids)),
+        );
+        for (const row of rows.filter((candidate) => ids.includes(candidate.id))) {
+          unlinkNoodlerMedia(String(parseRecord(parseRecord(row.payload).metadata).noodlerMediaPath ?? "") || null);
+        }
+      }
+      return ids.length;
     },
+
+    async publishDueNoodlerPreparedPosts(at = new Date()): Promise<number> {
+      const settings = await this.getSettings();
+      if (!settings.enableNoodler || !settings.autoPostingScheduleEnabled) return 0;
+      const due = (await this.listNoodlerPreparedPosts()).filter(
+        (item) => item.state === "prepared" && Date.parse(item.publishAt) <= at.getTime(),
+      );
+      if (due.length === 0) return 0;
+      // One pass over posts for the whole batch: the crash-recovery lookup below only needs
+      // to know which prepared items already published, not to rescan every post per item.
+      const publishedPreparedIds = new Map<string, { id: string }>();
+      for (const post of await db.select().from(noodlePosts)) {
+        const preparedId = parseRecord(post.metadata).noodlerPreparedPostId;
+        if (typeof preparedId === "string" && !publishedPreparedIds.has(preparedId)) {
+          publishedPreparedIds.set(preparedId, { id: post.id });
+        }
+      }
+      let published = 0;
+      const discardedMediaPaths: Array<string | null> = [];
+      for (const item of due) {
+        const didPublish = await db.transaction(async (tx) => {
+          const current = (await tx.select().from(noodlerPreparedPosts).where(eq(noodlerPreparedPosts.id, item.id)))[0];
+          if (!current || current.state !== "prepared" || Date.parse(current.publishAt) > at.getTime()) return false;
+          const existingPost = publishedPreparedIds.get(current.id);
+          if (!existingPost && Date.parse(current.publishAt) < at.getTime() - ELAPSED_PREPARED_SLOT_MS) {
+            await tx.update(noodlerPreparedPosts).set({ state: "discarded", updatedAt: at.toISOString() }).where(eq(noodlerPreparedPosts.id, current.id));
+            // Unlinked only after the discard commits, so a crash here leaks a file rather than
+            // leaving a publishable row whose image is already gone.
+            discardedMediaPaths.push(String(parseRecord(parseRecord(current.payload).metadata).noodlerMediaPath ?? "") || null);
+            return false;
+          }
+          if (existingPost) {
+            await tx
+              .update(noodlerPreparedPosts)
+              .set({ state: "published", publishedPostId: existingPost.id, updatedAt: at.toISOString() })
+              .where(eq(noodlerPreparedPosts.id, current.id));
+            return false;
+          }
+          const accountRow = (await tx.select().from(noodleAccounts).where(eq(noodleAccounts.id, current.creatorAccountId)))[0];
+          if (!accountRow || accountRow.platform !== "noodler") {
+            await tx.update(noodlerPreparedPosts).set({ state: "discarded", updatedAt: at.toISOString() }).where(eq(noodlerPreparedPosts.id, current.id));
+            return false;
+          }
+          const account = mapAccount(accountRow);
+          const sourceRow = account.noodleAccountId
+            ? (await tx.select().from(noodleAccounts).where(eq(noodleAccounts.id, account.noodleAccountId)))[0]
+            : null;
+          if (
+            !account.settings.scheduler.autoPosting?.enabled ||
+            !sourceRow ||
+            current.policyFingerprint !== noodlerReservePolicyFingerprint(account, settings, sourceRow.updatedAt)
+          ) {
+            await tx.update(noodlerPreparedPosts).set({ state: "discarded", updatedAt: at.toISOString() }).where(eq(noodlerPreparedPosts.id, current.id));
+            return false;
+          }
+          const payload = parseRecord(current.payload) as NoodlerPreparedPostPayload;
+          if (typeof payload.content !== "string" || !payload.content.trim()) {
+            await tx.update(noodlerPreparedPosts).set({ state: "discarded", updatedAt: at.toISOString() }).where(eq(noodlerPreparedPosts.id, current.id));
+            return false;
+          }
+          const postId = newId();
+          const imageState = current.imageState === "attached" ? "attached" : "closed";
+          await tx.insert(noodlePosts).values({
+            id: postId,
+            authorAccountId: account.id,
+            title: typeof payload.title === "string" ? payload.title : null,
+            content: payload.content,
+            imageUrl: typeof parseRecord(payload.metadata).noodlerMediaPath === "string" ? noodlerPostMediaUrl(postId) : null,
+            imagePrompt: typeof payload.imagePrompt === "string" ? payload.imagePrompt : null,
+            parentPostId: null,
+            quotePostId: null,
+            source: "generated",
+            access: payload.access === "public" ? "public" : "locked",
+            metadata: JSON.stringify({ ...parseRecord(payload.metadata), noodlerPreparedPostId: current.id }),
+            authorSnapshot: JSON.stringify(snapshotForAccount(account)),
+            // A late publish is stamped with the moment it actually happened. Using publishAt
+            // would file the post behind whatever the feed received during the delay.
+            createdAt:
+              Date.parse(current.publishAt) < at.getTime() ? at.toISOString() : current.publishAt,
+            updatedAt: at.toISOString(),
+          });
+          await tx
+            .update(noodlerPreparedPosts)
+            .set({
+              state: "published",
+              publishedPostId: postId,
+              imageState,
+              imageClaimToken: null,
+              imageClaimLeaseUntil: null,
+              updatedAt: at.toISOString(),
+            })
+            .where(eq(noodlerPreparedPosts.id, current.id));
+          return true;
+        });
+        if (didPublish) published += 1;
+      }
+      for (const path of discardedMediaPaths) unlinkNoodlerMedia(path);
+      return published;
+    },
+
+    async reconcileNoodlerPreparedPosts(at = new Date()): Promise<number> {
+      const settings = await this.getSettings();
+      const repaired = await db.transaction(async (tx) => {
+        const [items, posts] = await Promise.all([
+          tx.select().from(noodlerPreparedPosts),
+          tx.select().from(noodlePosts),
+        ]);
+        const postsByPreparedId = new Map<string, typeof posts>();
+        for (const post of posts) {
+          const preparedId = parseRecord(post.metadata).noodlerPreparedPostId;
+          if (typeof preparedId !== "string") continue;
+          const existing = postsByPreparedId.get(preparedId) ?? [];
+          existing.push(post);
+          postsByPreparedId.set(preparedId, existing);
+        }
+        let count = 0;
+        for (const item of items) {
+          const linkedPosts = (postsByPreparedId.get(item.id) ?? []).sort((left, right) =>
+            left.id.localeCompare(right.id),
+          );
+          const linkedPost = linkedPosts[0];
+          if (linkedPost) {
+            if (item.state !== "published" || item.publishedPostId !== linkedPost.id) {
+              await tx
+                .update(noodlerPreparedPosts)
+                .set({ state: "published", publishedPostId: linkedPost.id, updatedAt: at.toISOString() })
+                .where(eq(noodlerPreparedPosts.id, item.id));
+              count += 1;
+            }
+          } else if (item.state === "published") {
+            // The linked post is gone. Re-preparing is only right while the slot is still in the
+            // future; a row whose publishAt has passed would be republished by the very next poll,
+            // so a user who deletes an automatic post would watch it come back. Discard those.
+            const slotStillAhead = Date.parse(item.publishAt) > at.getTime();
+            await tx
+              .update(noodlerPreparedPosts)
+              .set(
+                slotStillAhead
+                  ? { state: "prepared", publishedPostId: null, updatedAt: at.toISOString() }
+                  : { state: "discarded", updatedAt: at.toISOString() },
+              )
+              .where(eq(noodlerPreparedPosts.id, item.id));
+            count += 1;
+          }
+        }
+        return count;
+      });
+      const items = await this.listNoodlerPreparedPosts();
+      const prepared = items.filter((item) => item.state === "prepared");
+      const accounts = new Map(
+        [...(await this.listAccounts()), ...(await this.listNoodlerAccounts())].map((account) => [account.id, account]),
+      );
+      const invalidIds = prepared
+        .filter((item) => {
+          const account = accounts.get(item.creatorAccountId);
+          const source = account?.noodleAccountId ? accounts.get(account.noodleAccountId) : null;
+          return (
+            // A row whose timestamps do not parse can never become due and would otherwise make
+            // every status read and publish pass fail until someone edited storage by hand.
+            Number.isNaN(Date.parse(item.publishAt)) ||
+            Number.isNaN(Date.parse(item.generatedAt)) ||
+            !account ||
+            !source ||
+            !account.settings.scheduler.autoPosting?.enabled ||
+            item.policyFingerprint !== noodlerReservePolicyFingerprint(account, settings, source.updatedAt)
+          );
+        })
+        .map((item) => item.id);
+      const invalidIdSet = new Set(invalidIds);
+      // Soonest first, so lowering postsPerDay discards the latest excess items and leaves
+      // the imminent ones intact.
+      const validFuture = prepared
+        .filter((item) => !invalidIdSet.has(item.id) && Date.parse(item.publishAt) > at.getTime())
+        .sort((a, b) => Date.parse(a.publishAt) - Date.parse(b.publishAt));
+      const excessIds = validFuture.slice(settings.postsPerDay).map((item) => item.id);
+      const discardedSet = new Set([...invalidIds, ...excessIds]);
+      const discarded = [...discardedSet];
+      if (discarded.length > 0) {
+        await db.transaction(async (tx) =>
+          tx.update(noodlerPreparedPosts).set({ state: "discarded", updatedAt: at.toISOString() }).where(inArray(noodlerPreparedPosts.id, discarded)),
+        );
+        for (const item of prepared.filter((candidate) => discardedSet.has(candidate.id))) {
+          unlinkNoodlerMedia(String(parseRecord(item.payload.metadata).noodlerMediaPath ?? "") || null);
+        }
+      }
+      // A crash between the durable row write and the media promotion leaves a row pointing at a
+      // file that is not there; publishing it would give the post a 404 image route. Drop the
+      // reference instead, so the post publishes as text.
+      for (const item of items) {
+        if (item.state !== "prepared" || discardedSet.has(item.id)) continue;
+        const mediaPath = item.payload.metadata.noodlerMediaPath;
+        if (typeof mediaPath !== "string" || !mediaPath) continue;
+        const absolute = resolveNoodlerMediaAbsolutePath(mediaPath);
+        if (absolute && existsSync(absolute)) continue;
+        const { noodlerMediaPath: _missing, ...metadata } = item.payload.metadata;
+        await db.transaction(async (tx) =>
+          tx
+            .update(noodlerPreparedPosts)
+            .set({
+              payload: JSON.stringify({ ...item.payload, metadata }),
+              imageState: "closed",
+              updatedAt: at.toISOString(),
+            })
+            .where(eq(noodlerPreparedPosts.id, item.id)),
+        );
+      }
+      // Published and discarded rows only exist for crash recovery, and this table is read whole
+      // on every poll, so aged terminal rows are dropped instead of accumulating forever.
+      const pruneBefore = at.getTime() - TERMINAL_PREPARED_POST_RETENTION_MS;
+      const prunable = items
+        .filter(
+          (item) =>
+            item.state !== "prepared" &&
+            !discardedSet.has(item.id) &&
+            !(Date.parse(item.updatedAt) > pruneBefore),
+        )
+        .map((item) => item.id);
+      if (prunable.length > 0) {
+        await db.delete(noodlerPreparedPosts).where(inArray(noodlerPreparedPosts.id, prunable));
+      }
+      return repaired + discarded.length;
+    },
+
+    async getNoodlerReserveStatus(at = new Date()): Promise<NoodlerReserveStatus> {
+      const settings = await this.getSettings();
+      const state = await this.ensureNoodlerReserveState(at);
+      const effectiveMs = Date.parse(state.lastObservedBudgetTime);
+      const cutoff = effectiveMs - ROLLING_DAY_MS;
+      const [items, attempts, creators] = await Promise.all([
+        this.listNoodlerPreparedPosts(),
+        db.select().from(noodlerAutomaticAttempts),
+        this.listAutoPostEnabledAccounts(),
+      ]);
+      const prepared = items.filter((item) => item.state === "prepared");
+      return {
+        preparedCount: prepared.length,
+        preparedThrough: prepared.reduce<string | null>((latest, item) => !latest || item.publishAt > latest ? item.publishAt : latest, null),
+        textAttemptsUsed: attempts.filter((row) => row.kind === "text" && Date.parse(row.claimedAt) > cutoff).length,
+        imageAttemptsUsed: attempts.filter((row) => row.kind === "image" && Date.parse(row.claimedAt) > cutoff).length,
+        postsPerDay: settings.postsPerDay,
+        preparationNotBefore: state.preparationNotBefore,
+        creators: creators.map((account) => ({
+          accountId: account.id,
+          nextPreparedAt: prepared.find((item) => item.creatorAccountId === account.id)?.publishAt ?? null,
+        })),
+      };
+    },
+
 
     async updateAccountFollow(
       id: string,
@@ -1628,6 +2129,17 @@ export function createNoodleStorage(db: DB) {
       return mapManagedPost(row);
     },
 
+    async getNoodlerPostByWizardExecution(
+      accountId: string,
+      executionId: string,
+    ): Promise<NoodlerManagedPost | null> {
+      const account = await this.getNoodlerAccountById(accountId);
+      if (!account) return null;
+      const rows = await db.select().from(noodlePosts).where(eq(noodlePosts.authorAccountId, accountId));
+      const row = rows.find((candidate) => parseRecord(candidate.metadata).noodlerWizardExecutionId === executionId);
+      return row ? mapManagedPost(row) : null;
+    },
+
     async createNoodlerPost(input: NoodlerPostPersistenceInput): Promise<NoodlerManagedPost | null> {
       const account = await this.getNoodlerAccountById(input.authorAccountId);
       if (!account) return null;
@@ -1645,7 +2157,6 @@ export function createNoodleStorage(db: DB) {
           quotePostId: null,
           source: input.source ?? "manual",
           access: input.access ?? "public",
-          ppvPrice: input.access === "ppv" ? (input.ppvPrice ?? null) : null,
           metadata: JSON.stringify(input.metadata ?? {}),
           authorSnapshot: JSON.stringify(snapshotForAccount(account)),
           createdAt: timestamp,
@@ -1678,7 +2189,6 @@ export function createNoodleStorage(db: DB) {
         quotePostId: input.quotePostId ?? null,
         source: input.source ?? "manual",
         access: "public",
-        ppvPrice: null,
         metadata: JSON.stringify(input.metadata ?? {}),
         authorSnapshot: JSON.stringify(snapshotForAccount(account)),
         createdAt: timestamp,
@@ -2074,8 +2584,15 @@ export function createNoodleStorage(db: DB) {
         }
       }
       const deletedRows = rows.filter((row) => deletedIds.has(row.id));
+      // The guard is "every actor in this subtree is an account this installation owns". A
+      // creator reply is authored by a NoodleR stage account, so leaving those out made a
+      // comment undeletable as soon as its creator answered it.
       const noodleAccountIds = new Set((await this.listAccounts()).map((account) => account.id));
-      if (deletedRows.some((row) => !noodleAccountIds.has(row.actorAccountId))) return [];
+      const knownAccountIds = new Set([
+        ...noodleAccountIds,
+        ...(await this.listNoodlerAccounts()).map((account) => account.id),
+      ]);
+      if (deletedRows.some((row) => !knownAccountIds.has(row.actorAccountId))) return [];
       const relatedDigests = await db
         .select()
         .from(noodleActivityDigests)
@@ -2091,6 +2608,15 @@ export function createNoodleStorage(db: DB) {
         await tx
           .delete(noodleActivityDigests)
           .where(inArray(noodleActivityDigests.sourceInteractionId, [...deletedIds]));
+        // This is the route comment deletion actually takes, and the subtree it removes can
+        // contain both a comment that owns a creator-reply claim and the reply that claim
+        // points at. Either one left behind keeps consuming the rolling allowance forever.
+        await tx
+          .delete(noodlerCreatorReplyClaims)
+          .where(inArray(noodlerCreatorReplyClaims.parentInteractionId, [...deletedIds]));
+        await tx
+          .delete(noodlerCreatorReplyClaims)
+          .where(inArray(noodlerCreatorReplyClaims.replyInteractionId, [...deletedIds]));
         await tx.delete(noodleInteractions).where(inArray(noodleInteractions.id, [...deletedIds]));
       });
       return deletedRows.map(mapInteraction);
@@ -2143,6 +2669,299 @@ export function createNoodleStorage(db: DB) {
         .where(inArray(noodleInteractions.postId, noodlerPostIds))
         .orderBy(noodleInteractions.createdAt);
       return rows.map(mapInteraction);
+    },
+
+    async claimNoodlerCreatorReply(
+      creatorAccountId: string,
+      postId: string,
+      parentInteractionId: string,
+      viewerAccountId: string,
+      at = now(),
+      ceiling = DEFAULT_NOODLER_CREATOR_REPLIES_PER_24_HOURS,
+    ): Promise<NoodlerCreatorReplyClaimResult> {
+      return db.transaction(async (tx) => {
+        const [creatorRows, parentRows, viewerRows] = await Promise.all([
+          tx
+            .select()
+            .from(noodleAccounts)
+            .where(and(eq(noodleAccounts.id, creatorAccountId), eq(noodleAccounts.platform, "noodler"))),
+          tx.select().from(noodleInteractions).where(eq(noodleInteractions.id, parentInteractionId)),
+          tx
+            .select()
+            .from(noodleAccounts)
+            .where(and(eq(noodleAccounts.id, viewerAccountId), eq(noodleAccounts.platform, "noodle"))),
+        ]);
+        const creatorRow = creatorRows[0];
+        const parentRow = parentRows[0];
+        const viewerRow = viewerRows[0];
+        if (
+          !creatorRow ||
+          !parentRow ||
+          !viewerRow ||
+          viewerRow.kind !== "persona" ||
+          parentRow.type !== "reply" ||
+          (!parentRow.content?.trim() && !parentRow.imageUrl?.trim()) ||
+          parentRow.postId !== postId ||
+          parentRow.actorAccountId !== viewerAccountId ||
+          creatorRow.noodleAccountId === viewerAccountId ||
+          parentRow.actorAccountId === creatorAccountId
+        ) {
+          return { status: "ineligible" };
+        }
+        const postRows = await tx
+          .select()
+          .from(noodlePosts)
+          .where(and(eq(noodlePosts.id, postId), eq(noodlePosts.authorAccountId, creatorAccountId)));
+        const postRow = postRows[0];
+        if (!postRow) return { status: "ineligible" };
+
+        const creator = mapAccount(creatorRow);
+        if (isNoodlerHiddenFromViewer(creator, viewerAccountId)) return { status: "ineligible" };
+        const post = mapManagedPost(postRow);
+        const [subscriptions, unlocks] = await Promise.all([
+          tx
+            .select()
+            .from(noodleAccountSubscriptions)
+            .where(
+              and(
+                eq(noodleAccountSubscriptions.viewerAccountId, viewerAccountId),
+                eq(noodleAccountSubscriptions.creatorAccountId, creatorAccountId),
+              ),
+            ),
+          tx
+            .select()
+            .from(noodlePostUnlocks)
+            .where(
+              and(eq(noodlePostUnlocks.viewerAccountId, viewerAccountId), eq(noodlePostUnlocks.postId, post.id)),
+            ),
+        ]);
+        if (
+          !canViewNoodlerPost({
+            post,
+            subscribed: subscriptions.length > 0,
+            unlockedPostIds: new Set(unlocks.map((unlock) => unlock.postId)),
+          })
+        ) {
+          return { status: "ineligible" };
+        }
+
+        const cutoff = new Date(Date.parse(at) - ROLLING_DAY_MS).toISOString();
+        // Prune only expired claims that never produced a reply. A claim that did is the
+        // permanent "this comment already has a creator reply" key and must outlive the
+        // budget window; an orphan one gates nothing once it leaves it.
+        // Budget membership is `claimedAt > cutoff`, so anything not greater is outside the
+        // window: pruning must use the exact complement or a claim sitting on the boundary is
+        // neither counted nor released, and blocks its comment forever.
+        const expiredOrphans = (await tx.select().from(noodlerCreatorReplyClaims)).filter(
+          (row) => !row.replyInteractionId && !(row.claimedAt > cutoff),
+        );
+        if (expiredOrphans.length > 0) {
+          await tx.delete(noodlerCreatorReplyClaims).where(
+            inArray(
+              noodlerCreatorReplyClaims.id,
+              expiredOrphans.map((row) => row.id),
+            ),
+          );
+        }
+        // Duplicate detection runs after the eligibility and access checks above so a caller
+        // replaying known IDs cannot read back a stored reply it is no longer entitled to,
+        // and after the prune so an expired orphan claim does not block the same comment forever.
+        const existingClaims = await tx
+          .select()
+          .from(noodlerCreatorReplyClaims)
+          .where(
+            and(
+              eq(noodlerCreatorReplyClaims.parentInteractionId, parentInteractionId),
+              eq(noodlerCreatorReplyClaims.creatorAccountId, creatorAccountId),
+            ),
+          );
+        const existing = existingClaims[0];
+        if (existing) {
+          const replyRows = existing.replyInteractionId
+            ? await tx.select().from(noodleInteractions).where(eq(noodleInteractions.id, existing.replyInteractionId))
+            : [];
+          return { status: "duplicate", interaction: replyRows[0] ? mapInteraction(replyRows[0]) : null };
+        }
+        // The reply can also outlive its claim if a crash lost the claim write. Reconcile against
+        // the replies themselves so the comment cannot collect a second creator reply.
+        const strandedReply = (
+          await tx
+            .select()
+            .from(noodleInteractions)
+            .where(
+              and(
+                eq(noodleInteractions.parentInteractionId, parentInteractionId),
+                eq(noodleInteractions.actorAccountId, creatorAccountId),
+                eq(noodleInteractions.type, "reply"),
+              ),
+            )
+        )[0];
+        if (strandedReply) {
+          await tx.insert(noodlerCreatorReplyClaims).values({
+            id: newId(),
+            postId: post.id,
+            parentInteractionId,
+            creatorAccountId,
+            replyInteractionId: strandedReply.id,
+            claimedAt: at,
+          });
+          return { status: "duplicate", interaction: mapInteraction(strandedReply) };
+        }
+
+        const recentClaims = await tx
+          .select()
+          .from(noodlerCreatorReplyClaims)
+          .where(gt(noodlerCreatorReplyClaims.claimedAt, cutoff));
+        if (recentClaims.length >= ceiling) return { status: "exhausted" };
+
+        const claimId = newId();
+        await tx.insert(noodlerCreatorReplyClaims).values({
+          id: claimId,
+          postId: post.id,
+          parentInteractionId,
+          creatorAccountId,
+          replyInteractionId: null,
+          claimedAt: at,
+        });
+        return {
+          status: "claimed",
+          claimId,
+          creator,
+          post,
+          parent: mapInteraction(parentRow),
+          viewer: mapAccount(viewerRow),
+        };
+      });
+    },
+
+    /**
+     * Release a claim whose generation never produced a reply. The claim is the dedupe key
+     * for "this comment already has a creator reply", so keeping it after a failure would
+     * block that comment forever; no provider call succeeded, so nothing is billed twice.
+     */
+    async releaseNoodlerCreatorReplyClaim(claimId: string): Promise<void> {
+      await db.transaction(async (tx) => {
+        const rows = await tx
+          .select()
+          .from(noodlerCreatorReplyClaims)
+          .where(eq(noodlerCreatorReplyClaims.id, claimId));
+        if (!rows[0] || rows[0].replyInteractionId) return;
+        await tx.delete(noodlerCreatorReplyClaims).where(eq(noodlerCreatorReplyClaims.id, claimId));
+      });
+    },
+
+    async finalizeNoodlerCreatorReplyClaim(
+      claimId: string,
+      content: string,
+    ): Promise<NoodleInteraction | null> {
+      return db.transaction(async (tx) => {
+        const claimRows = await tx
+          .select()
+          .from(noodlerCreatorReplyClaims)
+          .where(eq(noodlerCreatorReplyClaims.id, claimId));
+        const claim = claimRows[0];
+        if (!claim) return null;
+        if (claim.replyInteractionId) {
+          const existing = await tx
+            .select()
+            .from(noodleInteractions)
+            .where(eq(noodleInteractions.id, claim.replyInteractionId));
+          return existing[0] ? mapInteraction(existing[0]) : null;
+        }
+        const [creatorRows, parentRows, postRows] = await Promise.all([
+          tx
+            .select()
+            .from(noodleAccounts)
+            .where(and(eq(noodleAccounts.id, claim.creatorAccountId), eq(noodleAccounts.platform, "noodler"))),
+          tx.select().from(noodleInteractions).where(eq(noodleInteractions.id, claim.parentInteractionId)),
+          tx.select().from(noodlePosts).where(eq(noodlePosts.id, claim.postId)),
+        ]);
+        const creatorRow = creatorRows[0];
+        const parentRow = parentRows[0];
+        const postRow = postRows[0];
+        if (
+          !creatorRow ||
+          !parentRow ||
+          !postRow ||
+          parentRow.type !== "reply" ||
+          parentRow.postId !== postRow.id ||
+          postRow.authorAccountId !== creatorRow.id
+        ) {
+          return null;
+        }
+        const creator = mapAccount(creatorRow);
+        if (isNoodlerHiddenFromViewer(creator, parentRow.actorAccountId)) return null;
+        const post = mapManagedPost(postRow);
+        const [subscriptions, unlocks] = await Promise.all([
+          tx
+            .select()
+            .from(noodleAccountSubscriptions)
+            .where(
+              and(
+                eq(noodleAccountSubscriptions.viewerAccountId, parentRow.actorAccountId),
+                eq(noodleAccountSubscriptions.creatorAccountId, creatorRow.id),
+              ),
+            ),
+          tx
+            .select()
+            .from(noodlePostUnlocks)
+            .where(
+              and(
+                eq(noodlePostUnlocks.viewerAccountId, parentRow.actorAccountId),
+                eq(noodlePostUnlocks.postId, postRow.id),
+              ),
+            ),
+        ]);
+        if (
+          !canViewNoodlerPost({
+            post,
+            subscribed: subscriptions.length > 0,
+            unlockedPostIds: new Set(unlocks.map((unlock) => unlock.postId)),
+          })
+        ) {
+          return null;
+        }
+        // Crash recovery: the reply row and the claim link are separate durable writes, so a
+        // crash between them leaves a reply whose claim is still unlinked. Adopt that reply
+        // instead of writing a second one — one reply per parent comment per creator.
+        const orphanedReply = (
+          await tx
+            .select()
+            .from(noodleInteractions)
+            .where(
+              and(
+                eq(noodleInteractions.parentInteractionId, parentRow.id),
+                eq(noodleInteractions.actorAccountId, creatorRow.id),
+                eq(noodleInteractions.type, "reply"),
+              ),
+            )
+        )[0];
+        if (orphanedReply) {
+          await tx
+            .update(noodlerCreatorReplyClaims)
+            .set({ replyInteractionId: orphanedReply.id })
+            .where(eq(noodlerCreatorReplyClaims.id, claimId));
+          return mapInteraction(orphanedReply);
+        }
+        const replyId = newId();
+        await tx.insert(noodleInteractions).values({
+          id: replyId,
+          postId: postRow.id,
+          parentInteractionId: parentRow.id,
+          actorAccountId: creatorRow.id,
+          type: "reply",
+          content: content.trim(),
+          imageUrl: null,
+          actorSnapshot: JSON.stringify(snapshotForAccount(creator)),
+          createdAt: now(),
+        });
+        await tx
+          .update(noodlerCreatorReplyClaims)
+          .set({ replyInteractionId: replyId })
+          .where(eq(noodlerCreatorReplyClaims.id, claimId));
+        const rows = await tx.select().from(noodleInteractions).where(eq(noodleInteractions.id, replyId));
+        return rows[0] ? mapInteraction(rows[0]) : null;
+      });
     },
 
     async createNoodlerInteraction(
@@ -2405,13 +3224,52 @@ export function createNoodleStorage(db: DB) {
               eq(noodleAccountSubscriptions.creatorAccountId, creatorAccountId),
             ),
           );
-        if (existing[0]) return mapSubscription(existing[0]);
+        if (existing[0]) {
+          const followingAccountIds = viewer.settings.social.followingAccountIds ?? [];
+          const followingAccountTimestamps = { ...viewer.settings.social.followingAccountTimestamps };
+          if (!followingAccountIds.includes(creatorAccountId)) {
+            followingAccountTimestamps[creatorAccountId] ??= existing[0].createdAt;
+            await tx
+              .update(noodleAccounts)
+              .set({
+                settings: JSON.stringify({
+                  ...viewer.settings,
+                  social: {
+                    ...viewer.settings.social,
+                    followingAccountIds: [...followingAccountIds, creatorAccountId],
+                    followingAccountTimestamps,
+                  },
+                }),
+                updatedAt: now(),
+              })
+              .where(eq(noodleAccounts.id, viewerAccountId));
+          }
+          return mapSubscription(existing[0]);
+        }
+        if (viewer.settings.wallet.coins < NOODLER_SUBSCRIPTION_COST) return null;
+        const timestamp = now();
+        const followingAccountIds = viewer.settings.social.followingAccountIds ?? [];
+        const followingAccountTimestamps = { ...viewer.settings.social.followingAccountTimestamps };
+        followingAccountTimestamps[creatorAccountId] ??= timestamp;
+        const nextViewerSettings: NoodleAccountSettings = {
+          ...viewer.settings,
+          social: {
+            ...viewer.settings.social,
+            followingAccountIds: followingAccountIds.includes(creatorAccountId)
+              ? followingAccountIds
+              : [...followingAccountIds, creatorAccountId],
+            followingAccountTimestamps,
+          },
+          wallet: { coins: viewer.settings.wallet.coins - NOODLER_SUBSCRIPTION_COST },
+        };
+        // Insert before debiting: a duplicate row means the subscription already existed,
+        // and that path must stay idempotent rather than charging again or throwing.
         try {
           await tx.insert(noodleAccountSubscriptions).values({
             id: newId(),
             viewerAccountId,
             creatorAccountId,
-            createdAt: now(),
+            createdAt: timestamp,
           });
         } catch (error) {
           if (
@@ -2419,7 +3277,21 @@ export function createNoodleStorage(db: DB) {
           ) {
             throw error;
           }
+          const duplicate = await tx
+            .select()
+            .from(noodleAccountSubscriptions)
+            .where(
+              and(
+                eq(noodleAccountSubscriptions.viewerAccountId, viewerAccountId),
+                eq(noodleAccountSubscriptions.creatorAccountId, creatorAccountId),
+              ),
+            );
+          return duplicate[0] ? mapSubscription(duplicate[0]) : null;
         }
+        await tx
+          .update(noodleAccounts)
+          .set({ settings: JSON.stringify(nextViewerSettings), updatedAt: timestamp })
+          .where(eq(noodleAccounts.id, viewerAccountId));
         const rows = await tx
           .select()
           .from(noodleAccountSubscriptions)
@@ -2469,7 +3341,13 @@ export function createNoodleStorage(db: DB) {
         ]);
         const viewer = viewerRows[0] ? mapAccount(viewerRows[0]) : null;
         const postRow = postRows[0];
-        if (!viewer || viewer.kind !== "persona" || viewer.platform !== "noodle" || postRow?.access !== "ppv") {
+        if (
+          !viewer ||
+          viewer.kind !== "persona" ||
+          viewer.platform !== "noodle" ||
+          !postRow ||
+          mapPost(postRow).access !== "locked"
+        ) {
           return null;
         }
         const authorRows = await tx
@@ -2489,11 +3367,27 @@ export function createNoodleStorage(db: DB) {
           .from(noodlePostUnlocks)
           .where(and(eq(noodlePostUnlocks.viewerAccountId, viewerAccountId), eq(noodlePostUnlocks.postId, postId)));
         if (existing[0]) return mapPostUnlock(existing[0]);
+        if (viewer.settings.wallet.coins < NOODLER_UNLOCK_COST) return null;
+        const timestamp = now();
+        const nextViewerSettings: NoodleAccountSettings = {
+          ...viewer.settings,
+          wallet: { coins: viewer.settings.wallet.coins - NOODLER_UNLOCK_COST },
+        };
+        // Insert before debiting, so an already-unlocked post stays idempotent and free.
         try {
-          await tx.insert(noodlePostUnlocks).values({ id: newId(), viewerAccountId, postId, createdAt: now() });
+          await tx.insert(noodlePostUnlocks).values({ id: newId(), viewerAccountId, postId, createdAt: timestamp });
         } catch (error) {
           if (!isFileUniqueConstraintError(error, "noodle_post_unlocks", ["viewerAccountId", "postId"])) throw error;
+          const duplicate = await tx
+            .select()
+            .from(noodlePostUnlocks)
+            .where(and(eq(noodlePostUnlocks.viewerAccountId, viewerAccountId), eq(noodlePostUnlocks.postId, postId)));
+          return duplicate[0] ? mapPostUnlock(duplicate[0]) : null;
         }
+        await tx
+          .update(noodleAccounts)
+          .set({ settings: JSON.stringify(nextViewerSettings), updatedAt: timestamp })
+          .where(eq(noodleAccounts.id, viewerAccountId));
         const rows = await tx
           .select()
           .from(noodlePostUnlocks)

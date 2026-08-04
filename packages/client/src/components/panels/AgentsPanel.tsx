@@ -32,7 +32,11 @@ import {
   useUploadAgentImage,
   type AgentConfigRow,
 } from "../../hooks/use-agents";
-import { useCapabilityAgentRegistry, useCapabilityCatalog } from "../../hooks/use-capability-packages";
+import {
+  useCapabilityAgentRegistry,
+  useCapabilityCatalog,
+  useUninstallCapabilityPackage,
+} from "../../hooks/use-capability-packages";
 import {
   BUILT_IN_AGENTS,
   DEFAULT_AGENT_TOOLS,
@@ -213,12 +217,13 @@ export function AgentsPanel() {
   const { t: localizeUi } = useUiTranslation();
   const localize = useLocalizedUiText();
   const { data: agentConfigs, isLoading } = useAgentConfigs();
-  const { data: capabilityAgents } = useCapabilityAgentRegistry();
+  const { data: capabilityAgents, isLoading: capabilityAgentsLoading } = useCapabilityAgentRegistry();
   const { data: capabilityCatalog } = useCapabilityCatalog();
   const createAgent = useCreateAgent();
   const importAgent = useImportAgent();
   const { data: agentImportPolicy, isLoading: agentImportPolicyLoading } = useAgentImportPolicy();
   const deleteAgent = useDeleteAgent();
+  const uninstallCapabilityPackage = useUninstallCapabilityPackage();
   const uploadAgentImage = useUploadAgentImage();
   const { data: agentFolders = [] } = useLibraryFolders("agents");
   const createAgentFolder = useCreateLibraryFolder("agents");
@@ -293,6 +298,16 @@ export function AgentsPanel() {
     () => new Set(availableBuiltInAgents.map((agent) => agent.id)),
     [availableBuiltInAgents],
   );
+  const packageIdByAgentType = useMemo(
+    () =>
+      new Map(
+        (capabilityAgents ?? []).flatMap((agent) =>
+          agent.packageId ? ([[agent.id, agent.packageId]] as const) : [],
+        ),
+      ),
+    [capabilityAgents],
+  );
+  const capabilityAgentRegistryReady = !capabilityAgentsLoading && capabilityAgents !== undefined;
   const catalogArtworkByAgentId = useMemo(
     () =>
       new Map(
@@ -434,6 +449,54 @@ export function AgentsPanel() {
     [selectableAgents, selectedAgentIds],
   );
 
+  const removeAgentResource = useCallback(
+    (agent: AgentConfigRow) => {
+      const packageId = packageIdByAgentType.get(agent.type);
+      return packageId
+        ? uninstallCapabilityPackage.mutateAsync(packageId)
+        : deleteAgent.mutateAsync(builtInAgentIds.has(agent.type) ? agent.type : agent.id);
+    },
+    [builtInAgentIds, deleteAgent, packageIdByAgentType, uninstallCapabilityPackage],
+  );
+
+  const confirmAndRemoveAgent = useCallback(
+    async (agent: AgentConfigRow) => {
+      if (!capabilityAgentRegistryReady) return;
+      const name = getAgentLibraryDisplayName(agent);
+      const packageId = packageIdByAgentType.get(agent.type);
+      const confirmed = await showConfirmDialog({
+        title: packageId
+          ? localizeUi("ui.agents.agentcatalogview.uninstallValue1", { value1: name })
+          : localizeUi("ui.panels.agentspanel.deleteAgent"),
+        message: packageId
+          ? localizeUi("ui.agents.agentcatalogview.theDownloadedPackageActiveChatSelectionsAndAgentConfiguration")
+          : builtInAgentIds.has(agent.type)
+            ? localizeUi("ui.panels.agentspanel.deleteBuiltInValue1", { value1: name })
+            : localizeUi("ui.panels.agentspanel.deleteValue1", { value1: name }),
+        confirmLabel: packageId
+          ? localizeUi("ui.agents.agentcatalogview.uninstall")
+          : localizeUi("lorebook.editor.batch.delete"),
+        tone: "destructive",
+      });
+      if (!confirmed) return;
+      try {
+        await removeAgentResource(agent);
+        if (packageId) {
+          toast.success(localizeUi("ui.agents.agentcatalogview.value1Uninstalled", { value1: name }));
+        }
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : packageId
+              ? localizeUi("ui.agents.agentcatalogview.agentUninstallFailed")
+              : localizeUi("ui.panels.agentspanel.failedToDeleteValue1AgentValue2", { value1: 1, value2: "" }),
+        );
+      }
+    },
+    [builtInAgentIds, capabilityAgentRegistryReady, localizeUi, packageIdByAgentType, removeAgentResource],
+  );
+
   const handleCreateAgent = () => {
     // Create a new custom agent immediately in DB then open editor
     openAgentDetail("__new__");
@@ -569,38 +632,67 @@ export function AgentsPanel() {
   );
 
   const handleDeleteSelectedAgents = useCallback(async () => {
-    const ids = selectedAgents.map((agent) => agent.id);
-    if (ids.length === 0) return;
-    const agentNoun = ids.length === 1 ? "agent" : "agents";
-    const deleteMessage =
-      `Delete ${ids.length} selected ${agentNoun}? ` + "Basic agents will be hidden from the library and pickers.";
+    if (!capabilityAgentRegistryReady || selectedAgents.length === 0) return;
+
+    const includesPackageAgents = selectedAgents.some((agent) => packageIdByAgentType.has(agent.type));
 
     if (
       !(await showConfirmDialog({
-        title:localizeUi("ui.panels.agentspanel.deleteAgents"),
-        message: deleteMessage,
-        confirmLabel:localizeUi("lorebook.editor.batch.delete"),
+        title: localizeUi("ui.panels.agentspanel.removeAgents"),
+        message: localizeUi(
+          includesPackageAgents
+            ? "ui.panels.agentspanel.removeSelectedPackageAgents"
+            : "ui.panels.agentspanel.removeSelectedAgents",
+          { count: selectedAgents.length },
+        ),
+        confirmLabel: localizeUi("ui.panels.agentspanel.remove"),
         tone: "destructive",
       }))
     ) {
       return;
     }
 
-    const results = await Promise.allSettled(ids.map((id) => deleteAgent.mutateAsync(id)));
-    const failedIds = ids.filter((_, index) => results[index]?.status === "rejected");
-    const deletedCount = ids.length - failedIds.length;
+    const resources = new Map<string, AgentConfigRow[]>();
+    for (const agent of selectedAgents) {
+      const packageId = packageIdByAgentType.get(agent.type);
+      const key = packageId ? `package:${packageId}` : `agent:${agent.id}`;
+      resources.set(key, [...(resources.get(key) ?? []), agent]);
+    }
+    const operations = [...resources.entries()];
+    const results = await Promise.allSettled(operations.map(([, agents]) => removeAgentResource(agents[0]!)));
+    const failedIds = operations.flatMap(([, agents], index) =>
+      results[index]?.status === "rejected" ? agents.map((agent) => agent.id) : [],
+    );
+    const removedCount = selectedAgents.length - failedIds.length;
 
-    if (deletedCount > 0) {
-      toast.success(localizeUi("ui.panels.agentspanel.deletedValue1AgentValue2", { value1: deletedCount, value2: deletedCount === 1 ? "" :localizeUi("ui.noodle.stageprofileview.s") }));
+    if (removedCount > 0) {
+      toast.success(
+        localizeUi("ui.panels.agentspanel.removedValue1AgentValue2", {
+          value1: removedCount,
+          value2: removedCount === 1 ? "" : localizeUi("ui.noodle.stageprofileview.s"),
+        }),
+      );
     }
     if (failedIds.length > 0) {
       setSelectedAgentIds(new Set(failedIds));
-      toast.error(localizeUi("ui.panels.agentspanel.failedToDeleteValue1AgentValue2", { value1: failedIds.length, value2: failedIds.length === 1 ? "" :localizeUi("ui.noodle.stageprofileview.s") }));
+      toast.error(
+        localizeUi("ui.panels.agentspanel.failedToRemoveValue1AgentValue2", {
+          value1: failedIds.length,
+          value2: failedIds.length === 1 ? "" : localizeUi("ui.noodle.stageprofileview.s"),
+        }),
+      );
       return;
     }
 
     exitSelectionMode();
-  }, [deleteAgent, exitSelectionMode, selectedAgents, localizeUi]);
+  }, [
+    capabilityAgentRegistryReady,
+    exitSelectionMode,
+    localizeUi,
+    packageIdByAgentType,
+    removeAgentResource,
+    selectedAgents,
+  ]);
 
   const prepareAgentEntries = useCallback(
     (entries: FolderPackageImportEntry[], source: "file" | "folder", skippedFunctionCount = 0) => {
@@ -834,27 +926,14 @@ export function AgentsPanel() {
         nativeDragEnabled: nativeAgentDragEnabled,
         touchSafeDragMode: touchSafeAgentDragMode,
         suppressClickRef: suppressAgentClickRef,
-        onDelete: async () => {
-          const deleteMessage = custom
-            ? `Delete "${agent.name}"?`
-            : `Delete "${agent.name}"? This basic agent will be hidden from the library and pickers.`;
-          if (
-            await showConfirmDialog({
-              title:localizeUi("ui.panels.agentspanel.deleteAgent"),
-              message: deleteMessage,
-              confirmLabel:localizeUi("lorebook.editor.batch.delete"),
-              tone: "destructive",
-            })
-          ) {
-            deleteAgent.mutate(custom ? agent.id : agent.type);
-          }
-        },
+        onDelete: capabilityAgentRegistryReady ? () => void confirmAndRemoveAgent(agent) : undefined,
       });
     },
     [
       availableBuiltInAgents,
       catalogArtworkByAgentId,
-      deleteAgent,
+      capabilityAgentRegistryReady,
+      confirmAndRemoveAgent,
       draggedAgentId,
       getDraggedAgentIds,
       getDraggedAgentTypes,
@@ -1089,7 +1168,7 @@ export function AgentsPanel() {
                 aria-expanded={isExpanded}
                 aria-label={localizeUi("ui.panels.agentspanel.value1FolderValue2DoubleTapOrPressF2To", { value1: isExpanded ?localizeUi("ui.panels.ttsconfigcard.collapse") :localizeUi("ui.panels.ttsconfigcard.expand"), value2: folder.name })}
                 title={localizeUi("ui.panels.backgroundpicker.doubleClickDoubleTapOrPressF2ToRename")}
-                className="group relative flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 transition-all hover:bg-[var(--sidebar-accent)]/40"
+                className="group relative flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 transition-all hover:bg-[var(--sidebar-accent)]/40 max-md:pr-12 [@media(pointer:coarse)]:pr-12"
                 onClick={(event) =>
                   handleFolderRenameGesture(folder.id, event, {
                     onSingleClick: () => setExpandedFolderId(isExpanded ? null : folder.id),
@@ -1139,11 +1218,25 @@ export function AgentsPanel() {
                   )}
                 </div>
                 {(agentSearchActive ? folderAgents.length : folder.itemIds.length) > 0 && (
-                  <span className="shrink-0 text-[0.5625rem] text-[var(--muted-foreground)]">
+                  <span
+                    data-folder-item-count="inline"
+                    className="shrink-0 text-[0.5625rem] text-[var(--muted-foreground)] max-md:hidden [@media(pointer:coarse)]:hidden"
+                  >
                     {agentSearchActive ? folderAgents.length : folder.itemIds.length}
                   </span>
                 )}
-                <div className="absolute right-2 top-1/2 flex -translate-y-1/2 shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100">
+                <div
+                  data-folder-actions
+                  className="pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 [@media(pointer:fine)]:group-focus-within:opacity-100 max-md:opacity-100 [@media(pointer:coarse)]:opacity-100 group-hover:[&_button]:pointer-events-auto [@media(pointer:fine)]:group-focus-within:[&_button]:pointer-events-auto max-md:[&_button]:pointer-events-auto [@media(pointer:coarse)]:[&_button]:pointer-events-auto"
+                >
+                  {(agentSearchActive ? folderAgents.length : folder.itemIds.length) > 0 && (
+                    <span
+                      data-folder-item-count="actions"
+                      className="hidden px-1 text-[0.5625rem] text-[var(--muted-foreground)] max-md:inline [@media(pointer:coarse)]:inline"
+                    >
+                      {agentSearchActive ? folderAgents.length : folder.itemIds.length}
+                    </span>
+                  )}
                   <button
                     onClick={(event) => {
                       event.stopPropagation();
@@ -1257,20 +1350,9 @@ export function AgentsPanel() {
                   nativeDragEnabled: nativeAgentDragEnabled,
                   touchSafeDragMode: touchSafeAgentDragMode,
                   suppressClickRef: suppressAgentClickRef,
-                  onDelete: async () => {
-                    const deleteMessage =
-                      `Delete "${agent.name}"? ` + "This basic agent will be hidden from the library and pickers.";
-                    if (
-                      await showConfirmDialog({
-                        title:localizeUi("ui.panels.agentspanel.deleteAgent"),
-                        message: deleteMessage,
-                        confirmLabel:localizeUi("lorebook.editor.batch.delete"),
-                        tone: "destructive",
-                      })
-                    ) {
-                      deleteAgent.mutate(agent.id);
-                    }
-                  },
+                  onDelete: capabilityAgentRegistryReady
+                    ? () => void confirmAndRemoveAgent(sourceAgent)
+                    : undefined,
                 });
               })
             )}
@@ -1340,18 +1422,7 @@ export function AgentsPanel() {
                 nativeDragEnabled: nativeAgentDragEnabled,
                 touchSafeDragMode: touchSafeAgentDragMode,
                 suppressClickRef: suppressAgentClickRef,
-                onDelete: async () => {
-                  if (
-                    await showConfirmDialog({
-                      title:localizeUi("ui.panels.agentspanel.deleteAgent"),
-                      message:localizeUi("ui.panels.agentspanel.deleteValue1", { value1: agent.name }),
-                      confirmLabel:localizeUi("lorebook.editor.batch.delete"),
-                      tone: "destructive",
-                    })
-                  ) {
-                    deleteAgent.mutate(agent.id);
-                  }
-                },
+                onDelete: capabilityAgentRegistryReady ? () => void confirmAndRemoveAgent(agent) : undefined,
               }),
             )
           )}
@@ -1364,6 +1435,7 @@ export function AgentsPanel() {
           selectedCount={selectedAgents.length}
           onExport={() => void handleExportSelectedAgents()}
           onDelete={handleDeleteSelectedAgents}
+          deleteDisabled={!capabilityAgentRegistryReady}
           exporting={exportingSelected}
         />
       )}
@@ -1633,7 +1705,13 @@ function renderAgentCard({
         )}
       </button>
       <button
-        className={cn("min-w-0 flex-1 text-left", !selectionMode && (onDelete ? "pr-24" : "pr-16"))}
+        className={cn(
+          "min-w-0 flex-1 text-left",
+          !selectionMode &&
+            (onDelete
+              ? "pr-0 max-md:pr-24 [@media(pointer:coarse)]:pr-24"
+              : "pr-0 max-md:pr-16 [@media(pointer:coarse)]:pr-16"),
+        )}
         onClick={(event) => {
           event.stopPropagation();
           if (suppressClickRef?.current) return;
@@ -1653,7 +1731,7 @@ function renderAgentCard({
         </div>
       </button>
       {!selectionMode && (
-        <div className="absolute right-2 top-1/2 flex -translate-y-1/2 shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100">
+        <div className="pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 [@media(pointer:fine)]:group-focus-within:opacity-100 max-md:opacity-100 [@media(pointer:coarse)]:opacity-100 group-hover:[&_button]:pointer-events-auto [@media(pointer:fine)]:group-focus-within:[&_button]:pointer-events-auto max-md:[&_button]:pointer-events-auto [@media(pointer:coarse)]:[&_button]:pointer-events-auto">
           <ChatResourceActionButton payload={{ version: 1, kind: "agent", ids: [type], label: name }} />
           <button
             className="mari-chrome-control mari-chrome-control--small p-1.5"

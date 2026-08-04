@@ -102,7 +102,7 @@
 
 ## Latest Release
 
-Current stable release: **[v2.4.0](https://github.com/Pasta-Devs/Marinara-Engine/releases/tag/v2.4.0)**.
+Current stable release: **[v2.4.1](https://github.com/Pasta-Devs/Marinara-Engine/releases/tag/v2.4.1)**.
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes. Tagged releases use the `vX.Y.Z` format and are published on the [Releases](https://github.com/Pasta-Devs/Marinara-Engine/releases) page with a Windows installer, Android bootstrap APK, and named versioned source ZIP. Android APKs are Termux bootstrap + WebView shells: they can download Termux from F-Droid, launch Android's installer, start the Termux setup flow after required permission prompts, then open the local Marinara server on the same device.
 
@@ -199,7 +199,7 @@ The full guide library is browsable inside the app: open **Documentation** from 
 | [docs/media/style-profiles.md](docs/media/style-profiles.md)                         | Image style profiles and prompt grammar                                                                            |
 | [docs/media/tts-setup.md](docs/media/tts-setup.md)                                   | Text to speech (TTS) setup and voices                                                                              |
 | [docs/media/scene-video.md](docs/media/scene-video.md)                               | Scene-video provider setup and the Gallery animation workflow                                                      |
-| [docs/game/storyboard.md](docs/game/storyboard.md)                                   | Manual and automatic Game Mode storyboards plus inline Roleplay storyboard episodes                                |
+| [docs/game/storyboard.md](docs/game/storyboard.md)                                   | Storyboard Agent installation, global defaults, and Roleplay and Game Mode workflows                               |
 | [docs/game/ltx-2-3-storyboards.md](docs/game/ltx-2-3-storyboards.md)                   | Krea 2 first frames, local LTX 2.3 ComfyUI animation, and tested Game Mode settings                               |
 | [docs/agents/agents-overview.md](docs/agents/agents-overview.md)                     | Agent system overview: phases, per-chat enablement, built-in and custom agents                                     |
 | [docs/extending/custom-tools.md](docs/extending/custom-tools.md)                     | Function calling, custom tools, webhooks, scripts, and agent tool enablement                                       |
@@ -255,3 +255,7 @@ Pasta-Devs. Ordinary truthful descriptive and nominative references to Marinara
 Engine remain welcome. When a reference is used to market or operate a hosted
 service, its operator and independent status must be clear. See the [Trademark
 and Branding Policy](TRADEMARKS.md) for the complete guidelines.
+
+_olud.ai is an independent third-party service and is not endorsed by Pasta-Devs._
+
+[![olud.ai](https://olud.ai/badge.php?tool=pasta-devs-marinara-engine)](https://olud.ai/project/pasta-devs-marinara-engine.html)

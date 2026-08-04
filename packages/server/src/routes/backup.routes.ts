@@ -15,6 +15,7 @@ import { inflateRawSync } from "zlib";
 import AdmZip from "adm-zip";
 import { FILE_BACKED_TABLES } from "../db/file-backed-store.js";
 import { migrateLegacyNoodleAccountRow } from "../db/noodle-platform-migration.js";
+import { migrateLegacyNoodlePostAccessRow } from "../db/noodle-access-migration.js";
 import { getFileTableConfig, isFileTable, type AnyFileTable } from "../db/file-schema.js";
 import * as schema from "../db/schema/index.js";
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
@@ -46,6 +47,7 @@ import {
 } from "../services/import/profile-import-assets.js";
 import { ProfileImportRequestError } from "../services/import/profile-import-errors.js";
 import { planProfileNoodleImport, type ProfileNoodleImportWarning } from "../services/import/profile-import-noodle.js";
+import { withNoodleAutoPostPaused } from "../services/noodle/noodle-autopost-scheduler.service.js";
 import { computePersonalExtensionHash } from "../services/extensions/personal-extension-hash.js";
 import { personalServerExtensionRuntime } from "../services/extensions/personal-server-extension-runtime.js";
 import {
@@ -711,11 +713,14 @@ async function buildProfileStorageSnapshot(
   app: FastifyInstance,
   options: ProfileStorageSnapshotOptions = {},
 ): Promise<ProfileStorageSnapshot> {
-  return {
+  // Tables and assets are two separate reads. The NoodleR reserve writes both in one pass, so
+  // without holding it still the archive can contain a row whose media bytes are missing, or
+  // media no surviving row owns.
+  return withNoodleAutoPostPaused(async () => ({
     version: 1,
     tables: await buildProfileTableSnapshot(app),
     files: await collectProfileAssetFiles(getDataDir(), options),
-  };
+  }));
 }
 
 function isProfileStorageSnapshot(value: unknown): value is ProfileStorageSnapshot {
@@ -934,6 +939,7 @@ async function importProfileStorageSnapshot(
             // lets the column default fill `platform: "noodle"`, putting a restored NoodleR
             // account and its posts on the Noodle timeline.
             if (tableName === "noodle_accounts") cleanRow = migrateLegacyNoodleAccountRow(cleanRow);
+            if (tableName === "noodle_posts") cleanRow = migrateLegacyNoodlePostAccessRow(cleanRow);
             if (tableName === "api_connections") cleanRow.apiKeyEncrypted = "";
             if (tableName === "installed_extensions") cleanRow = quarantineProfilePersonalExtensionRow(cleanRow);
             const insert = tx.insert(table as any).values(cleanRow as any) as any;
@@ -1200,7 +1206,10 @@ async function buildProfileArchiveSources(
 async function writeNativeProfileZip(app: FastifyInstance, outputPath: string) {
   const workingDir = await mkdtemp(join(tmpdir(), "marinara-profile-tables-"));
   try {
-    const sources = await buildProfileArchiveSources(app, "", workingDir, true);
+    // Same row/asset consistency requirement as the JSON snapshot above.
+    const sources = await withNoodleAutoPostPaused(() =>
+      buildProfileArchiveSources(app, "", workingDir, true),
+    );
     await writeStoredZipArchive(outputPath, sources);
   } finally {
     await rm(workingDir, { recursive: true, force: true }).catch(() => {});
@@ -2199,7 +2208,9 @@ async function writeFullBackupArchive(
   workingDir: string,
 ) {
   const dataDir = getDataDir();
-  const sources = await buildProfileArchiveSources(app, backupName, workingDir, false);
+  const sources = await withNoodleAutoPostPaused(() =>
+    buildProfileArchiveSources(app, backupName, workingDir, false),
+  );
   sources.push({
     entryName: `${backupName}/RESTORE.txt`,
     data: Buffer.from(buildBackupRestoreNotes(), "utf8"),

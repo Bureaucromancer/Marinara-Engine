@@ -23,7 +23,7 @@ Pick one fix:
 2. Install pnpm yourself. Run this command, then run the launcher again:
 
 ```bash
-npm install -g pnpm
+npm install -g pnpm@10.34.5
 ```
 
 3. Update corepack in an administrator terminal, then run the launcher again:
@@ -39,7 +39,17 @@ Marinara v2.3.0 could start pnpm through Corepack successfully and then fail dur
 If the checkout itself cannot update, run `git pull` in the Marinara folder and start it again. As a temporary v2.3.0 workaround, install the pinned package manager globally, rerun the launcher, and then update normally:
 
 ```bash
-npm install -g pnpm@10.33.2
+npm install -g pnpm@10.34.5
+```
+
+### Launcher update to pnpm 10.34.5
+
+Marinara v2.4.1 moves its pinned package manager to pnpm 10.34.5. An existing 10.33.2 launcher can finish that one-time handoff in the same run; the refreshed launcher then selects 10.34.5 for future starts. Corepack verifies the release against the SHA-512 digest pinned in `package.json`, and the npm fallback also requests exactly 10.34.5 rather than an unpinned latest version.
+
+If an earlier v2.4.1 staging build already stopped with `Expected version: >=10.34.5` and `Got: 10.33.2`, run the launcher once more; that build downloaded the refreshed launcher before stopping. If the launcher still cannot obtain the pinned release automatically, install the exact version and rerun it:
+
+```bash
+npm install -g pnpm@10.34.5
 ```
 
 ### Linux: ERR_PNPM_ENAMETOOLONG during install
@@ -191,6 +201,7 @@ Then restart Marinara and click **Reapply Cleanup** in the sprite generation win
 
 Game Mode Storyboards turn a completed GM narration into keyframe images and optional clips. Roleplay Storyboards combine completed exchanges and display the result inline after the assistant response.
 
+- Confirm **Storyboard** is installed from **Agents** > **Download Agents**, then turn on **Enable Agents** and **Enable Storyboards** for the chat.
 - For a manual scene video, generate or upload a **Gallery** image first, then use its **Video** or **Animate** action. The **Gallery** splits **Images** and **Videos** into tabs, so check the **Videos** tab.
 - For automatic Game Mode Storyboards, open **Chat Settings** > **Agents** > **Storyboards** and confirm **Automatic Storyboard Illustrations** is on. Turn on **Automatic Storyboard Animations** too if you also want clips.
 - In Roleplay, add the **Storyboard** Agent to the chat. Choose **Still images** or **Animations**, set **Messages per episode**, and select the Storyboard image connection. **Manual only** runs from **Create storyboard** in the Gallery instead.
@@ -198,7 +209,7 @@ Game Mode Storyboards turn a completed GM narration into keyframe images and opt
 - If a custom prompt works better with all characters combined, turn off **Use NovelAI Character Prompts**.
 - Slow providers can hit a timeout. Raise `IMAGE_GEN_TIMEOUT_MS` or `VIDEO_GEN_TIMEOUT_MS` in `.env`, then restart Marinara. The server only reads these values at startup.
 
-See [Storyboard Engine Guide](game/storyboard.md) for both workflows and [Game Mode: Getting Started](game/getting-started.md) for Game setup.
+See the [Storyboard Agent Guide](game/storyboard.md) for both workflows and [Game Mode: Getting Started](game/getting-started.md) for Game setup.
 
 ### Game Mode world generation shows a JSON error
 
@@ -333,7 +344,24 @@ After disabling a full page extension, reload Marinara if a toolbar item, overla
 
 ### A Server Extension says no supported sandbox is available
 
-Server Extensions run only with macOS Seatbelt or Linux Bubblewrap. Install `bwrap` on the Linux host, then restart Marinara. Windows, Android, and other unsupported hosts deliberately refuse Server Extension execution instead of falling back to the main server process. Browser Extensions can still use their opaque-origin Worker sandbox.
+Server Extensions and Professor Mari's raw shell commands run only with macOS Seatbelt or Linux Bubblewrap. Install `bwrap` on a native Linux host, then restart Marinara. The official Docker image already includes Bubblewrap, but the default container remains least-privileged and cannot create Bubblewrap's nested namespaces and mounts. Marinara detects that state and keeps OS-sandbox features disabled instead of attempting broken commands.
+
+If you accept the broader container privileges and need these features in Docker, save this as `docker-compose.override.yml` next to `docker-compose.yml`:
+
+```yaml
+services:
+  marinara:
+    environment:
+      MARINARA_DOCKER_USER: root
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor=unconfined
+```
+
+Recreate the container after adding the override. Keeping the server process as root is necessary here so the added capability is not discarded when Marinara's entrypoint normally drops to the `node` user. Running the server as root with `SYS_ADMIN` is a broad privilege escalation, and disabling the container's AppArmor profile further weakens its outer security boundary; do not enable this merely to silence the unavailable-sandbox message. Docker's default seccomp profile adapts to added capabilities, so a blanket `seccomp=unconfined` setting should not be necessary on current Docker releases.
+
+Windows, Android, and other unsupported hosts deliberately refuse Server Extension execution instead of falling back to the main server process. Browser Extensions can still use their opaque-origin Worker sandbox.
 
 ## Getting more help
 

@@ -5,7 +5,7 @@
 import { useState, useEffect, useMemo, useRef, type CSSProperties, type RefObject } from "react";
 import { motion, AnimatePresence, type TargetAndTransition } from "framer-motion";
 import { Check } from "lucide-react";
-import type { SpritePlacement, SpriteSide } from "@marinara-engine/shared";
+import type { SpriteCharacterVisualSettings, SpritePlacement, SpriteSide } from "@marinara-engine/shared";
 import { useCharacterSprites, type SpriteInfo } from "../../hooks/use-characters";
 import { normalizeSpriteExpressionKey, resolveSpriteExpression } from "../../lib/sprite-expression-match";
 import {
@@ -39,6 +39,8 @@ interface SpriteOverlayProps {
   spriteExpressions?: Record<string, string>;
   /** Saved freeform placements per character (from chat metadata) */
   spritePlacements?: SpritePlacementMap;
+  /** Sparse display overrides keyed by character or persona ID. */
+  characterVisualSettings?: Record<string, SpriteCharacterVisualSettings>;
   /** Whether the overlay is currently in drag-to-arrange mode */
   editing?: boolean;
   /** Called when a sprite is moved (to persist it) */
@@ -72,6 +74,8 @@ interface VisibleSpriteEntry {
   renderMode: SpriteRenderMode;
   placement: SpritePlacement;
   zIndex: number;
+  spriteScale: number;
+  spriteOpacity: number;
 }
 
 function getSpritePlacementKey(characterId: string, renderMode: SpriteRenderMode) {
@@ -132,6 +136,7 @@ export function SpriteOverlay({
   spriteDisplayModes,
   spriteExpressions,
   spritePlacements,
+  characterVisualSettings,
   editing = false,
   onPlacementChange,
   onFinishPlacement,
@@ -260,41 +265,59 @@ export function SpriteOverlay({
     if (resolvedSpriteDisplayModes.includes("expressions")) modes.push("expressions");
     return modes;
   }, [fullBodyOnly, resolvedSpriteDisplayModes]);
+  const resolvedExpressionSpriteScale = expressionSpriteScale ?? spriteScale;
+  const resolvedFullBodySpriteScale = fullBodySpriteScale ?? spriteScale;
+  const resolvedExpressionSpriteOpacity = expressionSpriteOpacity ?? spriteOpacity;
+  const resolvedFullBodySpriteOpacity = fullBodySpriteOpacity ?? spriteOpacity;
   const visibleSpriteEntries = useMemo<VisibleSpriteEntry[]>(() => {
     const entries: VisibleSpriteEntry[] = [];
     const hasPairedSprites = renderModes.length > 1;
 
     for (const [index, charId] of characterIds.entries()) {
+      const characterSettings = characterVisualSettings?.[charId];
+      const characterSide = characterSettings?.spritePosition ?? side;
       const basePlacement = clampSpritePlacement(
-        spritePlacements?.[charId] ?? getDefaultSpritePlacement(index, characterIds.length, side),
+        spritePlacements?.[charId] ?? getDefaultSpritePlacement(index, characterIds.length, characterSide),
       );
 
       for (const [modeIndex, renderMode] of renderModes.entries()) {
         const placementKey = getSpritePlacementKey(charId, renderMode);
         const fallbackPlacement = hasPairedSprites
-          ? offsetPairedSpritePlacement(basePlacement, renderMode, side)
+          ? offsetPairedSpritePlacement(basePlacement, renderMode, characterSide)
           : basePlacement;
+        const isFullBody = renderMode === "full-body";
         entries.push({
           characterId: charId,
           placementKey,
           renderMode,
           placement: clampSpritePlacement(spritePlacements?.[placementKey] ?? fallbackPlacement),
           zIndex: 10 + index * 3 + modeIndex,
+          spriteScale: isFullBody
+            ? (characterSettings?.fullBodySpriteScale ?? resolvedFullBodySpriteScale)
+            : (characterSettings?.expressionSpriteScale ?? resolvedExpressionSpriteScale),
+          spriteOpacity: isFullBody
+            ? (characterSettings?.fullBodySpriteOpacity ?? resolvedFullBodySpriteOpacity)
+            : (characterSettings?.expressionSpriteOpacity ?? resolvedExpressionSpriteOpacity),
         });
       }
     }
 
     return entries;
-  }, [characterIds, renderModes, side, spritePlacements]);
+  }, [
+    characterIds,
+    characterVisualSettings,
+    renderModes,
+    resolvedExpressionSpriteOpacity,
+    resolvedExpressionSpriteScale,
+    resolvedFullBodySpriteOpacity,
+    resolvedFullBodySpriteScale,
+    side,
+    spritePlacements,
+  ]);
 
   if (visibleSpriteEntries.length === 0) return null;
 
   const stageZIndexClass = editing ? "z-[35]" : fullBodyOnly ? "z-[5]" : "z-[5] md:z-[15]";
-  const resolvedExpressionSpriteScale = expressionSpriteScale ?? spriteScale;
-  const resolvedFullBodySpriteScale = fullBodySpriteScale ?? spriteScale;
-  const resolvedExpressionSpriteOpacity = expressionSpriteOpacity ?? spriteOpacity;
-  const resolvedFullBodySpriteOpacity = fullBodySpriteOpacity ?? spriteOpacity;
-
   return (
     <div ref={stageRef} className={`pointer-events-none absolute inset-0 overflow-hidden ${stageZIndexClass}`}>
       {visibleSpriteEntries.map((entry) => (
@@ -314,15 +337,15 @@ export function SpriteOverlay({
           onFinishPlacement={onFinishPlacement}
           fullBodyOnly={fullBodyOnly}
           spriteDisplayModes={[entry.renderMode]}
-          spriteScale={entry.renderMode === "full-body" ? resolvedFullBodySpriteScale : resolvedExpressionSpriteScale}
-          spriteOpacity={
-            entry.renderMode === "full-body" ? resolvedFullBodySpriteOpacity : resolvedExpressionSpriteOpacity
-          }
+          spriteScale={entry.spriteScale}
+          spriteOpacity={entry.spriteOpacity}
         />
       ))}
 
       {editing && (
-        <div className="pointer-events-none absolute bottom-4 left-1/2 z-[30] -translate-x-1/2 rounded-full border border-white/10 bg-black/60 px-3 py-1 text-[0.625rem] font-medium text-white/80 shadow-lg backdrop-blur-md">{localizeUi("ui.chat.spriteoverlay.dragSpritesToRepositionThemUseTheCheckAbove")}</div>
+        <div className="pointer-events-none absolute bottom-4 left-1/2 z-[30] -translate-x-1/2 rounded-full border border-white/10 bg-black/60 px-3 py-1 text-[0.625rem] font-medium text-white/80 shadow-lg backdrop-blur-md">
+          {localizeUi("ui.chat.spriteoverlay.dragSpritesToRepositionThemUseTheCheckAbove")}
+        </div>
       )}
     </div>
   );
@@ -507,7 +530,9 @@ function CharacterSprite({
 
   useEffect(() => {
     if (!isDragging) {
-      setCurrentPlacement(clampSpritePlacement(placement));
+      const nextPlacement = clampSpritePlacement(placement);
+      currentPlacementRef.current = nextPlacement;
+      setCurrentPlacement(nextPlacement);
     }
   }, [isDragging, placement]);
 
@@ -535,7 +560,9 @@ function CharacterSprite({
 
       const dx = ((event.clientX - dragState.startX) / Math.max(stage.clientWidth, 1)) * 100;
       const dy = ((event.clientY - dragState.startY) / Math.max(stage.clientHeight, 1)) * 100;
-      setCurrentPlacement(clampSpritePlacement({ x: dragState.origin.x + dx, y: dragState.origin.y + dy }));
+      const nextPlacement = clampSpritePlacement({ x: dragState.origin.x + dx, y: dragState.origin.y + dy });
+      currentPlacementRef.current = nextPlacement;
+      setCurrentPlacement(nextPlacement);
     };
 
     const finishDrag = (event: PointerEvent) => {
@@ -605,18 +632,26 @@ function CharacterSprite({
             <Check size="0.75rem" strokeWidth={2.4} />
           </button>
           <div className="pointer-events-none rounded-full border border-white/10 bg-black/65 px-2 py-1 text-[0.5625rem] font-semibold uppercase tracking-wide text-white/75 shadow-md">
-            {isDragging ?localizeUi("ui.chat.charactersprite.releaseToSave") :localizeUi("ui.chat.charactersprite.dragToMove")}
+            {isDragging
+              ? localizeUi("ui.chat.charactersprite.releaseToSave")
+              : localizeUi("ui.chat.charactersprite.dragToMove")}
           </div>
         </div>
       )}
 
-      <div style={{ opacity: resolvedSpriteOpacity }}>
-        <AnimatePresence mode="wait">
+      <div className="grid" style={{ opacity: resolvedSpriteOpacity }}>
+        <AnimatePresence mode="sync">
           <motion.img
             key={`${placementKey}-${expression}`}
             src={spriteUrl}
-            alt={localizeUi("ui.chat.charactersprite.value1Value2Sprite", { value1: renderMode === "full-body" ?localizeUi("ui.chat.charactersprite.fullBody") :localizeUi("ui.chat.charactersprite.expression"), value2: expression })}
-            className={`${sizeClass} w-auto object-contain drop-shadow-[0_0_20px_rgba(0,0,0,0.5)] ${editing ? "cursor-grab active:cursor-grabbing" : ""}`}
+            alt={localizeUi("ui.chat.charactersprite.value1Value2Sprite", {
+              value1:
+                renderMode === "full-body"
+                  ? localizeUi("ui.chat.charactersprite.fullBody")
+                  : localizeUi("ui.chat.charactersprite.expression"),
+              value2: expression,
+            })}
+            className={`${sizeClass} col-start-1 row-start-1 w-auto object-contain drop-shadow-[0_0_20px_rgba(0,0,0,0.5)] ${editing ? "cursor-grab active:cursor-grabbing" : ""}`}
             style={spriteScaleStyle}
             draggable={false}
             initial={variant.initial}

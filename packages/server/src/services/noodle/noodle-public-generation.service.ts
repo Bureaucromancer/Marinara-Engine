@@ -43,8 +43,10 @@ import {
   resolvePersonaAccount,
 } from "./noodle-public-support.js";
 import { noodleResponseFormat } from "./noodle-response-format.js";
+import type { ConnectionAdmissionMode } from "../generation/connection-admission.js";
 import { isUnsupportedNoodleVisionInputError } from "./noodle-vision.js";
 import { formatNoodleMessagesForLog } from "./noodle-generation-log.js";
+import { ensureAmbientNoodleAccounts } from "./noodle-ambient-profiles.js";
 
 type PublicGenerationConnection = NonNullable<
   Awaited<ReturnType<ReturnType<typeof createConnectionsStorage>["getWithKey"]>>
@@ -59,40 +61,9 @@ type PublicGenerationInput = {
   timeZone?: string;
   debugMode: boolean;
   reviewImagePromptsBeforeSend: boolean;
+  /** Scheduler-owned automatic refreshes pass background so they yield to user generation. */
+  admissionMode?: ConnectionAdmissionMode;
 };
-
-const RANDOM_NOODLE_USERS = [
-  {
-    entityId: "random_user:thread-countess",
-    displayName: "Thread Countess",
-    bio: "Chronically online textile hobbyist who treats every Noodle argument like court gossip.",
-  },
-  {
-    entityId: "random_user:packet-soup",
-    displayName: "Packet Soup",
-    bio: "Friendly lurker, recipe collector, and accidental drama amplifier.",
-  },
-  {
-    entityId: "random_user:orbit-notice",
-    displayName: "Orbit Notice",
-    bio: "Posts vague observations, likes too quickly, and follows anyone with interesting chaos.",
-  },
-  {
-    entityId: "random_user:glass-bulletin",
-    displayName: "Glass Bulletin",
-    bio: "Local rumor account with polished manners and questionable sources.",
-  },
-  {
-    entityId: "random_user:moth-hour",
-    displayName: "Moth Hour",
-    bio: "Night-scroller who replies with eerie encouragement and niche memes.",
-  },
-  {
-    entityId: "random_user:brine-index",
-    displayName: "Brine Index",
-    bio: "Overconfident commentator who keeps a spreadsheet of everyone else's scandals.",
-  },
-] as const;
 
 function parseStringArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string" && item.length > 0);
@@ -113,12 +84,6 @@ function sinceHoursIso(hours: number) {
 
 function timelineRefreshMaxTokens(characterCount: number) {
   return 4096 + Math.max(0, characterCount) * 1024;
-}
-
-async function ensureRandomUserAccounts(noodle: ReturnType<typeof createNoodleStorage>) {
-  for (const profile of RANDOM_NOODLE_USERS) {
-    await noodle.upsertAccountFromProfile({ kind: "random_user", ...profile, invited: true });
-  }
 }
 
 async function ensureSelectedGroupCharacterAccounts(
@@ -187,6 +152,7 @@ export function createPublicNoodleGenerationService(db: DB) {
           fallbackConnection,
           fallbackBaseUrl: fallbackConnection ? resolveBaseUrl(fallbackConnection) : "",
           category: "main",
+          admissionMode: input.admissionMode,
         });
         await ensurePersonaAccounts(noodle, characters);
         if (settings.allowProfessorMari) await ensureProfessorMariAccount(noodle, characters);
@@ -196,7 +162,7 @@ export function createPublicNoodleGenerationService(db: DB) {
           characters,
           settings.invitedCharacterGroupIds,
         );
-        if (settings.allowRandomUsers) await ensureRandomUserAccounts(noodle);
+        if (settings.allowRandomUsers) await ensureAmbientNoodleAccounts(noodle, true);
         const { resolvable: participantAccounts, staleAccounts } = await filterResolvableNoodleParticipants(
           await noodle.listAccounts(),
           characters,
@@ -456,6 +422,7 @@ export function createPublicNoodleGenerationService(db: DB) {
           imageConnection,
           debugMode,
           reviewImagePromptsBeforeSend: input.reviewImagePromptsBeforeSend,
+          admissionMode: input.admissionMode,
         });
         const activity = await commitGeneratedNoodleActivity({
           db,

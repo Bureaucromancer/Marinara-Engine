@@ -194,8 +194,8 @@
   --muted-foreground: #d4adfc;
   --accent: #2a1a3e;
   --accent-foreground: #f0e8ff;
-  --destructive: #ff6b9d;
-  --destructive-foreground: #0a0a0a;
+  --destructive: var(--primary);
+  --destructive-foreground: var(--primary-foreground);
   --border: #d4adfc33;
   --input: #d4adfc33;
   --ring: #d4acfb;
@@ -465,8 +465,8 @@
   --muted-foreground: #7a64a0;
   --accent: #ede4f7;
   --accent-foreground: #1a1025;
-  --destructive: #e84878;
-  --destructive-foreground: #ffffff;
+  --destructive: var(--primary);
+  --destructive-foreground: var(--primary-foreground);
   --border: #d4adfc44;
   --input: #d4adfc44;
   --ring: #d4acfb;
@@ -2771,6 +2771,28 @@ strong {
   color: #e8e6e3;
   overflow-wrap: anywhere;
   word-break: break-word;
+  /* Code is LTR syntax whatever surrounds it. The direction must live in CSS,
+     not only the renderer's dir attribute: the chat HTML path re-sanitizes
+     markup with an attribute allowlist that strips `dir`. */
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* Mixed-direction defence, docs viewer only: links and bold runs frequently
+   hold LTR text (English UI labels, URLs) inside RTL prose; isolating them
+   keeps the bidi algorithm from dragging sentence punctuation around.
+   Scoped to .docs-reader-content because chat shares .mari-message-content
+   and isolation would change how existing RTL chat prose reorders. */
+.docs-reader-content a,
+.docs-reader-content strong {
+  unicode-bidi: isolate;
+}
+
+/* ==highlight== inside docs: inline padding severs cursive shaping across the
+   element boundary (Arabic contextual forms), so the docs reader drops it.
+   Chat keeps the padded look — same reasoning as the scoped rule above. */
+.docs-reader-content .mari-md-highlight {
+  padding: 0;
 }
 
 /* Strikethrough */
@@ -2799,6 +2821,12 @@ strong {
   -webkit-overflow-scrolling: touch;
   white-space: pre;
   color: #d4d4d4;
+  /* Code is LTR even when the document around it is RTL. Lives in CSS, not
+     only the renderer's dir attribute, because the chat HTML path strips
+     attributes. No text-align here: direction alone realigns the block, and
+     text-align would override card/theme CSS that chat honors today. */
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 .mari-message-content .mari-md-codeblock code {
   background: none;
@@ -2827,7 +2855,7 @@ strong {
 .mari-message-content .mari-md-codeblock-lang {
   position: absolute;
   top: 0;
-  right: 0;
+  inset-inline-end: 0;
   font-size: 0.7em;
   color: rgba(255, 255, 255, 0.3);
   padding: 0.25em 0.6em;
@@ -2849,7 +2877,7 @@ strong {
 /* Unordered lists */
 .mari-message-content .mari-md-ul {
   list-style: disc;
-  padding-left: 1.5em;
+  padding-inline-start: 1.5em;
   margin: 0.35em 0;
 }
 .mari-message-content .mari-md-ul .mari-md-ul {
@@ -2860,7 +2888,7 @@ strong {
 /* Ordered lists */
 .mari-message-content .mari-md-ol {
   list-style: decimal;
-  padding-left: 1.5em;
+  padding-inline-start: 1.5em;
   margin: 0.35em 0;
 }
 .mari-message-content .mari-md-ol .mari-md-ol {
@@ -2888,7 +2916,7 @@ strong {
 .mari-message-content .mari-md-table td {
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 0.4em 0.75em;
-  text-align: left;
+  text-align: start;
 }
 .mari-message-content .mari-md-table th {
   background: rgba(255, 255, 255, 0.06);
@@ -2918,14 +2946,17 @@ strong {
   background-color: color-mix(in srgb, var(--primary) 24%, transparent);
   color: var(--foreground);
   border-radius: 2px;
-  padding: 0 0.1em;
+  /* No inset at all (native-find style): inline padding severs cursive
+     shaping across the mark boundary (Arabic contextual forms, lam-alef),
+     and a box-shadow substitute grows the tint vertically and double-paints
+     where two marks abut. The bare background hugs the glyphs safely. */
   font-weight: 500;
 }
 
 /* Task lists */
 .mari-message-content .mari-md-task-list {
   list-style: none;
-  padding-left: 0.25em;
+  padding-inline-start: 0.25em;
   margin: 0.35em 0;
 }
 .mari-message-content li.mari-md-task-item {

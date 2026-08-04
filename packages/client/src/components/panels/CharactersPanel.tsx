@@ -49,7 +49,8 @@ import {
 import { useUIStore, type CharacterLibrarySort } from "../../stores/ui.store";
 import { handleFolderRenameKeyDown, useFolderRenameGesture } from "../../hooks/use-folder-rename-gesture";
 import { useTouchFolderDrag } from "../../hooks/use-touch-folder-drag";
-import { cn, getAvatarCropStyle, type AvatarCropValue } from "../../lib/utils";
+import { normalizeAvatarCrop } from "@marinara-engine/shared";
+import { cn, getAvatarCropStyle } from "../../lib/utils";
 import { estimateCharacterCardTokens, formatEstimatedTokens } from "../../lib/character-token-count";
 import { SelectionActionBar } from "../ui/SelectionActionBar";
 import { SmoothFolderContent } from "../ui/SmoothFolderContent";
@@ -956,7 +957,7 @@ export function CharactersPanel() {
                   value2: group.name,
                 })}
                 title={localizeUi("ui.panels.backgroundpicker.doubleClickDoubleTapOrPressF2ToRename")}
-                className="group relative flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 transition-all hover:bg-[var(--sidebar-accent)]/40"
+                className="group relative flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 transition-all hover:bg-[var(--sidebar-accent)]/40 max-md:pr-12 [@media(pointer:coarse)]:pr-12"
                 onClick={(event) =>
                   handleFolderRenameGesture(group.id, event, {
                     onSingleClick: () => setExpandedGroupId(isExpanded ? null : group.id),
@@ -1008,11 +1009,25 @@ export function CharactersPanel() {
                   )}
                 </div>
                 {folderMemberIds.length > 0 && (
-                  <span className="shrink-0 text-[0.5625rem] text-[var(--muted-foreground)]">
+                  <span
+                    data-folder-item-count="inline"
+                    className="shrink-0 text-[0.5625rem] text-[var(--muted-foreground)] max-md:hidden [@media(pointer:coarse)]:hidden"
+                  >
                     {folderMemberIds.length}
                   </span>
                 )}
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100">
+                <div
+                  data-folder-actions
+                  className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 [@media(pointer:fine)]:group-focus-within:opacity-100 max-md:opacity-100 [@media(pointer:coarse)]:opacity-100 group-hover:[&_button]:pointer-events-auto [@media(pointer:fine)]:group-focus-within:[&_button]:pointer-events-auto max-md:[&_button]:pointer-events-auto [@media(pointer:coarse)]:[&_button]:pointer-events-auto"
+                >
+                  {folderMemberIds.length > 0 && (
+                    <span
+                      data-folder-item-count="actions"
+                      className="hidden px-1 text-[0.5625rem] text-[var(--muted-foreground)] max-md:inline [@media(pointer:coarse)]:inline"
+                    >
+                      {folderMemberIds.length}
+                    </span>
+                  )}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1050,7 +1065,7 @@ export function CharactersPanel() {
                   const memberTags = fullMember ? getCharacterTags(fullMember) : [];
                   const memberTokenEstimate = fullMember ? estimateCharacterCardTokens(fullMember.parsed) : null;
                   const memberNameColor = (fullMember?.parsed.extensions?.nameColor as string) || undefined;
-                  const memberAvatarCrop = fullMember?.parsed.extensions?.avatarCrop as AvatarCropValue | undefined;
+                  const memberAvatarCrop = normalizeAvatarCrop(fullMember?.parsed.extensions?.avatarCrop) ?? undefined;
                   return (
                     <div
                       key={memberId}
@@ -1064,6 +1079,7 @@ export function CharactersPanel() {
                         openCharacterDetailFromPanel(memberId);
                       }}
                       onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return;
                         if (e.key !== "Enter" && e.key !== " ") return;
                         e.preventDefault();
                         if (selectionMode) {
@@ -1174,7 +1190,7 @@ export function CharactersPanel() {
                           </div>
                         )}
                       </div>
-                      <div className={cn("min-w-0 flex-1", !selectionMode && "pr-24")}>
+                      <div className="min-w-0 flex-1">
                         <span
                           className="block truncate text-[0.75rem] font-medium"
                           style={
@@ -1242,7 +1258,7 @@ export function CharactersPanel() {
                       {!selectionMode && (
                         <div
                           data-character-row-actions
-                          className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] p-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover/member:opacity-100 max-md:opacity-100"
+                          className="pointer-events-none absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] p-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover/member:opacity-100 [@media(pointer:fine)]:group-focus-within/member:opacity-100 max-md:static max-md:translate-y-0 max-md:opacity-100 [@media(pointer:coarse)]:static [@media(pointer:coarse)]:translate-y-0 [@media(pointer:coarse)]:opacity-100 group-hover/member:[&_button]:pointer-events-auto [@media(pointer:fine)]:group-focus-within/member:[&_button]:pointer-events-auto max-md:[&_button]:pointer-events-auto [@media(pointer:coarse)]:[&_button]:pointer-events-auto"
                         >
                           <ChatResourceActionButton
                             payload={{ version: 1, kind: "character", ids: [memberId], label: memberName }}
@@ -1490,7 +1506,7 @@ export function CharactersPanel() {
                       src={avatarUrl}
                       alt={charName}
                       className="h-full w-full object-cover"
-                      style={getAvatarCropStyle(char.parsed.extensions?.avatarCrop as AvatarCropValue | undefined)}
+                      style={getAvatarCropStyle(normalizeAvatarCrop(char.parsed.extensions?.avatarCrop))}
                     />
                   </div>
                 ) : (
@@ -1508,10 +1524,15 @@ export function CharactersPanel() {
               </div>
 
               {/* Info */}
-              <div className={cn("min-w-0 flex-1", !selectionMode && "pr-[6.5rem] max-md:pr-20")}>
+              <div
+                className={cn(
+                  "min-w-0 flex-1",
+                  !selectionMode && "pr-0 max-md:pr-32 [@media(pointer:coarse)]:pr-32",
+                )}
+              >
                 <div
                   data-character-row-name
-                  className="truncate text-sm font-medium"
+                  className="w-fit max-w-full truncate text-sm font-medium"
                   style={
                     charNameColor
                       ? charNameColor.startsWith("linear-gradient")
@@ -1573,11 +1594,11 @@ export function CharactersPanel() {
               {!selectionMode && (
                 <div
                   data-character-row-actions
-                  className="absolute right-2 top-1/2 grid w-24 -translate-y-1/2 grid-cols-3 gap-0.5 rounded-lg bg-[var(--sidebar)] p-1 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:w-20 max-md:opacity-100"
+                  className="pointer-events-none absolute right-2 top-1/2 flex w-auto -translate-y-1/2 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] p-1 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 [@media(pointer:fine)]:group-focus-within:opacity-100 max-md:opacity-100 [@media(pointer:coarse)]:opacity-100 group-hover:[&_button]:pointer-events-auto [@media(pointer:fine)]:group-focus-within:[&_button]:pointer-events-auto max-md:[&_button]:pointer-events-auto [@media(pointer:coarse)]:[&_button]:pointer-events-auto"
                 >
                   <ChatResourceActionButton
                     payload={{ version: 1, kind: "character", ids: [char.id], label: charName }}
-                    className="mari-character-row-action flex w-full items-center justify-center"
+                    className="mari-character-row-action flex w-7 items-center justify-center max-md:w-6"
                   />
                   <button
                     type="button"
@@ -1593,7 +1614,7 @@ export function CharactersPanel() {
                         },
                       });
                     }}
-                    className="mari-chrome-control mari-character-row-action flex w-full items-center justify-center"
+                    className="mari-chrome-control mari-character-row-action flex w-7 items-center justify-center max-md:w-6"
                     title={localizeUi("ui.presets.sectionstab.duplicate")}
                     aria-label={localizeUi("ui.presets.sectionstab.duplicate")}
                   >
@@ -1617,7 +1638,7 @@ export function CharactersPanel() {
                       }
                       deleteCharacter.mutate(char.id);
                     }}
-                    className="mari-chrome-control mari-character-row-action flex w-full items-center justify-center"
+                    className="mari-chrome-control mari-character-row-action flex w-7 items-center justify-center max-md:w-6"
                     title={localizeUi("lorebook.editor.batch.delete")}
                     aria-label={localizeUi("lorebook.editor.batch.delete")}
                   >
@@ -1632,7 +1653,7 @@ export function CharactersPanel() {
                         characterName: charName,
                       });
                     }}
-                    className="mari-chrome-control mari-character-row-action col-span-3 flex w-full items-center justify-center gap-1 border-[var(--marinara-chat-chrome-button-border-active)] bg-[var(--marinara-chat-chrome-button-bg-active)] text-[0.625rem] font-semibold text-[var(--marinara-chat-chrome-button-text-active)] max-md:text-[0.5625rem]"
+                    className="mari-chrome-control mari-character-row-action flex w-7 items-center justify-center border-[var(--marinara-chat-chrome-button-border-active)] bg-[var(--marinara-chat-chrome-button-bg-active)] text-[var(--marinara-chat-chrome-button-text-active)] max-md:w-6"
                     title={localizeUi("ui.panels.characterspanel.startNewChatWithValue1", {
                       value1: charName,
                     })}
@@ -1641,7 +1662,6 @@ export function CharactersPanel() {
                     })}
                   >
                     <MessageCircle className="h-3.5 w-3.5 shrink-0 max-md:h-3 max-md:w-3" />
-                    {localizeUi("ui.panels.characterspanel.chat")}
                   </button>
                 </div>
               )}

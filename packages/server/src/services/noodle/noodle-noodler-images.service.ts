@@ -17,6 +17,7 @@ import { createConnectionsStorage } from "../storage/connections.storage.js";
 import { createPromptOverridesStorage } from "../storage/prompt-overrides.storage.js";
 import { loadPrompt, NOODLE_IMAGE_POST } from "../prompt-overrides/index.js";
 import { generateNoodleImageWithRetry } from "./noodle-image-retry.js";
+import type { ConnectionAdmissionMode } from "../generation/connection-admission.js";
 import { characterAppearanceFromRow, characterNoodleImageContextFromRow } from "./noodle-public-images.service.js";
 import type { NoodleImagePromptReviewItem, ReviewedNoodleImagePrompt } from "./noodle-public-images.service.js";
 import { characterNameFromRow } from "./noodle-public-support.js";
@@ -52,6 +53,9 @@ export async function generateNoodlerPostImage(input: {
   debugMode: boolean;
   previewOnly?: boolean;
   promptOverride?: { prompt: string; negativePrompt?: string };
+  beforeProviderAttempt?: (attempt: number) => Promise<void>;
+  onProviderAttemptFailure?: (attempt: number) => Promise<void>;
+  admissionMode?: ConnectionAdmissionMode;
 }): Promise<{
   metadata: Record<string, unknown>;
   preview: Omit<NoodleImagePromptReviewItem, "id"> | null;
@@ -161,8 +165,9 @@ export async function generateNoodlerPostImage(input: {
   }
 
   const image = await generateNoodleImageWithRetry(
-    () =>
-      generateImage(imageSource, imageBaseUrl, input.imageConnection.apiKey || "", imageServiceHint, {
+    async (attempt) => {
+      await input.beforeProviderAttempt?.(attempt);
+      return generateImage(imageSource, imageBaseUrl, input.imageConnection.apiKey || "", imageServiceHint, {
         prompt: finalPrompt,
         negativePrompt: finalNegativePrompt,
         model: imageModel,
@@ -173,9 +178,12 @@ export async function generateNoodlerPostImage(input: {
         imageDefaults,
         referenceImages,
         debugMode: input.debugMode,
+        admissionMode: input.admissionMode,
         fallback: imageFallback,
-      }),
-    (error, attempt, maxAttempts) => {
+      });
+    },
+    async (error, attempt, maxAttempts) => {
+      await input.onProviderAttemptFailure?.(attempt);
       logger.warn(
         error,
         "[noodler] Image generation attempt %d/%d failed for %s",

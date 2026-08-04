@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────
 // Game: Setup Wizard (initial game setup modal)
 // ──────────────────────────────────────────────
-import { lazy, Suspense, useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent } from "react";
+import { lazy, Suspense, useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { toast } from "sonner";
@@ -47,7 +47,9 @@ import {
 } from "@marinara-engine/shared";
 import { getCharacterTitle } from "../../lib/character-display";
 import { api } from "../../lib/api-client";
-import { cn, getAvatarCropStyle, parseAvatarCropJson, type AvatarCropValue } from "../../lib/utils";
+import type { AvatarCrop } from "@marinara-engine/shared";
+import { normalizeAvatarCrop } from "@marinara-engine/shared";
+import { cn, getAvatarCropStyle } from "../../lib/utils";
 import {
   GenerationParametersFields,
   getEditableGenerationParameters,
@@ -100,6 +102,8 @@ function normalizeCapabilitySetupSelectionKind(
 }
 
 interface GameSetupWizardProps {
+  /** Optional block rendered with the other pre-start choices, used to offer installed game experiences. */
+  experiencesSlot?: ReactNode;
   onComplete: (
     config: GameSetupConfig,
     preferences: string,
@@ -126,7 +130,7 @@ interface GameSetupWizardProps {
     name: string;
     comment?: string | null;
     avatarUrl?: string | null;
-    avatarCrop?: AvatarCropValue | null;
+    avatarCrop?: AvatarCrop | null;
   }>;
   initialPartyCharacterIds?: string[];
 }
@@ -152,7 +156,7 @@ function CharacterAvatar({
   character: {
     name: string;
     avatarUrl?: string | null;
-    avatarCrop?: AvatarCropValue | null;
+    avatarCrop?: AvatarCrop | null;
   };
   className?: string;
 }) {
@@ -428,6 +432,7 @@ function normalizeGameLanguage(language: string): string {
 }
 
 export function GameSetupWizard({
+  experiencesSlot,
   onComplete,
   onCancel,
   isLoading,
@@ -636,13 +641,16 @@ export function GameSetupWizard({
   );
   const personas = useMemo(
     () =>
-      (personasList as Array<{
+      ((personasList as Array<{
         id: string;
         name: string;
         avatarPath?: string | null;
-        avatarCrop?: string | null;
+        avatarCrop?: AvatarCrop | string | null;
         comment?: string;
-      }>) ?? [],
+      }>) ?? []).map((persona) => ({
+        ...persona,
+        avatarCrop: normalizeAvatarCrop(persona.avatarCrop),
+      })),
     [personasList],
   );
   const characterFolders = useMemo(
@@ -1258,6 +1266,9 @@ export function GameSetupWizard({
               )}
             </div>
 
+            {/* Absent when nothing provides an experience, leaving this step exactly as it was. */}
+            {experiencesSlot}
+
             <div>
               <label className={GAME_SETUP_FIELD_LABEL}>{localizeUi("ui.game.gamesetupwizard.gameName")}</label>
               <input
@@ -1852,7 +1863,7 @@ export function GameSetupWizard({
                         character={{
                           name: p.name,
                           avatarUrl: p.avatarPath ?? null,
-                          avatarCrop: parseAvatarCropJson(p.avatarCrop),
+                          avatarCrop: p.avatarCrop,
                         }}
                       />
                       <div className="min-w-0 flex-1">
@@ -1897,7 +1908,7 @@ export function GameSetupWizard({
                           character={{
                             name: p.name,
                             avatarUrl: p.avatarPath ?? null,
-                            avatarCrop: parseAvatarCropJson(p.avatarCrop),
+                            avatarCrop: p.avatarCrop,
                           }}
                         />
                         <div className="min-w-0 flex-1">

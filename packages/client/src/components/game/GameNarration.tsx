@@ -40,7 +40,8 @@ import {
   GitBranch,
   Languages,
 } from "lucide-react";
-import { cn, copyToClipboard, getAvatarCropStyle, type AvatarCrop, type LegacyAvatarCrop } from "../../lib/utils";
+import type { AvatarCrop } from "@marinara-engine/shared";
+import { cn, copyToClipboard, getAvatarCropStyle } from "../../lib/utils";
 import { useRenderTimer } from "../../lib/perf-diagnostics";
 import { findNamedMapValue } from "../../lib/game-character-name-match";
 import type { GameSegmentEdit } from "../../lib/game-segment-edits";
@@ -276,7 +277,7 @@ function narrationSegmentAnchorKey(segment: NarrationSegment): string {
 
 type SpeakerAvatarInfo = {
   url: string;
-  crop?: AvatarCrop | LegacyAvatarCrop | null;
+  crop?: AvatarCrop | null;
   nameColor?: string;
   dialogueColor?: string;
 };
@@ -4666,7 +4667,8 @@ export function GameNarration({
                 return (
                   <div className="flex min-w-0 gap-3 max-[420px]:gap-2" style={gameAvatarScaleStyle}>
                     {/* Left: Speaker avatar with reaction indicator */}
-                    <div className="relative flex shrink-0 flex-col items-center gap-1">
+                    {/* Inert theming hook — see experience-dialogue-wrap below. */}
+                    <div className="experience-dialogue-avatar relative flex shrink-0 flex-col items-center gap-1">
                       {activeCanUploadPortrait ? (
                         <div className="group/avatar relative">
                           <button
@@ -4747,15 +4749,17 @@ export function GameNarration({
                     <div className="flex min-w-0 flex-1 flex-col">
                       <div className="mb-1.5 flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
+                          {/* Inert theming hook. The inner span lets a skewed name plate counter-skew its
+                              text; unstyled it collapses to plain inline text. */}
                           <span
-                            className="text-sm font-bold"
+                            className="experience-dialogue-speaker text-sm font-bold"
                             style={
                               nameColorStyle(
                                 findNamedMapValue(speakerNameColors, active.speaker ?? "") ?? active.color,
                               ) ?? { color: "rgb(186 230 253)" }
                             }
                           >
-                            {active.speaker || "Dialogue"}
+                            <span>{active.speaker || "Dialogue"}</span>
                           </span>
                           {active.partyType && active.partyType !== "main" && (
                             <span
@@ -4773,7 +4777,14 @@ export function GameNarration({
                         </div>
                       </div>
 
-                      <div className="relative">
+                      <div
+                        className={cn(
+                          "relative",
+                          // Inert theming hook: an experience reshapes the dialogue box from under its
+                          // surface class. Nothing in the base engine styles it, so Classic is unchanged.
+                          (!active.partyType || active.partyType === "main") && "experience-dialogue-wrap",
+                        )}
+                      >
                         <div
                           ref={activeSegmentScrollRef}
                           onPointerDown={(event) => handleMobileSegmentPointerDown(event, active)}
@@ -4784,7 +4795,7 @@ export function GameNarration({
                               ? "border-purple-400/10 bg-purple-950/20"
                               : active.partyType === "whisper"
                                 ? "border-[var(--marinara-chat-chrome-panel-border)] bg-[var(--marinara-chat-chrome-highlight-bg)]"
-                                : "border-[var(--border)] bg-[var(--muted)]/20 dark:border-white/10 dark:bg-black/35",
+                                : "experience-dialogue-bubble border-[var(--border)] bg-[var(--muted)]/20 dark:border-white/10 dark:bg-black/35",
                             activeSegmentActionButtons && "pr-16",
                           )}
                         >
@@ -5832,7 +5843,7 @@ function CroppedAvatar({
 }: {
   src: string;
   alt: string;
-  crop?: AvatarCrop | LegacyAvatarCrop | null;
+  crop?: AvatarCrop | null;
   className?: string;
   onLoadError?: () => void;
 }) {
@@ -5880,11 +5891,14 @@ function PartyOverlayBox({
   return (
     <div
       className={cn(
-        "isolate flex w-fit min-w-0 max-w-full transform-gpu items-start gap-2 rounded-xl border bg-clip-padding px-3 py-2 sm:max-w-[75%]",
+        // Inert theming hook for the aside box. `data-line-type` exposes the variant so a theme can tint
+        // thought and whisper differently without depending on the utility classes below.
+        "experience-side-line isolate flex w-fit min-w-0 max-w-full transform-gpu items-start gap-2 rounded-xl border bg-clip-padding px-3 py-2 sm:max-w-[75%]",
         (line.type === "side" || line.type === "extra") && "shadow-[0_16px_38px_rgba(0,0,0,0.45)]",
         style.border,
         style.bg,
       )}
+      data-line-type={line.type}
     >
       {avatar ? (
         <CroppedAvatar

@@ -955,7 +955,7 @@ export function LorebooksPanel() {
                 aria-expanded={isExpanded}
                 aria-label={localizeUi("ui.panels.agentspanel.value1FolderValue2DoubleTapOrPressF2To", { value1: isExpanded ?localizeUi("ui.panels.ttsconfigcard.collapse") :localizeUi("ui.panels.ttsconfigcard.expand"), value2: folder.name })}
                 title={localizeUi("ui.panels.backgroundpicker.doubleClickDoubleTapOrPressF2ToRename")}
-                className="group relative flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 transition-all hover:bg-[var(--sidebar-accent)]/40"
+                className="group relative flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 transition-all hover:bg-[var(--sidebar-accent)]/40 max-md:pr-12 [@media(pointer:coarse)]:pr-12"
                 onClick={(event) =>
                   handleFolderRenameGesture(folder.id, event, {
                     onSingleClick: () => setExpandedFolderId(isExpanded ? null : folder.id),
@@ -1005,11 +1005,25 @@ export function LorebooksPanel() {
                   )}
                 </div>
                 {(folderFilterActive ? folderItems.length : folder.itemIds.length) > 0 && (
-                  <span className="shrink-0 text-[0.5625rem] text-[var(--muted-foreground)]">
+                  <span
+                    data-folder-item-count="inline"
+                    className="shrink-0 text-[0.5625rem] text-[var(--muted-foreground)] max-md:hidden [@media(pointer:coarse)]:hidden"
+                  >
                     {folderFilterActive ? folderItems.length : folder.itemIds.length}
                   </span>
                 )}
-                <div className="absolute right-2 top-1/2 flex -translate-y-1/2 shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100">
+                <div
+                  data-folder-actions
+                  className="pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 [@media(pointer:fine)]:group-focus-within:opacity-100 max-md:opacity-100 [@media(pointer:coarse)]:opacity-100 group-hover:[&_button]:pointer-events-auto [@media(pointer:fine)]:group-focus-within:[&_button]:pointer-events-auto max-md:[&_button]:pointer-events-auto [@media(pointer:coarse)]:[&_button]:pointer-events-auto"
+                >
+                  {(folderFilterActive ? folderItems.length : folder.itemIds.length) > 0 && (
+                    <span
+                      data-folder-item-count="actions"
+                      className="hidden px-1 text-[0.5625rem] text-[var(--muted-foreground)] max-md:inline [@media(pointer:coarse)]:inline"
+                    >
+                      {folderFilterActive ? folderItems.length : folder.itemIds.length}
+                    </span>
+                  )}
                   <button
                     onClick={(event) => {
                       event.stopPropagation();
@@ -1238,7 +1252,12 @@ function LorebookRow({
           </span>
         </button>
       )}
-      <div className={cn("min-w-0 flex-1", !selectionMode && "pr-24")}>
+      <div
+        className={cn(
+          "min-w-0 flex-1",
+          !selectionMode && "pr-0 max-md:pr-24 [@media(pointer:coarse)]:pr-24",
+        )}
+      >
         <div className="flex items-center gap-1.5">
           <span className="truncate text-sm font-medium">{lorebook.name}</span>
           {!lorebook.enabled && (
@@ -1258,7 +1277,7 @@ function LorebookRow({
         </div>
       </div>
       {!selectionMode && (
-        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100">
+        <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 [@media(pointer:fine)]:group-focus-within:opacity-100 max-md:opacity-100 [@media(pointer:coarse)]:opacity-100 group-hover:[&_button]:pointer-events-auto [@media(pointer:fine)]:group-focus-within:[&_button]:pointer-events-auto max-md:[&_button]:pointer-events-auto [@media(pointer:coarse)]:[&_button]:pointer-events-auto">
           <ChatResourceActionButton
             payload={{ version: 1, kind: "lorebook", ids: [lorebook.id], label: lorebook.name }}
           />

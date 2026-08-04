@@ -12,6 +12,7 @@ import {
   updatePersonaGroupSchema,
   PROFESSOR_MARI_ID,
   CONVERSATION_CALL_CHARACTER_VIDEO_CLIP_KINDS,
+  findImageStyleProfile,
 } from "@marinara-engine/shared";
 import type { CharacterData, ConversationCallCharacterVideoClipKind, ExportEnvelope } from "@marinara-engine/shared";
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
@@ -380,15 +381,14 @@ const avatarGenerationPromptId = (name: string) =>
       .slice(0, 120) || "character"
   }`;
 
-function buildAvatarGenerationPrompt(body: AvatarGenerationBody): string {
+const AVATAR_GENERATION_HARD_NEGATIVE_PROMPT =
+  "text, captions, logos, watermarks, borders, UI, collage layouts, duplicate faces, extra people, cropped-off heads";
+
+function buildAvatarGenerationPrompt(body: AvatarGenerationBody, profileSubjectTags: string): string {
   const name = body.name?.trim() || "Character";
   const appearance = body.appearance?.trim() || name;
-  return [
-    `Create a polished character avatar portrait for ${name}.`,
-    `Canonical appearance: ${appearance}.`,
-    `Composition: centered face-and-shoulders portrait, readable expression, clear silhouette, suitable as a chat avatar.`,
-    `Avoid text, captions, logos, watermarks, borders, UI, collage layouts, duplicate faces, extra people, and cropped-off heads.`,
-  ].join(" ");
+  if (profileSubjectTags.trim()) return `Canonical appearance for ${name}: ${appearance}.`;
+  return `Create a polished character avatar portrait for ${name}. Canonical appearance: ${appearance}. Composition: centered face-and-shoulders portrait, readable expression, clear silhouette, suitable as a chat avatar.`;
 }
 
 async function resolveAvatarGenerationConnection(app: FastifyInstance, body: AvatarGenerationBody) {
@@ -502,16 +502,18 @@ async function readGalleryForCharacter(
   const images = await galleryStorage.listByCharacterId(characterId);
   const result: Array<Record<string, unknown>> = [];
   for (const img of images) {
-    // img.filePath is stored relative to data/gallery/, e.g.
-    // "characters/<id>/<filename>". The original filename is the basename.
+    // img.filePath is stored relative to data/gallery/ — usually
+    // "characters/<id>/<filename>", but GENERATED images keep their canonical
+    // chat-scoped or "shared/<filename>" path. Resolve through the same helper
+    // the serving route uses so those rows export their bytes too instead of
+    // being silently dropped (which stranded card://self refs to them).
     const relPath: string = typeof img.filePath === "string" ? img.filePath : "";
-    const filename = relPath.split("/").pop() ?? "";
-    if (!filename) continue;
-    const galleryDir = join(DATA_DIR, "gallery", "characters", characterId);
-    const dataUrl = await readImageAsDataUrl(galleryDir, filename);
+    const storedFile = relPath ? resolveStoredGalleryFile(relPath) : null;
+    if (!storedFile) continue;
+    const dataUrl = await readImageAsDataUrl(storedFile.directory, storedFile.filename);
     if (!dataUrl) continue;
     result.push({
-      filename,
+      filename: storedFile.filename,
       data: dataUrl,
       prompt: img.prompt ?? "",
       provider: img.provider ?? "",
@@ -672,12 +674,18 @@ export async function charactersRoutes(app: FastifyInstance) {
     const width = body.width ?? imageSettings.portrait.width;
     const height = body.height ?? imageSettings.portrait.height;
     const imageDefaults = resolveConnectionImageDefaults(resolved.conn);
+    const profileSubjectTags =
+      findImageStyleProfile(
+        imageSettings.styleProfiles,
+        body.styleProfileId || imageDefaults?.styleProfileId || imageSettings.styleProfiles.defaultProfileId,
+      ).subjectTags.avatar ?? "";
     const compiled = compileImagePrompt({
       kind: "avatar",
-      prompt: buildAvatarGenerationPrompt(body),
+      prompt: buildAvatarGenerationPrompt(body, profileSubjectTags),
       styleProfiles: imageSettings.styleProfiles,
       styleProfileId: body.styleProfileId,
       imageDefaults,
+      hardNegative: AVATAR_GENERATION_HARD_NEGATIVE_PROMPT,
     });
     const previewSize = resolveImagePromptReviewSize({
       connection: resolved.conn,
@@ -741,6 +749,11 @@ export async function charactersRoutes(app: FastifyInstance) {
     const imgSource = conn.imageGenerationSource || imgModel;
     const imgServiceHint = conn.imageService || imgSource;
     const imageDefaults = resolveConnectionImageDefaults(conn);
+    const profileSubjectTags =
+      findImageStyleProfile(
+        imageSettings.styleProfiles,
+        body.styleProfileId || imageDefaults?.styleProfileId || imageSettings.styleProfiles.defaultProfileId,
+      ).subjectTags.avatar ?? "";
     const imageFallback = await resolveImageConnectionFallback(connections, conn.id);
     const compiled = promptOverride
       ? {
@@ -749,10 +762,11 @@ export async function charactersRoutes(app: FastifyInstance) {
         }
       : compileImagePrompt({
           kind: "avatar",
-          prompt: buildAvatarGenerationPrompt(body),
+          prompt: buildAvatarGenerationPrompt(body, profileSubjectTags),
           styleProfiles: imageSettings.styleProfiles,
           styleProfileId: body.styleProfileId,
           imageDefaults,
+          hardNegative: AVATAR_GENERATION_HARD_NEGATIVE_PROMPT,
         });
 
     try {

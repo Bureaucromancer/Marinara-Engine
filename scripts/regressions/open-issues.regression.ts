@@ -8,7 +8,8 @@ import type { Chat, ChatMode, Message } from "../../packages/shared/src/types/ch
 import { chatModeSchema } from "../../packages/shared/src/schemas/chat.schema.js";
 import playwrightConfig from "../../playwright.config.js";
 import { resolveDevSharedBuildScript } from "../dev-shared-build.mjs";
-import { characterCardVersions, characters, chats, messages } from "../../packages/server/src/db/schema/index.js";
+import { validatePullRequestTriage } from "../validate-pr-triage.mjs";
+import { characterCardVersions, characterGroups, characters, chatPresets, chats, messages } from "../../packages/server/src/db/schema/index.js";
 import { eq } from "../../packages/server/src/db/file-query.js";
 import { parseBuildMeta, resolveBuildBranch } from "../../packages/server/src/config/build-info.js";
 
@@ -55,6 +56,7 @@ import {
   resolveTrackerPanelDesktopWidth,
 } from "../../packages/client/src/lib/tracker-panel-layout.js";
 import { getApiErrorMessage } from "../../packages/client/src/lib/api-client.js";
+import { scrollProfessorMariTranscriptToBottom } from "../../packages/client/src/lib/professor-mari-transcript-scroll.js";
 import { parseCustomParametersDraft } from "../../packages/client/src/lib/generation-custom-parameters.js";
 import { parseGenerationParameterDraft } from "../../packages/client/src/lib/generation-parameter-draft.js";
 import {
@@ -91,7 +93,10 @@ import {
 import { isGitUpdateApplyAllowed } from "../../packages/server/src/services/updates/update-apply-policy.js";
 import { parseNoodleAvatarCrop } from "../../packages/server/src/services/storage/noodle.storage.js";
 import { sanitizeExampleDialoguePromptLeaf } from "../../packages/server/src/services/prompt/prompt-escaping.js";
-import { parseCharacterCommands } from "../../packages/server/src/services/conversation/character-commands.js";
+import {
+  parseCharacterCommands,
+  parseCharacterCommandsBySpeaker,
+} from "../../packages/server/src/services/conversation/character-commands.js";
 import {
   collapseDuplicateConversationSpeakerPrefixes,
   isRepeatedConversationResponse,
@@ -186,7 +191,13 @@ import { createCustomToolsStorage } from "../../packages/server/src/services/sto
 import { createCharactersStorage } from "../../packages/server/src/services/storage/characters.storage.js";
 import { createLorebooksStorage } from "../../packages/server/src/services/storage/lorebooks.storage.js";
 import { createNoodleStorage } from "../../packages/server/src/services/storage/noodle.storage.js";
-import { buildReferencedCharacterContext } from "../../packages/server/src/services/prompt/macro-context.js";
+import { createChatPresetsStorage } from "../../packages/server/src/services/storage/chat-presets.storage.js";
+import { buildGoogleModelsPageUrl } from "../../packages/server/src/routes/connections.routes.js";
+import {
+  buildReferencedCharacterContext,
+  MAX_REFERENCED_CHARACTERS,
+} from "../../packages/server/src/services/prompt/macro-context.js";
+import { assemblePrompt } from "../../packages/server/src/services/prompt/assembler.js";
 import { resolveRunPodComfyUiTimeoutSeconds } from "../../packages/server/src/services/image/runpod-comfyui.service.js";
 import {
   findMissingComfyReferenceSlots,
@@ -197,6 +208,7 @@ import {
   buildInitialAgentAddSetupState,
 } from "../../packages/client/src/components/chat/AgentAddSetupFields.js";
 import { resolveSpriteTransition } from "../../packages/client/src/lib/sprite-transition.js";
+import { resolveSpriteExpressionState } from "../../packages/client/src/lib/sprite-expression-state.js";
 import {
   parseIllustratorPromptReviewOverride,
   resolveIllustratorPromptSubmission,
@@ -307,6 +319,36 @@ assert.equal(shouldSuppressAutonomousMessages("dnd"), true);
 assert.equal(resolveSpriteTransition("full-body", "none"), "crossfade");
 assert.equal(resolveSpriteTransition("full-body", "shake"), "shake");
 assert.equal(resolveSpriteTransition("expressions", "none"), "none");
+assert.deepEqual(
+  resolveSpriteExpressionState([
+    { extra: { spriteExpressions: { "character-a": "happy" } } },
+    { extra: {} },
+  ]),
+  { "character-a": "happy" },
+);
+assert.deepEqual(
+  resolveSpriteExpressionState(
+    [
+      { extra: { spriteExpressions: { "character-a": "happy" } } },
+      { extra: { spriteExpressions: { persona: "excited" } } },
+      { extra: JSON.stringify({ spriteExpressions: { "character-c": "angry" } }) },
+    ],
+    { "character-b": "thinking" },
+  ),
+  {
+    "character-a": "happy",
+    "character-b": "thinking",
+    "character-c": "angry",
+    persona: "excited",
+  },
+);
+assert.deepEqual(
+  resolveSpriteExpressionState([
+    { extra: { spriteExpressions: { "character-a": "happy" } } },
+    { extra: { spriteExpressions: { "character-a": "neutral" } } },
+  ]),
+  { "character-a": "neutral" },
+);
 assert.deepEqual(findMissingComfyReferenceSlots(comfyReferenceWorkflow, "reference_image", 1), [1]);
 assert.deepEqual(findMissingComfyReferenceSlots(comfyReferenceWorkflow, "reference_image_name", 1), [2]);
 assert.equal(numberedComfyReferencePlaceholder("reference_image_name", 2), "%reference_image_name_03%");
@@ -650,6 +692,69 @@ try {
   const characterStorage = createCharactersStorage(db);
   const lorebookStorage = createLorebooksStorage(db);
   const noodleStorage = createNoodleStorage(db);
+  const chatPresetStorage = createChatPresetsStorage(db);
+  await chatPresetStorage.ensureDefaults();
+  const originalConversationDefault = await chatPresetStorage.getDefault("conversation");
+  assert.ok(originalConversationDefault, "Conversation mode must start with a Default settings profile");
+  await db
+    .update(chatPresets)
+    .set({ name: "Broken Default", settings: JSON.stringify({ connectionId: "must-be-reset" }) })
+    .where(eq(chatPresets.id, originalConversationDefault.id));
+  await db.insert(chatPresets).values({
+    id: "duplicate-conversation-default",
+    name: "Default Copy",
+    mode: "conversation",
+    isDefault: "true",
+    isActive: "true",
+    settings: JSON.stringify({ connectionId: "must-be-reset" }),
+    createdAt: "9999-12-31T23:59:59.000Z",
+    updatedAt: "9999-12-31T23:59:59.000Z",
+  });
+  const duplicateDefaultChatId = "duplicate-default-profile-reference";
+  await db.insert(chats).values({
+    id: duplicateDefaultChatId,
+    name: "Duplicate Default profile reference",
+    mode: "conversation",
+    characterIds: "[]",
+    metadata: JSON.stringify({ appliedChatPresetId: "duplicate-conversation-default", preserved: true }),
+    sortOrder: 0,
+    createdAt: "2026-08-02T06:00:00.000Z",
+    updatedAt: "2026-08-02T06:00:00.000Z",
+  });
+  await chatPresetStorage.ensureDefaults();
+  const normalizedConversationProfiles = await chatPresetStorage.listByMode("conversation");
+  assert.equal(
+    normalizedConversationProfiles.filter((profile) => profile.isDefault).length,
+    1,
+    "Default settings profile repair must remove duplicate built-ins",
+  );
+  assert.equal(
+    normalizedConversationProfiles.filter((profile) => profile.isActive).length,
+    1,
+    "Default settings profile repair must leave exactly one active profile",
+  );
+  assert.deepEqual(await chatPresetStorage.getDefault("conversation"), {
+    ...originalConversationDefault,
+    name: "Default",
+    isActive: true,
+    settings: {},
+  });
+  const reboundDefaultChat = (await db.select().from(chats).where(eq(chats.id, duplicateDefaultChatId)))[0];
+  assert.ok(reboundDefaultChat);
+  assert.deepEqual(JSON.parse(reboundDefaultChat.metadata), {
+    appliedChatPresetId: originalConversationDefault.id,
+    preserved: true,
+  });
+  assert.ok(
+    await chatPresetStorage.getById(JSON.parse(reboundDefaultChat.metadata).appliedChatPresetId),
+    "Rebound chat profile references must remain resolvable after duplicate cleanup",
+  );
+  await chatPresetStorage.ensureDefaults();
+  assert.equal(
+    (await chatPresetStorage.listByMode("conversation")).filter((profile) => profile.isDefault).length,
+    1,
+    "Default settings profile repair must be idempotent",
+  );
   const storageTrimFixture = await characterStorage.create({
     ...characterDataSchema.parse({ name: "Storage trim fixture" }),
     name: "  Storage trim fixture  ",
@@ -692,7 +797,7 @@ try {
       name: "Susie",
       description: "A trusted friend from the western district.",
       first_mes: "REFERENCED_GREETING_MUST_STAY_OUT",
-      mes_example: "REFERENCED_EXAMPLE_MUST_STAY_OUT",
+      mes_example: "REFERENCED_EXAMPLE_SHOULD_APPEAR",
       extensions: {
         appearance: "Blonde hair and a blue summer dress.",
       },
@@ -749,7 +854,191 @@ try {
   assert.match(referencedContext.content, /Blonde hair and a blue summer dress\./u);
   assert.match(referencedContext.content, /REFERENCED_LOREBOOK_MEMORY/u);
   assert.doesNotMatch(referencedContext.content, /REFERENCED_GREETING_MUST_STAY_OUT/u);
-  assert.doesNotMatch(referencedContext.content, /REFERENCED_EXAMPLE_MUST_STAY_OUT/u);
+  assert.match(referencedContext.content, /REFERENCED_EXAMPLE_SHOULD_APPEAR/u);
+
+  const macroLorebook = await lorebookStorage.create(
+    createLorebookSchema.parse({
+      name: "Active character references",
+      category: "character",
+      characterIds: [storageTrimFixture.id],
+    }),
+  );
+  await lorebookStorage.createEntry(
+    createLorebookEntrySchema.parse({
+      lorebookId: macroLorebook.id,
+      name: "Cafe companion",
+      content: `The cafe companion is {{${referencedCharacter.id}}}.`,
+      keys: ["cafe"],
+    }),
+  );
+  const assembleCharacterReferenceFixture = (chatId: string, content: string, includePlacementMarker = false) =>
+    assemblePrompt({
+      db,
+      preset: {
+        id: "character-reference-preset",
+        name: "Character reference fixture",
+        sectionOrder: JSON.stringify([
+          "lorebook",
+          ...(includePlacementMarker ? ["id-macro-cards"] : []),
+          "history",
+          ...(includePlacementMarker ? ["duplicate-id-macro-cards"] : []),
+        ]),
+        groupOrder: JSON.stringify([]),
+        wrapFormat: "xml",
+        parameters: JSON.stringify({}),
+        variableGroups: JSON.stringify([]),
+        variableValues: JSON.stringify({}),
+      },
+      sections: [
+        {
+          id: "lorebook",
+          presetId: "character-reference-preset",
+          identifier: "lorebook",
+          name: "Lorebook",
+          content: "",
+          role: "system",
+          enabled: "true",
+          isMarker: "true",
+          groupId: null,
+          markerConfig: JSON.stringify({ type: "lorebook" }),
+          injectionPosition: "relative",
+          injectionDepth: 0,
+          injectionOrder: 0,
+          forbidOverrides: "false",
+        },
+        ...(includePlacementMarker
+          ? [
+              {
+                id: "id-macro-cards",
+                presetId: "character-reference-preset",
+                identifier: "id_macro_cards",
+                name: "ID Macro Cards",
+                content: "",
+                role: "system",
+                enabled: "true",
+                isMarker: "true",
+                groupId: null,
+                markerConfig: JSON.stringify({ type: "id_macro_cards" }),
+                injectionPosition: "ordered",
+                injectionDepth: 0,
+                injectionOrder: 1,
+                forbidOverrides: "false",
+              },
+            ]
+          : []),
+        {
+          id: "history",
+          presetId: "character-reference-preset",
+          identifier: "chatHistory",
+          name: "Chat History",
+          content: "",
+          role: "system",
+          enabled: "true",
+          isMarker: "true",
+          groupId: null,
+          markerConfig: JSON.stringify({ type: "chat_history" }),
+          injectionPosition: "relative",
+          injectionDepth: 0,
+          injectionOrder: 1,
+          forbidOverrides: "false",
+        },
+        ...(includePlacementMarker
+          ? [
+              {
+                id: "duplicate-id-macro-cards",
+                presetId: "character-reference-preset",
+                identifier: "id_macro_cards",
+                name: "Duplicate ID Macro Cards",
+                content: "",
+                role: "system",
+                enabled: "true",
+                isMarker: "true",
+                groupId: null,
+                markerConfig: JSON.stringify({ type: "id_macro_cards" }),
+                injectionPosition: "ordered",
+                injectionDepth: 0,
+                injectionOrder: 2,
+                forbidOverrides: "false",
+              },
+            ]
+          : []),
+      ],
+      groups: [],
+      choiceBlocks: [],
+      chatChoices: {},
+      chatId,
+      characterIds: [storageTrimFixture.id],
+      personaName: "Mari",
+      personaDescription: "",
+      chatMessages: [{ role: "user", content }],
+    });
+  const assembledReference = await assembleCharacterReferenceFixture(
+    "character-reference-regression",
+    "I went to the cafe.",
+  );
+  const assembledReferenceText = assembledReference.messages.map((message) => message.content).join("\n");
+  assert.match(assembledReferenceText, /The cafe companion is Susie\./u);
+  assert.match(assembledReferenceText, /A trusted friend from the western district\./u);
+  assert.match(assembledReferenceText, /REFERENCED_EXAMPLE_SHOULD_APPEAR/u);
+  assert.doesNotMatch(assembledReferenceText, /REFERENCED_GREETING_MUST_STAY_OUT/u);
+  assert.ok(
+    assembledReferenceText.indexOf("<referenced_characters>") <
+      assembledReferenceText.indexOf("The cafe companion is Susie."),
+    "Presets without the placement marker must keep ID macro cards in the legacy leading position",
+  );
+
+  const placedReference = await assembleCharacterReferenceFixture(
+    "character-reference-marker-regression",
+    "I went to the cafe.",
+    true,
+  );
+  const placedReferenceText = placedReference.messages.map((message) => message.content).join("\n");
+  assert.ok(
+    placedReferenceText.indexOf("The cafe companion is Susie.") <
+      placedReferenceText.indexOf("<referenced_characters>"),
+    "The ID Macro Cards marker must own placement after lorebook-discovered references are resolved",
+  );
+  assert.equal(
+    placedReferenceText.match(/<referenced_characters>/gu)?.length,
+    1,
+    "Only the first explicit marker may own placement, without a duplicate legacy fallback block",
+  );
+
+  const cappedDirectReferences = [];
+  for (let index = 0; index < MAX_REFERENCED_CHARACTERS; index += 1) {
+    cappedDirectReferences.push(
+      await characterStorage.create(
+        characterDataSchema.parse({
+          name: `Reference cap ${index + 1}`,
+          description: `DIRECT_REFERENCE_${index + 1}_MUST_APPEAR`,
+        }),
+      ),
+    );
+  }
+  const overflowReference = await characterStorage.create(
+    characterDataSchema.parse({
+      name: "Overflow reference must stay out",
+      description: "OVERFLOW_REFERENCE_CONTEXT_MUST_STAY_OUT",
+    }),
+  );
+  await lorebookStorage.createEntry(
+    createLorebookEntrySchema.parse({
+      lorebookId: macroLorebook.id,
+      name: "Reference cap overflow",
+      content: `The overflow reference is {{${overflowReference.id}}}.`,
+      keys: ["reference-cap"],
+    }),
+  );
+  const cappedReferencePrompt = await assembleCharacterReferenceFixture(
+    "character-reference-cap-regression",
+    `${cappedDirectReferences.map((character) => `{{${character.id}}}`).join(" ")} reference-cap`,
+  );
+  const cappedReferenceText = cappedReferencePrompt.messages.map((message) => message.content).join("\n");
+  for (let index = 0; index < MAX_REFERENCED_CHARACTERS; index += 1) {
+    assert.match(cappedReferenceText, new RegExp(`DIRECT_REFERENCE_${index + 1}_MUST_APPEAR`, "u"));
+  }
+  assert.doesNotMatch(cappedReferenceText, /OVERFLOW_REFERENCE_CONTEXT_MUST_STAY_OUT/u);
+  assert.doesNotMatch(cappedReferenceText, /Overflow reference must stay out/u);
 
   await lorebookStorage.update(hiddenCharacterLorebook.id, { hiddenFromLibrary: false });
   assert.equal(
@@ -1220,6 +1509,141 @@ try {
     "character.update must preserve every omitted Character Card field through the real merge and persistence path",
   );
 
+  const characterFolderTimestamp = "2026-08-04T12:00:00.000Z";
+  await db.insert(characterGroups).values({
+    id: "character-folder-source",
+    name: "Source Folder",
+    description: "",
+    characterIds: JSON.stringify([characterId]),
+    createdAt: characterFolderTimestamp,
+    updatedAt: characterFolderTimestamp,
+  });
+  await db.insert(characterGroups).values({
+    id: "character-folder-target",
+    name: "Target Folder",
+    description: "",
+    characterIds: "[]",
+    createdAt: characterFolderTimestamp,
+    updatedAt: characterFolderTimestamp,
+  });
+
+  const folderListResult = await mariDb.executeAction({ action: "character.folder.list" });
+  assert.equal(folderListResult.ok, true, "Professor Mari must be able to list character folders");
+  assert.deepEqual(
+    (folderListResult.output as Array<{ id: string }>).map((folder) => folder.id),
+    ["character-folder-source", "character-folder-target"],
+  );
+
+  const folderMoveResult = await mariDb.executeAction({
+    action: "character.moveToFolder",
+    characterId,
+    folderName: "Target Folder",
+    reason: "Regression coverage for issue #4568",
+    apply: true,
+  });
+  assert.equal(folderMoveResult.ok, true, "Professor Mari must be able to move a character into a named folder");
+
+  const foldersAfterMove = await db.select().from(characterGroups);
+  const sourceFolder = foldersAfterMove.find((folder) => folder.id === "character-folder-source");
+  const targetFolder = foldersAfterMove.find((folder) => folder.id === "character-folder-target");
+  assert.deepEqual(JSON.parse(sourceFolder?.characterIds ?? "[]"), []);
+  assert.deepEqual(JSON.parse(targetFolder?.characterIds ?? "[]"), [characterId]);
+
+  const unchangedFolderTimestamp = "2026-08-04T12:30:00.000Z";
+  const unchangedMembership = ["neighbor-before", characterId, "neighbor-after"];
+  await db
+    .update(characterGroups)
+    .set({ characterIds: JSON.stringify(unchangedMembership), updatedAt: unchangedFolderTimestamp })
+    .where(eq(characterGroups.id, "character-folder-target"));
+  const noOpFolderMoveResult = await mariDb.executeAction({
+    action: "character.moveToFolder",
+    characterId,
+    folderId: "character-folder-target",
+    apply: true,
+  });
+  assert.equal(noOpFolderMoveResult.ok, true);
+  const unchangedFolder = (await db.select().from(characterGroups)).find(
+    (folder) => folder.id === "character-folder-target",
+  );
+  assert.deepEqual(JSON.parse(unchangedFolder?.characterIds ?? "[]"), unchangedMembership);
+  assert.equal(unchangedFolder?.updatedAt, unchangedFolderTimestamp);
+
+  for (const id of ["character-folder-duplicate-a", "character-folder-duplicate-b"]) {
+    await db.insert(characterGroups).values({
+      id,
+      name: "Duplicate Folder",
+      description: "",
+      characterIds: "[]",
+      createdAt: characterFolderTimestamp,
+      updatedAt: characterFolderTimestamp,
+    });
+  }
+  const ambiguousFolderMoveResult = await mariDb.executeAction({
+    action: "character.moveToFolder",
+    characterId,
+    folderName: "Duplicate Folder",
+    apply: true,
+  });
+  assert.equal(ambiguousFolderMoveResult.ok, false, "Duplicate folder names must require an explicit folder ID");
+  const duplicateFoldersAfterAmbiguousMove = (await db.select().from(characterGroups)).filter((folder) =>
+    folder.id.startsWith("character-folder-duplicate-"),
+  );
+  assert.deepEqual(
+    duplicateFoldersAfterAmbiguousMove.map((folder) => JSON.parse(folder.characterIds)),
+    [[], []],
+  );
+
+  const duplicateFolderIdMoveResult = await mariDb.executeAction({
+    action: "character.moveToFolder",
+    characterId,
+    folderId: "character-folder-duplicate-a",
+    apply: true,
+  });
+  assert.equal(duplicateFolderIdMoveResult.ok, true, "An explicit folder ID must disambiguate duplicate names");
+  const duplicateFoldersAfterIdMove = (await db.select().from(characterGroups)).filter((folder) =>
+    folder.id.startsWith("character-folder-duplicate-"),
+  );
+  const selectedDuplicateFolder = duplicateFoldersAfterIdMove.find((folder) => folder.id.endsWith("-a"));
+  const unselectedDuplicateFolder = duplicateFoldersAfterIdMove.find((folder) => folder.id.endsWith("-b"));
+  assert.deepEqual(JSON.parse(selectedDuplicateFolder?.characterIds ?? "[]"), [characterId]);
+  assert.deepEqual(JSON.parse(unselectedDuplicateFolder?.characterIds ?? "[]"), []);
+
+  const concurrentCharacterId = "character-folder-concurrent-character";
+  const concurrentCharacterCreateResult = await mariDb.executeAction({
+    action: "character.create",
+    characterId: concurrentCharacterId,
+    data: { name: "Concurrent Folder Character" },
+    apply: true,
+  });
+  assert.equal(concurrentCharacterCreateResult.ok, true);
+  await db.insert(characterGroups).values({
+    id: "character-folder-concurrent-target",
+    name: "Concurrent Target",
+    description: "",
+    characterIds: "[]",
+    createdAt: characterFolderTimestamp,
+    updatedAt: characterFolderTimestamp,
+  });
+  const concurrentFolderMoves = await Promise.all(
+    [characterId, concurrentCharacterId].map((movingCharacterId) =>
+      mariDb.executeAction({
+        action: "character.moveToFolder",
+        characterId: movingCharacterId,
+        folderId: "character-folder-concurrent-target",
+        apply: true,
+      }),
+    ),
+  );
+  assert.ok(concurrentFolderMoves.every((result) => result.ok), "Concurrent folder moves must both succeed");
+  const concurrentTargetFolder = (await db.select().from(characterGroups)).find(
+    (folder) => folder.id === "character-folder-concurrent-target",
+  );
+  assert.deepEqual(
+    JSON.parse(concurrentTargetFolder?.characterIds ?? "[]").sort(),
+    [characterId, concurrentCharacterId].sort(),
+    "Serialized folder moves must preserve both memberships",
+  );
+
   for (const approval of mariDb.getPendingApprovals()) {
     await mariDb.keepAppliedReview(approval.id);
   }
@@ -1229,6 +1653,17 @@ try {
   else process.env.FILE_STORAGE_DIR = previousFileStorageDir;
   rmSync(characterUpdateStorageRoot, { recursive: true, force: true });
 }
+
+const googleModelsPageUrl = buildGoogleModelsPageUrl(
+  "https://gemini-proxy.example.test/v1beta",
+  "/models",
+  "next page/token",
+);
+assert.equal(
+  googleModelsPageUrl,
+  "https://gemini-proxy.example.test/v1beta/models?pageSize=1000&pageToken=next%20page%2Ftoken",
+);
+assert.equal(new URL(googleModelsPageUrl).searchParams.has("key"), false, "Gemini API keys must stay out of model URLs");
 
 const professorMariAboutMeCommands = parseCharacterCommands(
   '[update_character: name="Luna", about_me="fate dealer. tea hoarder. 🔮"]\n' +
@@ -1505,26 +1940,7 @@ assert.deepEqual(
   ZAI_IMAGE_MODELS.map((model) => model.id),
   ["glm-image", "cogview-4-250304"],
 );
-const pullRequestTriageWorkflow = readFileSync(
-  new URL("../../.github/workflows/pull-request-triage.yml", import.meta.url),
-  "utf8",
-);
-assert.match(pullRequestTriageWorkflow, /pull_request_review:\s+types: \[submitted, dismissed\]/u);
-assert.match(pullRequestTriageWorkflow, /github\.event\.review\.user\.login == 'SpicyMarinara'/u);
-assert.match(pullRequestTriageWorkflow, /github\.event\.review\.state == 'commented'/u);
-assert.match(pullRequestTriageWorkflow, /'Ignore unrelated triage event'/u);
-assert.match(pullRequestTriageWorkflow, /APPROVAL_EVENT_RELEVANT/u);
-assert.match(pullRequestTriageWorkflow, /if: env\.APPROVAL_EVENT_RELEVANT != 'true'/u);
-assert.match(
-  pullRequestTriageWorkflow,
-  /name: "\$\{\{ github\.event\.pull_request\.base\.ref == 'staging'.*'Ignore unrelated triage event' \}\}"/u,
-);
-assert.match(
-  pullRequestTriageWorkflow,
-  /github\.event\.action != 'edited' \|\| contains\(toJSON\(github\.event\.changes\), '\\?"base\\?"'\)/u,
-);
-assert.doesNotMatch(pullRequestTriageWorkflow, /github\.event\.changes\.base != null/u);
-assert.doesNotMatch(pullRequestTriageWorkflow, /github\.event\.changes\.base\.ref\.from != ''/u);
+validatePullRequestTriage();
 assert.equal(
   buildAtlasCloudUrl("https://api.atlascloud.ai/v1/", "generateImage"),
   "https://api.atlascloud.ai/api/v1/model/generateImage",
@@ -1945,6 +2361,28 @@ const professorMariHomeSource = readFileSync(
 assert.match(professorMariHomeSource, /chatHistorySelectionMode/u);
 assert.match(professorMariHomeSource, /toggleProfessorChatSelection/u);
 assert.match(professorMariHomeSource, /handleBulkDeleteProfessorChats/u);
+const professorMariTranscript = { scrollHeight: 720, scrollTop: 0 };
+scrollProfessorMariTranscriptToBottom(professorMariTranscript);
+assert.equal(
+  professorMariTranscript.scrollTop,
+  professorMariTranscript.scrollHeight,
+  "Professor Mari transcript scrolling must align a mounted pane with its newest message",
+);
+assert.match(
+  professorMariHomeSource,
+  /ref=\{setTranscriptScrollNode\}[\s\S]{0,100}data-component="HomeProfessorMariChat\.Transcript"/u,
+  "Professor Mari transcript panes must trigger scrolling from their mounted ref",
+);
+assert.match(
+  professorMariHomeSource,
+  /messageLoadAbortRef\.current !== controller[\s\S]{0,80}activeChatIdRef\.current !== id/u,
+  "Professor Mari message loads must discard stale requests and inactive chat results",
+);
+assert.match(
+  professorMariHomeSource,
+  /message\.role === "user"[\s\S]{0,180}<TranscriptRow[\s\S]{0,100}border-y border-\[var\(--border\)\]\/60/u,
+  "Professor Mari user messages must retain their theme-aware horizontal separators",
+);
 assert.match(
   professorMariHomeSource,
   /Promise\.allSettled\([\s\S]*?api\.delete\(`\/chats\/internal\/professor-mari\/chats\/\$\{id\}`\)/u,
@@ -1953,6 +2391,64 @@ assert.match(
 const roleplaySurfaceSource = readFileSync(
   new URL("../../packages/client/src/components/chat/ChatRoleplaySurface.tsx", import.meta.url),
   "utf8",
+);
+const chatMessageSource = readFileSync(
+  new URL("../../packages/client/src/components/chat/ChatMessage.tsx", import.meta.url),
+  "utf8",
+);
+const narratorUiStoreSource = readFileSync(
+  new URL("../../packages/client/src/stores/ui.store.ts", import.meta.url),
+  "utf8",
+);
+assert.match(
+  roleplaySurfaceSource,
+  /const inactiveIds = new Set\(readStringArray\(chatMeta\.inactiveCharacterIds\)\);[\s\S]{0,180}return activeIds\.length > 0 \? activeIds : chatCharIds;/u,
+  "Merged Narrator avatars must exclude inactive Roleplay characters",
+);
+assert.equal(
+  roleplaySurfaceSource.match(/mergedGroupCharacterIds=\{activeChatCharacterIds\}/gu)?.length,
+  3,
+  "Historical, regenerating, and streaming Narrator messages must share the active avatar list",
+);
+assert.match(
+  chatMessageSource,
+  /const cycleMergedNarratorAvatars = !isRoleplay \|\| roleplayNarratorAvatarCycling;/u,
+  "Narrator avatar cycling must remain unchanged outside Roleplay and follow the Roleplay preference",
+);
+assert.match(
+  chatMessageSource,
+  /\[cycleMergedNarratorAvatars, isMergedGroup, mergedCycleKey, mergedAvatars\.length, mergedNameColors\.length\]/u,
+  "Narrator cycling must reset when active character IDs change without changing count",
+);
+assert.match(
+  chatMessageSource,
+  /const applyMergedCycleIndex = \(index: number\) => \{[\s\S]{0,1200}applyMergedCycleIndex\(0\);/u,
+  "Narrator cycling must immediately apply its reset index to avatar and name opacity",
+);
+assert.match(
+  chatMessageSource,
+  /const mergedNameColors = useMemo\(\(\) => mergedAvatars\.map\(\(avatar\) => avatar\.nameColor\)/u,
+  "Merged Narrator avatar and name-color indexes must come from the same renderable character list",
+);
+assert.match(
+  chatMessageSource,
+  /mergedNameColors\.length === 0 \? \([\s\S]{0,180}<NameColorText color=\{msgNameColor\}>\{localizeUi\("ui\.chat\.chatmessage\.narrator"\)\}/u,
+  "Merged messages must retain a Narrator label when no active character avatar resolves",
+);
+assert.match(
+  chatMessageSource,
+  /useCompactRectangleAvatar \|\| !cycleMergedNarratorAvatars[\s\S]{0,180}rectangleSafeCropStyle/u,
+  "Static compact Narrator avatars must not receive positioned crop dimensions that break their flex layout",
+);
+assert.match(
+  chatMessageSource,
+  /cycleMergedNarratorAvatars \? "absolute inset-0 w-full" : "relative w-0 min-w-0 flex-1"/u,
+  "Disabling Narrator cycling must place active avatars together",
+);
+assert.match(
+  narratorUiStoreSource,
+  /roleplayNarratorAvatarCycling:\s*true/u,
+  "Narrator avatar cycling must remain enabled by default",
 );
 const themesRouteSource = readFileSync(
   new URL("../../packages/server/src/routes/themes.routes.ts", import.meta.url),
@@ -2323,6 +2819,10 @@ const conversationSelfieRuntimeSource = readFileSync(
   new URL("../../packages/server/src/services/generation/conversation-selfie-command-runtime.ts", import.meta.url),
   "utf8",
 );
+const illustratorReferencesSource = readFileSync(
+  new URL("../../packages/server/src/services/image/illustrator-references.ts", import.meta.url),
+  "utf8",
+);
 assert.match(appSource, /--marinara-app-accent-static-gradient/u);
 assert.match(appSource, /swipeDirections=\{\["left", "right", "top"\]\}/u);
 assert.doesNotMatch(agentEditorSource, /fetch\(["']\/api\/game-assets\/pick-local-music-folder/u);
@@ -2518,6 +3018,21 @@ assert.match(
   /logDebugOverride\([\s\S]*\[debug\/commands\/selfie\] prompt-builder system/u,
 );
 assert.match(
+  conversationSelfieRuntimeSource,
+  /resolveIllustratorCharacterReferences\(\{[\s\S]{0,800}persona: null,[\s\S]{0,800}maxReferences: 6/u,
+  "Conversation group selfies must keep all depicted character references without attaching the photographer persona",
+);
+assert.match(
+  conversationSelfieRuntimeSource,
+  /selfieResolvedCharacterIds = Array\.from\([\s\S]{0,300}referenceResolution\.characterIds[\s\S]{0,4500}characterIds: selfieResolvedCharacterIds/u,
+  "Conversation group selfies must be saved to every depicted character gallery",
+);
+assert.match(
+  illustratorReferencesSource,
+  /characterIds: orderedSelectedSources\.map\(\(source\) => source\.id\)/u,
+  "Gallery character IDs must retain every depicted character beyond the provider reference-image cap",
+);
+assert.match(
   globalStyles,
   /\[data-marinara-accent-animation\] :where\(\.mari-editor-shell, select\) \{[\s\S]*--primary: var\(--marinara-app-accent-static\);[\s\S]*--marinara-chat-chrome-accent: var\(--marinara-app-accent-static\);[\s\S]*\}/u,
 );
@@ -2624,6 +3139,42 @@ assert.deepEqual(splitGroupedSegmentDisplayLines(inheritedGroupConversationSegme
   "so anyway",
   "i was thinking about that",
 ]);
+const newlineAfterSpeakerNameSegments = parseGroupedSpeakerSegments(
+  "Char1:\nso anyway\ni was thinking about that\nChar2:\r\nyeah?",
+  new Set(["char1", "char2"]),
+);
+assert.deepEqual(
+  newlineAfterSpeakerNameSegments?.map(({ speaker, lines }) => ({ speaker, lines })),
+  [
+    { speaker: "Char1", lines: ["so anyway\ni was thinking about that"] },
+    { speaker: "Char2", lines: ["yeah?"] },
+  ],
+  "Grouped Conversation parsing must tolerate a newline after a recognized speaker name",
+);
+assert.deepEqual(
+  parseCharacterCommandsBySpeaker(
+    "Char1:\nNothing to run.\nChar2:\r\n[selfie]",
+    [
+      { id: "char-1", name: "Char1" },
+      { id: "char-2", name: "Char2" },
+    ],
+    "char-1",
+  ).commandCharacterIds,
+  ["char-2"],
+  "Commands beneath a newline-delimited speaker label must retain the same character attribution as the UI bubble",
+);
+assert.deepEqual(
+  parseCharacterCommandsBySpeaker(
+    "[selfie]\nChar1:\nChar2:\nVisible reply.",
+    [
+      { id: "char-1", name: "Char1" },
+      { id: "char-2", name: "Char2" },
+    ],
+    "char-1",
+  ).commandCharacterIds,
+  ["char-2"],
+  "A leading command must skip an empty named segment and follow the first visible speaker section",
+);
 assert.deepEqual(
   splitGroupedSegmentDisplayLines({
     ...inheritedGroupConversationSegments![0]!,
@@ -2878,6 +3429,16 @@ assert.match(
   retryAgentsPromptReviewSource,
   /const resultAgent = resolvedAgents\.find[\s\S]{0,360}resultAgent \?\? \(result\.agentType === "illustrator" \? fallbackIllustratorAgent : undefined\)/u,
   "Image Prompt retries must retain custom agent settings without borrowing Illustrator configuration",
+);
+assert.match(
+  conversationGenerationSource,
+  /promptText:\s*\[\s*currentUserInputContent\(\) \?\? ""[\s\S]{0,500}includePersonaWhenMentionedInPrompt: false/u,
+  "Roleplay illustrations must resolve depicted characters from the latest user request without attaching an off-camera persona",
+);
+assert.match(
+  retryAgentsPromptReviewSource,
+  /promptText:\s*\[[\s\S]{0,180}recentMessages[\s\S]{0,500}includePersonaWhenMentionedInPrompt: false/u,
+  "Retried Roleplay illustrations must preserve latest-user character reference detection",
 );
 const uiStoreSource = readFileSync(new URL("../../packages/client/src/stores/ui.store.ts", import.meta.url), "utf8");
 const settingsSyncSource = readFileSync(
@@ -3771,13 +4332,152 @@ assert.match(
   "The summary UI must submit every selected entry to the combine endpoint",
 );
 assert.match(
+  summaryPopoverSource,
+  /role="tablist"[\s\S]{0,900}summaryPromptView === "summary"[\s\S]{0,900}summaryPromptView === "combine"/u,
+  "The Summary Prompt card must switch between Chat Summary and Combine prompt views",
+);
+assert.match(
+  summaryPopoverSource,
+  /currentChatSummaryPrompt[\s\S]{0,900}\{activeSummaryPrompt\}[\s\S]{0,1500}<textarea/u,
+  "The active Chat Summary prompt must remain visible above its template editor",
+);
+assert.doesNotMatch(
+  summaryPopoverSource,
+  /localizeUi\("ui\.chat\.summarypopover\.templates"\)/u,
+  "The Summary Prompt card must use one Edit path instead of a separate Templates button",
+);
+assert.match(
+  summaryPopoverSource,
+  /onClick=\{\(\) => void handleToggleVisiblePromptEditor\(\)\}[\s\S]{0,500}aria-expanded=\{visiblePromptEditorOpen\}/u,
+  "The Summary Prompt Edit/Done action must expose disclosure semantics for its editor",
+);
+assert.match(
+  summaryPopoverSource,
+  /visiblePromptEditorOpen[\s\S]{0,300}ui\.chat\.summarypopover\.done[\s\S]{0,100}ui\.noodle\.noodlepostcard\.edit/u,
+  "The Summary Prompt editor must replace Edit with a Done action while open",
+);
+assert.match(
+  summaryPopoverSource,
+  /setTemplateSelectOpen\(false\);\s*setTemplateEditorOpen\(false\);/u,
+  "Done must close the Chat Summary prompt editor",
+);
+assert.match(
+  summaryPopoverSource,
+  /if \(!visiblePromptEditorOpen\) \{\s*setTemplateSelectOpen\(false\);\s*handleEditVisiblePrompt\(\);/u,
+  "Opening the Summary Prompt editor must close its template selector",
+);
+assert.match(
+  summaryPopoverSource,
+  /const saved = await commitCombinePromptDraft\(\);\s*if \(saved\) setCombinePromptEditorOpen\(false\);/u,
+  "Done must save and close the Combine prompt editor",
+);
+assert.match(
+  summaryPopoverSource,
+  /if \(promptSettingsSaveLockedRef\.current\) \{\s*await promptSettingsSaveQueueRef\.current;[\s\S]{0,350}combinePromptDraftRef\.current/u,
+  "Combine prompt saves must wait for active settings writes and then retry the latest draft",
+);
+assert.match(
+  summaryPopoverSource,
+  /queryClient\.getQueryData<ChatSummaryPromptSettings/u,
+  "Queued Combine saves must use the latest prompt settings from the query cache",
+);
+assert.match(
+  summaryPopoverSource,
+  /const currentSettings = readCurrentPromptSettings\(\);\s*const promise = persistPromptTemplates\(currentSettings\.templates, currentSettings\.activeTemplateId, nextPrompt\);/u,
+  "Combine prompt persistence must apply the latest cached templates and active selection",
+);
+assert.doesNotMatch(
+  summaryPopoverSource,
+  /promptTemplatesRef|activePromptTemplateIdRef/u,
+  "Summary prompt saves must not replay mirrored template state from an earlier render",
+);
+assert.match(
+  summaryPopoverSource,
+  /if \(await commitCombinePromptDraft\(\)\) onClose\(\);/u,
+  "The Summary popover must close only after its Combine draft is safely persisted",
+);
+assert.equal(
+  summaryPopoverSource.match(/className="h-48 space-y-[12] overflow-y-auto pr-0\.5"/gu)?.length,
+  2,
+  "Chat Summary and Combine prompt views must reserve the same vertical space",
+);
+assert.match(
+  summaryPopoverSource,
+  /rows=\{5\}[\s\S]{0,500}className="h-28 w-full resize-none/u,
+  "The Combine prompt editor must stay compact enough to match the Chat Summary view",
+);
+const promptSettingsPersistSource = summaryPopoverSource.slice(
+  summaryPopoverSource.indexOf("const persistPromptTemplates"),
+  summaryPopoverSource.indexOf("const commitCombinePromptDraft"),
+);
+const promptSettingsLockIndex = promptSettingsPersistSource.indexOf("promptSettingsSaveLockedRef.current = true");
+const promptSettingsMutationIndex = promptSettingsPersistSource.indexOf("updateGlobalPromptSettings.mutateAsync");
+const promptSettingsUnlockIndex = promptSettingsPersistSource.indexOf("promptSettingsSaveLockedRef.current = false");
+assert.ok(
+  promptSettingsLockIndex >= 0 &&
+    promptSettingsLockIndex < promptSettingsMutationIndex &&
+    promptSettingsMutationIndex < promptSettingsUnlockIndex,
+  "Summary prompt writes must lock before mutation and unlock only afterward",
+);
+const summaryPromptControlsSource = summaryPopoverSource.slice(
+  summaryPopoverSource.indexOf('role="tablist"'),
+  summaryPopoverSource.indexOf('localizeUi("ui.chat.summarypopover.summaryConnection")'),
+);
+assert.equal(
+  summaryPromptControlsSource.match(/disabled=\{promptSettingsSaveLocked\}/gu)?.length,
+  9,
+  "Every prompt option, template row, and open template editor control must use the save lock",
+);
+assert.equal(
+  summaryPromptControlsSource.match(/disabled=\{!globalPromptSettingsReady \|\| promptSettingsSaveLocked\}/gu)?.length,
+  3,
+  "Every prompt-level action must use the save lock",
+);
+assert.match(
+  summaryPromptControlsSource,
+  /!hasTemplateDraft \|\|\s*promptSettingsSaveLocked \|\|\s*!globalPromptSettingsReady/u,
+  "The template Save action must use the save lock",
+);
+const summaryPromptSelectOptionSource = summaryPopoverSource.slice(
+  summaryPopoverSource.indexOf("interface SummaryPromptSelectOptionProps"),
+  summaryPopoverSource.indexOf("interface SummaryPromptTemplateRowProps"),
+);
+assert.equal(
+  summaryPromptSelectOptionSource.match(/disabled=\{disabled\}/gu)?.length,
+  1,
+  "Summary prompt select options must forward their disabled state",
+);
+const summaryPromptTemplateRowSource = summaryPopoverSource.slice(
+  summaryPopoverSource.indexOf("interface SummaryPromptTemplateRowProps"),
+);
+assert.equal(
+  summaryPromptTemplateRowSource.match(/disabled=\{disabled\}/gu)?.length,
+  4,
+  "Every template-row action must forward its disabled state",
+);
+assert.match(
+  summaryPopoverSource,
+  /className="flex items-center justify-center gap-1\.5"[\s\S]{0,900}handleBackfill/u,
+  "The Automatic Summaries backfill action must be centered",
+);
+assert.match(
   chatRoutesSource,
   /requestedSummaryEntryIds[\s\S]{0,6500}nextEntries\.splice\(Math\.max\(0, firstIndex\), 0, combinedEntry\)/u,
   "Combined summaries must replace their selected entries at the first selected chronological position",
 );
 assert.match(
   chatRoutesSource,
-  /combinedTokenEstimate[\s\S]{0,500}Selected summaries are too large to combine at once[\s\S]{0,3000}provider\.chatComplete/u,
+  /estimateChatSummaryTokens\(summaryPrompt\)[\s\S]{0,200}estimateChatSummaryTokens\(combinePrompt\)/u,
+  "The combine input budget must reserve the actual system and combine prompt sizes",
+);
+assert.match(
+  chatRoutesSource,
+  /combinedSummaryInputBudget[\s\S]{0,500}SUMMARY_COMBINE_MESSAGE_OVERHEAD_TOKENS/u,
+  "The combine input budget must reserve message overhead",
+);
+assert.match(
+  chatRoutesSource,
+  /estimateChatSummaryTokens\(sourceText\) > combinedSummaryInputBudget[\s\S]{0,500}Selected summaries are too large to combine at once[\s\S]{0,3000}provider\.chatComplete/u,
   "Combined summaries must be rejected before provider generation when they exceed the input budget",
 );
 const chatSidebarSource = readFileSync(
@@ -4485,6 +5185,241 @@ try {
     chatSettingsDrawerSource,
     /narrativeDirectorSecretPlotRunInterval:\s*normalizePositiveInteger\(\s*event\.target\.value/u,
     "Secret Plot run interval must not reject the browser's string input value",
+  );
+}
+
+// Issue #4449 — desktop sidebar hover actions overlay row content instead of
+// permanently reserving text width, while touch layouts keep room for visible
+// actions and Conversation Call duration rows size from their panel width.
+{
+  const sidebarPanelSources = new Map(
+    ["Characters", "Personas", "Lorebooks", "Agents", "Presets", "Connections"].map((panelName) => [
+      panelName,
+      readFileSync(
+        join(REPOSITORY_ROOT, `packages/client/src/components/panels/${panelName}Panel.tsx`),
+        "utf8",
+      ),
+    ]),
+  );
+
+  for (const [panelName, source] of sidebarPanelSources) {
+    assert.match(
+      source,
+      /max-md:pr-(?:14|16|20|24|32|36) \[@media\(pointer:coarse\)\]:pr-(?:14|16|20|24|32|36)/u,
+      `${panelName} rows must reserve action space only for touch layouts`,
+    );
+    assert.doesNotMatch(
+      source,
+      /\[@media\(pointer:fine\)\]:group-hover:pr-/u,
+      `${panelName} rows must not shrink their text area when desktop hover actions appear`,
+    );
+    assert.match(
+      source,
+      /pointer-events-none[^"\n]*group-hover(?:\/member)?:opacity-100[^"\n]*\[@media\(pointer:fine\)\]:group-focus-within(?:\/member)?:opacity-100[^"\n]*\[@media\(pointer:coarse\)\]:opacity-100[^"\n]*group-hover(?:\/member)?:\[&_button\]:pointer-events-auto[^"\n]*\[@media\(pointer:fine\)\]:group-focus-within(?:\/member)?:\[&_button\]:pointer-events-auto[^"\n]*max-md:\[&_button\]:pointer-events-auto[^"\n]*\[@media\(pointer:coarse\)\]:\[&_button\]:pointer-events-auto/u,
+      `${panelName} action overlays must activate button hit targets only when their actions are visible`,
+    );
+    const hiddenActionOverlayCount = source.match(/pointer-events-none[^"\n]*opacity-0/gu)?.length ?? 0;
+    const focusVisibleOverlayCount =
+      source.match(
+        /pointer-events-none[^"\n]*\[@media\(pointer:fine\)\]:group-focus-within(?:\/member)?:opacity-100/gu,
+      )?.length ?? 0;
+    const focusInteractiveOverlayCount =
+      source.match(
+        /pointer-events-none[^"\n]*\[@media\(pointer:fine\)\]:group-focus-within(?:\/member)?:\[&_button\]:pointer-events-auto/gu,
+      )?.length ?? 0;
+    assert.equal(
+      focusVisibleOverlayCount,
+      hiddenActionOverlayCount,
+      `${panelName} must reveal every fine-pointer action overlay while it contains keyboard focus`,
+    );
+    assert.equal(
+      focusInteractiveOverlayCount,
+      hiddenActionOverlayCount,
+      `${panelName} must keep every focused fine-pointer action overlay interactive`,
+    );
+  }
+
+  const personasPanelSource = sidebarPanelSources.get("Personas")!;
+  const charactersPanelSource = sidebarPanelSources.get("Characters")!;
+  const presetsPanelSource = sidebarPanelSources.get("Presets")!;
+  for (const panelName of ["Characters", "Personas", "Lorebooks", "Agents", "Presets"]) {
+    assert.match(
+      sidebarPanelSources.get(panelName)!,
+      /group relative flex cursor-pointer[^"\n]*max-md:pr-12 \[@media\(pointer:coarse\)\]:pr-12/u,
+      `${panelName} folder headers must reserve space for always-visible touch actions`,
+    );
+  }
+  assert.match(
+    charactersPanelSource,
+    /max-md:pr-20 \[@media\(pointer:coarse\)\]:pr-24/u,
+    "Character rows must match their coarse-pointer padding to the desktop-width action toolbar",
+  );
+  assert.match(
+    charactersPanelSource,
+    /group-hover\/member:opacity-100[^"\n]*max-md:static max-md:translate-y-0[^"\n]*\[@media\(pointer:coarse\)\]:static \[@media\(pointer:coarse\)\]:translate-y-0/u,
+    "Character folder-member actions must participate in touch layout instead of overflowing their row",
+  );
+  assert.match(
+    presetsPanelSource,
+    /max-md:pr-36 \[@media\(pointer:coarse\)\]:pr-36/u,
+    "Preset rows must reserve space for the complete selected-preset touch toolbar",
+  );
+  assert.match(
+    charactersPanelSource,
+    /data-character-row-name\s+className="w-fit max-w-full truncate/u,
+    "Character names must keep a content-sized click target beneath overlaid actions",
+  );
+  assert.match(
+    personasPanelSource,
+    /className="w-fit max-w-full truncate text-sm font-medium">\{persona\.name\}/u,
+    "Persona names must keep a content-sized click target beneath overlaid actions",
+  );
+  assert.match(
+    charactersPanelSource,
+    /data-touch-drag-card="character"[\s\S]*?onKeyDown=\{\(e\) => \{\s*if \(e\.target !== e\.currentTarget\) return;/u,
+    "Character folder rows must preserve descendant action-button keyboard events",
+  );
+  assert.match(
+    personasPanelSource,
+    /data-touch-drag-card="persona"[\s\S]*?onKeyDown=\{\(e\) => \{\s*if \(e\.target !== e\.currentTarget\) return;/u,
+    "Persona folder rows must preserve descendant action-button keyboard events",
+  );
+  assert.match(
+    personasPanelSource,
+    /group group\/member relative flex/u,
+    "Persona folder rows must establish the positioning context for overlaid actions",
+  );
+  assert.match(
+    personasPanelSource,
+    /absolute right-1 top-1\/2 flex -translate-y-1\/2 items-center/u,
+    "Persona folder actions must overlay their row instead of occupying flex width",
+  );
+
+  const settingsPanelSource = readFileSync(
+    join(REPOSITORY_ROOT, "packages/client/src/components/panels/SettingsPanel.tsx"),
+    "utf8",
+  );
+  assert.match(
+    settingsPanelSource,
+    /grid-cols-\[repeat\(auto-fit,minmax\(min\(100%,10rem\),1fr\)\)\]/u,
+    "Conversation Call clip rows must wrap from the panel width instead of a viewport breakpoint",
+  );
+  assert.equal(
+    settingsPanelSource.match(/w-\[3\.75rem\] grid-cols-\[minmax\(0,1fr\)_auto\]/gu)?.length,
+    2,
+    "Conversation Call generated and custom clip duration controls must share the compact width",
+  );
+  assert.match(
+    settingsPanelSource,
+    /id="quick-replies-actions-drawer"[\s\S]{0,180}grid min-w-0 max-w-full[\s\S]{0,80}overflow-hidden/u,
+    "Quick reply actions must shrink within narrow settings panels",
+  );
+  assert.match(
+    settingsPanelSource,
+    /CustomQuickRepliesManager[\s\S]{0,900}mt-1 min-w-0 max-w-full overflow-hidden/u,
+    "Custom quick replies must contain their fields and destructive controls at narrow widths",
+  );
+}
+
+// Issues #4532 and #4533 — every runtime World Maps host must preserve the
+// target chat mode, while Chat Settings uses feature copy instead of repeating
+// package-installation guidance in an already-reached activation surface.
+{
+  const findCapabilityHosts = (source: string, packageId: string, view: string) =>
+    (source.match(/<CapabilityElement\b[\s\S]*?\/>/gu) ?? []).filter(
+      (host) => host.includes(`packageId="${packageId}"`) && host.includes(`view="${view}"`),
+    );
+  const sourceBetween = (source: string, startMarker: string, endMarker: string, label: string) => {
+    const start = source.indexOf(startMarker);
+    assert.ok(start >= 0, `${label} start marker must exist`);
+    const end = source.indexOf(endMarker, start);
+    assert.ok(end > start, `${label} end marker must exist after its start marker`);
+    return source.slice(start, end);
+  };
+
+  const chatInputSource = readFileSync(
+    join(REPOSITORY_ROOT, "packages/client/src/components/chat/ChatInput.tsx"),
+    "utf8",
+  );
+  const roleplayRuntimeHosts = findCapabilityHosts(chatInputSource, "hierarchical-maps", "runtime");
+  assert.equal(roleplayRuntimeHosts.length, 1, "Roleplay must expose exactly one World Maps runtime host");
+  assert.match(
+    roleplayRuntimeHosts[0],
+    /capabilityProps=\{\{[\s\S]*?chatId: activeChatId,[\s\S]*?chatMode: mode,/u,
+    "Roleplay World Maps runtime controls must preserve the active chat mode",
+  );
+
+  const gameInputSource = readFileSync(
+    join(REPOSITORY_ROOT, "packages/client/src/components/game/GameInput.tsx"),
+    "utf8",
+  );
+  const gameRuntimeHosts = findCapabilityHosts(gameInputSource, "hierarchical-maps", "runtime");
+  assert.equal(gameRuntimeHosts.length, 1, "Game input must expose exactly one World Maps runtime host");
+  assert.match(
+    gameRuntimeHosts[0],
+    /capabilityProps=\{\{[\s\S]*?chatId: draftKey,[\s\S]*?chatMode: "game",/u,
+    "Game World Maps runtime controls must identify their supported chat mode",
+  );
+
+  const gameMapSource = readFileSync(join(REPOSITORY_ROOT, "packages/client/src/components/game/GameMap.tsx"), "utf8");
+  const gameWorldMapHosts = findCapabilityHosts(gameMapSource, "hierarchical-maps", "world-map");
+  assert.equal(gameWorldMapHosts.length, 2, "Game Map must expose exactly its desktop and mobile World Maps hosts");
+  const desktopWorldMapHosts = gameWorldMapHosts.filter((host) => !host.includes("compact: true,"));
+  const mobileWorldMapHosts = gameWorldMapHosts.filter((host) => host.includes("compact: true,"));
+  assert.equal(desktopWorldMapHosts.length, 1, "Desktop Game Map must expose one non-compact World Maps host");
+  assert.equal(mobileWorldMapHosts.length, 1, "Mobile Game Map must expose one compact World Maps host");
+  for (const [surface, host] of [
+    ["Desktop", desktopWorldMapHosts[0]],
+    ["Mobile", mobileWorldMapHosts[0]],
+  ] as const) {
+    assert.match(
+      host,
+      /capabilityProps=\{\{[\s\S]*?chatId,[\s\S]*?chatMode: "game",/u,
+      `${surface} Game World Maps host must identify its supported chat mode`,
+    );
+  }
+
+  const chatSettingsSource = readFileSync(
+    join(REPOSITORY_ROOT, "packages/client/src/components/chat/ChatSettingsDrawer.tsx"),
+    "utf8",
+  );
+  assert.match(
+    chatSettingsSource,
+    /const worldMapsSettingsDescription = localizeUi\("ui\.chat\.chatsettingsdrawer\.worldMapsFeatureSummary"\);/u,
+    "Chat Settings must source the World Maps feature summary from localization",
+  );
+  const worldMapsFeatureSummary = String(lorebookEnglishLocale["ui.chat.chatsettingsdrawer.worldMapsFeatureSummary"]);
+  assert.equal(
+    worldMapsFeatureSummary,
+    "Adds persistent hierarchical locations, durable shared worlds, reusable artwork, customizable Direct Link lines, and movement to Roleplay and Game.",
+    "The canonical English World Maps settings summary must describe the feature",
+  );
+  assert.doesNotMatch(
+    worldMapsFeatureSummary,
+    /Add the Agent|Chat Settings|Tracker Agents/iu,
+    "The World Maps settings summary must not repeat installation guidance",
+  );
+  const gameWorldMapsSettingsBranch = sourceBetween(
+    chatSettingsSource,
+    'if (agent.id === "hierarchical-maps" && mapsPackage) {',
+    'if (agent.id === "long-term-memory" && ltmPackage) {',
+    "Game World Maps settings branch",
+  );
+  assert.match(
+    gameWorldMapsSettingsBranch,
+    /<AgentSettingsCard[\s\S]*?description=\{worldMapsSettingsDescription\}[\s\S]*?<CapabilityElement/u,
+    "Game Chat Settings must omit package-installation guidance from the expanded World Maps card",
+  );
+  const roleplayActiveAgentCards = sourceBetween(
+    chatSettingsSource,
+    "{/* Active agents in this category */}",
+    "{inactiveInCat.length > 0 ? (",
+    "Roleplay active-agent settings cards",
+  );
+  assert.match(
+    roleplayActiveAgentCards,
+    /agent\.id === "hierarchical-maps"[\s\S]{0,120}\? worldMapsSettingsDescription[\s\S]{0,80}: agent\.description/u,
+    "Roleplay Chat Settings must omit package-installation guidance from the active World Maps card",
   );
 }
 

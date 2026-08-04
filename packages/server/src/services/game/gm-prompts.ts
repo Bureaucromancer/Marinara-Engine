@@ -626,6 +626,8 @@ export function buildGmFormatReminder(
     addressMode?: "party" | "gm";
     /** Whether the current player turn already includes a resolved [dice: ...] roll. */
     playerDiceRollSubmitted?: boolean;
+    /** Built-in systems an installed experience replaces with its own. Undeclared systems stay built-in. */
+    experienceProvidedSystems?: { inventory?: boolean };
   },
 ): string {
   const lines: string[] = [];
@@ -652,6 +654,9 @@ export function buildGmFormatReminder(
       return lines;
     });
   const hudWidgets = Array.isArray(ctx.hudWidgets) ? ctx.hudWidgets : [];
+  // An experience that tracks items itself owns the whole loop, so asking the GM for [inventory:] here
+  // would only produce commands nothing consumes.
+  const experienceOwnsInventory = ctx.experienceProvidedSystems?.inventory === true;
   const playerInventory = Array.isArray(ctx.playerInventory)
     ? ctx.playerInventory.flatMap((item) => {
         const name = normalizePromptText(item?.name);
@@ -683,6 +688,7 @@ export function buildGmFormatReminder(
     `FORMAT:`,
     `- Narration: text - 1-4 sentences per beat, blank line between beats.`,
     `- Lines: [Name] [main|side|whisper:Target|thought] [neutral|happy|sad|angry|surprised|scared|disgusted|thinking|laughing|crying|blushing|smirk|embarrassed|determined|confused|sleepy|custom]: "Dialogue"|Thought - first bracket specifies the format, main is primary spoken line, side is a short aside like banter, cut-in, or interruption, whisper is quiet speech meant for one listener only, the thought is an internal monologue (no quotes for it), and the last bracket is the character's expression when delivering the line.`,
+    `- Party speaker labels must use the exact canonical names listed under PARTY. Never expand, combine, or replace a party member's name with a legal name, nickname, alias, title, or description-derived variant.`,
     ...(customSpriteLines.length
       ? [
           ``,
@@ -765,7 +771,11 @@ export function buildGmFormatReminder(
           `- [map_update: new_location="Location Name" connected_to="Previous Location Name" node_emoji="emoji"] - only when the party arrives at an entirely new location on the current node map.`,
         ]
       : []),
-    `- [inventory: action="add|remove" item="Item A, Item B" count="3"] - every real item gain or loss, keep names short and use count/quantity for stacked items.`,
+    ...(experienceOwnsInventory
+      ? []
+      : [
+          `- [inventory: action="add|remove" item="Item A, Item B" count="3"] - every real item gain or loss, keep names short and use count/quantity for stacked items.`,
+        ]),
     `- [Note: contents] or [Book: contents] - when a new readable note or book is acquired and should be tracked in the journal.`,
     `- [state: exploration|dialogue|combat|travel_rest] - only on actual mode transitions. If you're planning to use [state: combat], this one ALWAYS has to be at the end of the turn, as it initiates a new combat generation and UI.`,
     `- [reputation: npc="Name" action="helped"] - when an NPC's tracked stance changes because of what happened.`,
@@ -813,8 +823,9 @@ export function buildGmFormatReminder(
     );
   }
 
-  // Inventory context
-  if (playerInventory.length > 0) {
+  // Inventory context. Skipped when an experience owns items: an older save can still carry a stale
+  // built-in list, which would contradict the inventory the player has on screen.
+  if (!experienceOwnsInventory && playerInventory.length > 0) {
     lines.push(``, `PLAYER INVENTORY: ${buildCompactInventoryLine(playerInventory)}`);
   }
 

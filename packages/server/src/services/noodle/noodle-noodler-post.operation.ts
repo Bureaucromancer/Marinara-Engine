@@ -1,6 +1,5 @@
 import {
   createNoodlePoll,
-  type NoodleAccount,
   type NoodlerGenerationRequest,
   type NoodlerPostCreateInput,
   type NoodlerPostUpdateInput,
@@ -14,6 +13,7 @@ import { newId } from "../../utils/id-generator.js";
 import { createConnectionsStorage } from "../storage/connections.storage.js";
 import { createNoodleStorage } from "../storage/noodle.storage.js";
 import { generateNoodlerPost } from "./noodle-noodler-generation.service.js";
+import type { ConnectionAdmissionMode } from "../generation/connection-admission.js";
 import {
   persistNoodlerPostWithUploadedMedia,
   readNoodlerMediaPath,
@@ -44,6 +44,24 @@ export type UpdateNoodlerPostResult =
   | { status: "noodler_post_not_found" };
 
 /**
+ * A foreground post invalidates the near-future reserve the same way a manual one does, or the
+ * creator posts now and again from reserve within the hour. The post is already persisted by the
+ * time this runs, so a cleanup failure is logged and swallowed: reporting it as a failed
+ * generation would invite a retry that creates a second post.
+ */
+async function invalidateNearFutureReserve(
+  noodle: ReturnType<typeof createNoodleStorage>,
+  accountId: string,
+  postedAt: string,
+): Promise<void> {
+  try {
+    await noodle.discardPreparedPostsAfterManualPost(accountId, postedAt);
+  } catch (error) {
+    logger.warn(error, "[noodler] Could not invalidate the reserve after posting for %s", accountId);
+  }
+}
+
+/**
  * Reusable generated-post application seam for HTTP now and Slice 8 scheduling later.
  * Provider and persistence failures intentionally throw for the caller to handle.
  */
@@ -51,6 +69,7 @@ export async function generateAndApplyNoodlerPost(
   db: DB,
   request: NoodlerGenerationRequest,
   media?: NoodlerPostMediaUpload,
+  admissionMode?: ConnectionAdmissionMode,
 ): Promise<GenerateAndApplyNoodlerPostResult> {
   const noodle = createNoodleStorage(db);
   const settings = await noodle.getSettings();
@@ -61,11 +80,21 @@ export async function generateAndApplyNoodlerPost(
     if (!account) {
       return { status: "noodler_account_not_found" } as const;
     }
+    if (request.executionId) {
+      const existing = await noodle.getNoodlerPostByWizardExecution(account.id, request.executionId);
+      if (existing) {
+        // A replay returns the post the first attempt created; the reserve it displaced still
+        // has to be invalidated, because the first attempt may have died before doing so.
+        await invalidateNearFutureReserve(noodle, account.id, existing.createdAt);
+        return { status: "generated", post: existing, imagePromptReview: null } as const;
+      }
+    }
     const connectionId = request.connectionId ?? settings.generationConnectionId;
     if (!connectionId) return { status: "connection_required" } as const;
     const connection = await createConnectionsStorage(db).getWithKey(connectionId);
     if (!connection) return { status: "connection_not_found" } as const;
-    const generated = await generateNoodlerPost(db, { account, request, connection, media });
+    const generated = await generateNoodlerPost(db, { account, request, connection, media, admissionMode });
+    await invalidateNearFutureReserve(noodle, account.id, generated.post.createdAt);
     return {
       status: "generated",
       post: generated.post,
@@ -77,16 +106,11 @@ export async function generateAndApplyNoodlerPost(
 
 const MAX_CONCURRENT_MANUAL_REFRESH = 3;
 
-export type NoodlerRefreshNowResult =
-  | { status: "disabled" }
-  | { status: "ok"; outcomes: NoodlerRefreshNowOutcome[] };
+export type NoodlerRefreshNowResult = { status: "disabled" } | { status: "ok"; outcomes: NoodlerRefreshNowOutcome[] };
 
 /**
- * Global "Refresh NoodleR now": runs every automation-enabled creator, prioritizing those
- * scheduled soonest, with bounded concurrency and per-creator typed outcomes so one
- * creator's failure never rolls back another's successful post. Each selected creator's
- * slot is consumed the same way an automatic run would consume it (advances `nextRunAt`
- * under its own cadence) rather than resetting to an unrelated default.
+ * Global "Refresh NoodleR now": explicit user-authorized work, separate from the automatic
+ * reserve budget and publication clock.
  */
 export async function refreshAllNoodlerCreatorsNow(db: DB): Promise<NoodlerRefreshNowResult> {
   const noodle = createNoodleStorage(db);
@@ -94,13 +118,13 @@ export async function refreshAllNoodlerCreatorsNow(db: DB): Promise<NoodlerRefre
   if (!settings.enableNoodler) return { status: "disabled" };
 
   const accounts = await noodle.listAutoPostEnabledAccounts();
-  const nextRunAtMs = (account: NoodleAccount) => {
-    const nextRunAt = account.settings.scheduler.autoPosting?.nextRunAt;
-    return nextRunAt === null || nextRunAt === undefined ? Number.POSITIVE_INFINITY : Date.parse(nextRunAt);
-  };
-  const prioritized = [...accounts].sort((a, b) => nextRunAtMs(a) - nextRunAtMs(b));
-
-  const nowIso = new Date().toISOString();
+  // Least-recently active creator first, so limited provider capacity goes to the quiet ones.
+  // Profile edits move `updatedAt` without being activity, so they must not reorder this.
+  const activity = await noodle.getNoodlerCreatorActivityTimes();
+  const activityOf = (accountId: string) => activity.get(accountId) ?? "";
+  const prioritized = [...accounts].sort(
+    (a, b) => activityOf(a.id).localeCompare(activityOf(b.id)) || a.id.localeCompare(b.id),
+  );
   const settled = await settleAgentJobsWithConcurrencyLimit(
     prioritized,
     MAX_CONCURRENT_MANUAL_REFRESH,
@@ -108,11 +132,8 @@ export async function refreshAllNoodlerCreatorsNow(db: DB): Promise<NoodlerRefre
       const result = await generateAndApplyNoodlerPost(db, {
         mode: "noodler",
         targetAccountId: account.id,
-        access: "subscriber",
+        access: "locked",
       });
-      // Consume the slot only on a real post; busy/failed/skipped runs leave any explicit
-      // schedule edit intact instead of burning the creator's next automatic slot.
-      if (result.status === "generated") await noodle.claimAutoPostRunNow(account.id, nowIso);
       // "disabled"/"busy" are no-op refreshes, not failures; surface them as skipped so the
       // client doesn't lump a busy creator in with a real generation/connection failure.
       const status = result.status === "disabled" || result.status === "busy" ? "skipped" : result.status;
@@ -124,6 +145,40 @@ export async function refreshAllNoodlerCreatorsNow(db: DB): Promise<NoodlerRefre
     if (entry.status === "fulfilled") return entry.value;
     logger.error(entry.reason, "[noodler] Global refresh failed for creator %s", prioritized[index]!.id);
     return { accountId: prioritized[index]!.id, status: "error" };
+  });
+  return { status: "ok", outcomes };
+}
+
+export async function refreshTargetedNoodlerCreatorsNow(
+  db: DB,
+  accountIds: string[],
+  executionId?: string,
+): Promise<NoodlerRefreshNowResult> {
+  const noodle = createNoodleStorage(db);
+  const settings = await noodle.getSettings();
+  if (!settings.enableNoodler) return { status: "disabled" };
+
+  // One creator named twice is one refresh, not two: the per-account lock already serializes the
+  // work, but without this the response reports that creator twice.
+  const targetAccountIds = [...new Set(accountIds)];
+  const settled = await settleAgentJobsWithConcurrencyLimit(
+    targetAccountIds,
+    MAX_CONCURRENT_MANUAL_REFRESH,
+    async (accountId): Promise<NoodlerRefreshNowOutcome> => {
+      const result = await generateAndApplyNoodlerPost(db, {
+        mode: "noodler",
+        targetAccountId: accountId,
+        access: "locked",
+        executionId,
+      });
+      const status = result.status === "disabled" || result.status === "busy" ? "skipped" : result.status;
+      return { accountId, status };
+    },
+  );
+  const outcomes = settled.map((entry, index): NoodlerRefreshNowOutcome => {
+    if (entry.status === "fulfilled") return entry.value;
+    logger.error(entry.reason, "[noodler] Targeted refresh failed for creator %s", targetAccountIds[index]!);
+    return { accountId: targetAccountIds[index]!, status: "error" };
   });
   return { status: "ok", outcomes };
 }
@@ -147,7 +202,6 @@ export async function createNoodlerPost(
         content: input.content,
         source: "manual",
         access: input.access,
-        ppvPrice: input.access === "ppv" ? (input.ppvPrice ?? null) : null,
         imageUrl: persistedMedia?.imageUrl ?? null,
         metadata: {
           ...(input.poll ? { poll: createNoodlePoll(input.poll) } : {}),
@@ -160,6 +214,14 @@ export async function createNoodlerPost(
         ? await persistNoodlerPostWithUploadedMedia(input.targetAccountId, postId, media, persist)
         : await persist();
     if (!post) return { status: "noodler_account_not_found" } as const;
+    // The post is already persisted. Failing the request over cleanup would report a successful
+    // create as an error and invite a retry that posts twice; a stale prepared post is the
+    // cheaper problem, and the next reconciliation pass drops it anyway.
+    try {
+      await noodle.discardPreparedPostsAfterManualPost(input.targetAccountId, post.createdAt);
+    } catch (error) {
+      logger.warn(error, "[noodler] Failed to discard prepared posts after a manual post for %s", input.targetAccountId);
+    }
     return { status: "created", post } as const;
   });
   return locked.acquired ? locked.value : { status: "busy" };

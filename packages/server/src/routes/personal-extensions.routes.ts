@@ -7,8 +7,9 @@ import {
   personalExtensionStoragePatchSchema,
   rollbackPersonalExtensionSchema,
   updatePersonalExtensionSchema,
-  PERSONAL_EXTENSION_CONTRIBUTION_ICONS,
   PERSONAL_EXTENSION_CONTRIBUTION_KINDS,
+  PERSONAL_EXTENSION_CONTRIBUTION_POSITIONS,
+  PERSONAL_EXTENSION_CONTRIBUTION_SURFACES,
   PERSONAL_EXTENSION_FULL_PAGE_CAPABILITY,
   PERSONAL_EXTENSION_UI_ELEMENT_KINDS,
   PERSONAL_EXTENSION_UI_LIMITS,
@@ -223,7 +224,8 @@ export function browserWorkerSource(extension: PersonalExtension) {
   });
   const contributionContract = JSON.stringify({
     kinds: PERSONAL_EXTENSION_CONTRIBUTION_KINDS,
-    icons: PERSONAL_EXTENSION_CONTRIBUTION_ICONS,
+    surfaces: PERSONAL_EXTENSION_CONTRIBUTION_SURFACES,
+    positions: PERSONAL_EXTENSION_CONTRIBUTION_POSITIONS,
     elementKinds: PERSONAL_EXTENSION_UI_ELEMENT_KINDS,
     limits: PERSONAL_EXTENSION_UI_LIMITS,
   });
@@ -511,7 +513,8 @@ export function browserWorkerSource(extension: PersonalExtension) {
   // Marinara to place trusted controls in fixed slots, but it never supplies
   // markup, styles, component code, URLs, or host callbacks.
   const contributionKinds = new Set(contributionContract.kinds);
-  const contributionIcons = new Set(contributionContract.icons);
+  const contributionSurfaces = new Set(contributionContract.surfaces);
+  const contributionPositions = new Set(contributionContract.positions);
   const contributionControlKinds = new Set(["button", "input", "select", "toggle", "slider", "color"]);
   const uiContributions = new Map();
   const uiContributionActivateHandlers = new Map();
@@ -581,12 +584,33 @@ export function browserWorkerSource(extension: PersonalExtension) {
     const label = contributionText(options.label, contributionContract.limits.labelLength, true);
     const description = contributionText(options.description, contributionContract.limits.descriptionLength, false);
     const icon = options.icon == null ? undefined : options.icon;
-    if (icon !== undefined && !contributionIcons.has(icon)) throw new Error("unsupported contribution icon");
+    if (
+      icon !== undefined &&
+      (typeof icon !== "string" ||
+        icon.length > contributionContract.limits.iconLength ||
+        !/^[a-z0-9-]+$/.test(icon))
+    ) {
+      throw new Error("unsupported contribution icon");
+    }
+    let surface;
+    let position;
+    if (kind === "button") {
+      surface = options.surface == null ? "top-bar" : options.surface;
+      if (!contributionSurfaces.has(surface)) throw new Error("unsupported contribution surface");
+      if (surface === "top-bar") {
+        if (options.position !== undefined) throw new Error("top-bar contributions do not accept a position");
+      } else {
+        position = options.position == null ? "header" : options.position;
+        if (!contributionPositions.has(position)) throw new Error("unsupported contribution position");
+      }
+    } else if (options.surface !== undefined || options.position !== undefined) {
+      throw new Error("only button contributions may select a surface or position");
+    }
     if (kind !== "panel" && options.elements !== undefined) {
       throw new Error("only panel contributions may include elements");
     }
     const elements = kind === "panel" ? normalizeContributionElements(options.elements) : undefined;
-    return { id, kind, label, description, icon, elements };
+    return { id, kind, label, description, icon, surface, position, elements };
   };
   const registerContribution = (options) => {
     if (uiContributions.size >= contributionContract.limits.contributionsPerExtension) {

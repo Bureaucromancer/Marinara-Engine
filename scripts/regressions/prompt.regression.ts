@@ -18,12 +18,16 @@ import {
   createDefaultImageStyleProfileSettings,
   characterTrackerCustomFieldDefaultsToRecord,
   getDefaultBuiltInAgentSettings,
+  generateChatSummaryEntryTitle,
   isAgentAvailableInChatMode,
   isPatternSafe,
   normalizeChatSummaryEntries,
   normalizeChatSummaryPromptSettings,
   normalizeStoryboardAgentSettings,
   LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID,
+  DEFAULT_AGENT_TOOLS,
+  CHAT_SUMMARY_PROMPT_MAX_LENGTH,
+  DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT,
   DEFAULT_CHAT_SUMMARY_PROMPT,
   DEFAULT_LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT,
   normalizeCharacterTrackerCustomFieldDefaults,
@@ -61,7 +65,10 @@ import {
   formatNoodleTimelineForPrompt,
   NOODLE_PERSONA_IDENTITY_INSTRUCTION,
 } from "../../packages/server/src/services/noodle/noodle-prompt.js";
-import { buildPartyRecruitCardPrompt } from "../../packages/server/src/services/game/gm-prompts.js";
+import {
+  buildGmFormatReminder,
+  buildPartyRecruitCardPrompt,
+} from "../../packages/server/src/services/game/gm-prompts.js";
 import {
   normalizeCyoaChoiceOutput,
   normalizeCyoaDialogueQuotes,
@@ -147,6 +154,16 @@ assert.match(regeneratedSheetPrompt, /<campaign_history>/u);
 assert.match(regeneratedSheetPrompt, /Write every natural-language string value in Polish/u);
 assert.match(regeneratedSheetPrompt, /Scenario: The flooded vault/u);
 assert.doesNotMatch(regeneratedSheetPrompt, /A new companion is joining the party/u);
+
+const canonicalPartyNameReminder = buildGmFormatReminder({
+  gameActiveState: "exploration",
+  sessionNumber: 1,
+  map: null,
+  partyNames: ["Mari"],
+  playerName: "Player",
+});
+assert.match(canonicalPartyNameReminder, /Party speaker labels must use the exact canonical names listed under PARTY/u);
+assert.match(canonicalPartyNameReminder, /You also play Mari\./u);
 
 const REGRESSION_AGENT_IDS = [
   "about-me-keeper",
@@ -266,6 +283,45 @@ import {
   applyStoryboardAgentSettings,
   shouldSuppressIllustratorForegroundForStoryboard,
 } from "../../packages/server/src/services/game/storyboard-agent-settings.js";
+import {
+  STORYBOARD_FALLBACK_BEAT_MAX_CHARS,
+  compactStoryboardFallbackBeat,
+  compactStoryboardTextAtWordBoundary,
+  createStoryboardReviewPlanEnvelope,
+  formatStoryboardFallbackSectionText,
+  resolveStoryboardReviewPlanEnvelope,
+  storyboardPlanHasRenderableKeyframe,
+} from "../../packages/server/src/services/game/storyboard-planner-fallback.js";
+
+const fallbackBeatWords = Array.from({ length: 400 }, (_, index) => `storyboard-beat-${index}`);
+const compactedFallbackBeat = compactStoryboardFallbackBeat(fallbackBeatWords.join(" "));
+assert.ok(compactedFallbackBeat.length <= STORYBOARD_FALLBACK_BEAT_MAX_CHARS);
+assert.ok(compactedFallbackBeat.endsWith("..."));
+assert.ok(fallbackBeatWords.includes(compactedFallbackBeat.slice(0, -3).split(" ").at(-1) ?? ""));
+assert.equal(compactStoryboardTextAtWordBoundary("  silver   hair blue eyes  ", 18), "silver hair...");
+assert.equal(formatStoryboardFallbackSectionText("Morgana-: Hold the hatch.", "Morgana-"), "Morgana-: Hold the hatch.");
+assert.equal(
+  formatStoryboardFallbackSectionText("Morgana-: Morgana-: Hold the hatch.", "Morgana-"),
+  "Morgana-: Hold the hatch.",
+);
+assert.equal(formatStoryboardFallbackSectionText("Hold the hatch.", "Morgana-"), "Morgana-: Hold the hatch.");
+assert.equal(
+  formatStoryboardFallbackSectionText("Shellback Tollkeeper: Run, little coins!", "Shellback Tollkeeper"),
+  "Shellback Tollkeeper: Run, little coins!",
+);
+assert.equal(storyboardPlanHasRenderableKeyframe({ keyframes: [] }), false);
+assert.equal(storyboardPlanHasRenderableKeyframe({ keyframes: [{ narrationBeat: "  " }] }), false);
+assert.equal(storyboardPlanHasRenderableKeyframe({ keyframes: [{ imagePrompt: "A usable frame" }] }), true);
+const fallbackReviewEnvelope = createStoryboardReviewPlanEnvelope({
+  plan: { keyframes: [{ narrationBeat: compactedFallbackBeat }] },
+  plannerError: "Planner response was malformed; used fallback storyboard planner and skipped video generation.",
+  usedFallbackPlanner: true,
+});
+assert.deepEqual(resolveStoryboardReviewPlanEnvelope(fallbackReviewEnvelope), {
+  plan: fallbackReviewEnvelope.plan,
+  plannerError: fallbackReviewEnvelope.plannerError,
+  usedFallbackPlanner: true,
+});
 
 const assistantCadenceMessages = [
   { id: "illustrator-anchor", role: "assistant" },
@@ -609,6 +665,7 @@ import {
   appendNonLeadingSystemMessagesToLastUser,
   appendReadableAttachmentsToContent,
   applyTrackerCharacterCardIdentity,
+  canonicalizeGamePartySpeakerLabels,
   buildGenerationGuideInstruction,
   appendSeparateAgentInjectionMessage,
   collectLatestTrackerCharacterHistory,
@@ -631,8 +688,11 @@ import {
   appendContinuationMessageContent,
   CONTINUE_ASSISTANT_MESSAGE_DIRECT_PROMPT,
   formatRoleplaySummaryChatLog,
+  parseChatSummaryResult,
+  resolveChatSummaryCombinePrompt,
   resolveChatSummaryPrompt,
 } from "../../packages/server/src/services/generation/roleplay-summary-runtime.js";
+import { isChatToolEnabledByDefault } from "../../packages/server/src/services/generation/tool-resolution-runtime.js";
 import { scopeIndividualGroupMessagesForTarget } from "../../packages/server/src/services/generation/prompt-message-scope.js";
 import { resolveGenerationPromptPresetChoices } from "../../packages/server/src/routes/generate/prompt-preset-selection.js";
 import {
@@ -694,6 +754,7 @@ import {
 import { resolveCharacterAdvancedPromptIds } from "../../packages/server/src/services/prompt/macro-context.js";
 import {
   illustratorPromptRequestsRenderedText,
+  illustratorPromptTemplateOwnsComposition,
   mergeIllustratorNegativePrompt,
   normalizeIllustratorAppearance,
   readIllustratorAppearance,
@@ -1310,6 +1371,9 @@ const cases: RegressionCase[] = [
 
       assert.match(seededMariSource, /\$\{PROFESSOR_MARI_AGENT_CATALOG_KNOWLEDGE\}/u);
       assert.match(workspaceMariSource, /\$\{PROFESSOR_MARI_AGENT_CATALOG_KNOWLEDGE\}/u);
+      assert.match(workspaceMariSource, /"resultType":"image_prompt"/u);
+      assert.match(workspaceMariSource, /"activationKeywords":\["IMG_PROMPT:"\]/u);
+      assert.match(workspaceMariSource, /"trigger_image_generation":true/u);
     },
   },
   {
@@ -2562,6 +2626,46 @@ const cases: RegressionCase[] = [
     },
   },
   {
+    name: "conversation character macros defer to the active Individual group responder",
+    run() {
+      const initialContext = {
+        user: "Mari",
+        char: "Pantalone",
+        characters: ["Pantalone", "Dottore"],
+        variables: {},
+        convoFields: {
+          charDisplayName: "Regrator",
+          charAbout: "Runs the Northland Bank.",
+          personaAbout: "AI engineer.",
+          convoBehavior: "Keep the tone formal.",
+        },
+      };
+      const deferred = resolveMacros(
+        '{{convo_display}}|{{char_about}}|{{persona_about}}|{{convo_behavior}}|{{#if convo_behavior contains "playful"}}playful{{else}}formal{{/if}}',
+        initialContext,
+        { deferCharacterMacros: "all" },
+      );
+
+      assert.equal(hasDeferredCharacterMacros(deferred), true);
+      assert.equal(
+        resolveDeferredCharacterMacros(deferred, { name: "Pantalone" }, initialContext),
+        "Regrator|Runs the Northland Bank.|AI engineer.|Keep the tone formal.|formal",
+      );
+      assert.equal(
+        resolveDeferredCharacterMacros(deferred, { name: "Dottore" }, {
+          ...initialContext,
+          convoFields: {
+            charDisplayName: "Il Dottore",
+            charAbout: "A researcher from Snezhnaya.",
+            personaAbout: "AI engineer.",
+            convoBehavior: "Be playful with Mari.",
+          },
+        }),
+        "Il Dottore|A researcher from Snezhnaya.|AI engineer.|Be playful with Mari.|playful",
+      );
+    },
+  },
+  {
     name: "group macro uses the full active roster without changing existing identity macros",
     run() {
       const context = {
@@ -2906,6 +3010,7 @@ const cases: RegressionCase[] = [
             promptOnly: "true",
             applyMode: "prompt",
             targetCharacterIds: "[]",
+            targetPromptPresetIds: "[]",
             minDepth: null,
             maxDepth: null,
           },
@@ -2921,6 +3026,35 @@ const cases: RegressionCase[] = [
       assert.match(cleaned, /<lie>Keep lie markup\.<\/lie>/u);
       assert.match(cleaned, /<filter>Keep filter markup\.<\/filter>/u);
       assert.match(cleaned, /<!-- keep the author comment -->/u);
+    },
+  },
+  {
+    name: "prompt preset-scoped regexes run only for their selected preset",
+    run() {
+      const script = {
+        id: "preset-scoped-regex",
+        enabled: "true",
+        findRegex: "LAB",
+        replaceString: "PALACE",
+        placement: '["user_input"]',
+        flags: "g",
+        applyMode: "prompt",
+        targetCharacterIds: "[]",
+        targetPromptPresetIds: '["preset-laboratory"]',
+      };
+      assert.equal(applyRegexScriptsToPromptText("LAB", [script], "user_input", 0), "LAB");
+      assert.equal(
+        applyRegexScriptsToPromptText("LAB", [script], "user_input", 0, {
+          targetPromptPresetId: "preset-ballroom",
+        }),
+        "LAB",
+      );
+      assert.equal(
+        applyRegexScriptsToPromptText("LAB", [script], "user_input", 0, {
+          targetPromptPresetId: "preset-laboratory",
+        }),
+        "PALACE",
+      );
     },
   },
   {
@@ -3228,6 +3362,9 @@ const cases: RegressionCase[] = [
         editorSource,
         /\.\.\.\(localMaxTokens !== "" \? \{ maxTokens: clampAgentMaxTokens\(localMaxTokens\) \} : \{\}\)/u,
       );
+      const sharedScopeIndex = storyboardEditorSource.indexOf('id="shared"');
+      const roleplayScopeIndex = storyboardEditorSource.indexOf('id="roleplay"');
+      const gameScopeIndex = storyboardEditorSource.indexOf('id="game"');
       const roleplayLibraryIndex = storyboardEditorSource.indexOf("ui.agents.storyboard.roleplayPromptLibrary");
       const sharedFormatterIndex = storyboardEditorSource.indexOf("ui.agents.storyboard.sharedProviderFormatters");
       const defaultImagePromptIndex = storyboardEditorSource.indexOf("ui.agents.storyboard.defaultImagePrompt");
@@ -3235,8 +3372,22 @@ const cases: RegressionCase[] = [
       assert.ok(roleplayLibraryIndex >= 0, "Storyboard editor should expose a separate Roleplay prompt library");
       assert.ok(sharedFormatterIndex >= 0, "Storyboard editor should identify shared provider formatters");
       assert.ok(
-        roleplayLibraryIndex < sharedFormatterIndex && sharedFormatterIndex < defaultImagePromptIndex,
-        "Roleplay planning prompts should stay separate from the shared provider formatters",
+        sharedScopeIndex >= 0 && sharedScopeIndex < roleplayScopeIndex && roleplayScopeIndex < gameScopeIndex,
+        "Storyboard editor should present Shared, Roleplay, and Game Mode scopes in that order",
+      );
+      const sharedScopeSource = storyboardEditorSource.slice(sharedScopeIndex, roleplayScopeIndex);
+      const roleplayScopeSource = storyboardEditorSource.slice(roleplayScopeIndex, gameScopeIndex);
+      const gameScopeSource = storyboardEditorSource.slice(gameScopeIndex);
+      assert.match(sharedScopeSource, /settings\.imageConnectionId/u);
+      assert.match(sharedScopeSource, /settings\.autoGenerateMode/u);
+      assert.match(sharedScopeSource, /settings\.illustrationTemplateId/u);
+      assert.match(roleplayScopeSource, /settings\.runInterval/u);
+      assert.match(roleplayScopeSource, /settings\.roleplayEpisodeTemplateId/u);
+      assert.match(gameScopeSource, /settings\.illustrationPlannerTemplateId/u);
+      assert.match(gameScopeSource, /settings\.viewerDisplayMode/u);
+      assert.ok(
+        sharedFormatterIndex < roleplayLibraryIndex && defaultImagePromptIndex < roleplayLibraryIndex,
+        "Shared provider formatters should stay inside Shared before Roleplay prompts",
       );
       assert.match(editorSource, /includeCharacterAppearance:\s*settings\.includeCharacterAppearance/u);
       assert.match(editorSource, /useAvatarReferences:\s*settings\.useAvatarReferences/u);
@@ -3383,7 +3534,13 @@ const cases: RegressionCase[] = [
       );
       assert.match(storyboardHookSource, /previewOnly: true/);
       assert.match(gameRouteSource, /if \(input\.previewOnly\)/);
-      assert.match(gameRouteSource, /return \{ items, plannedStoryboard: plan \}/);
+      assert.match(gameRouteSource, /createStoryboardReviewPlanEnvelope\(\{/);
+      assert.match(gameRouteSource, /plannerWarning: illustratorErrorMessage/);
+      assert.match(
+        gameRouteSource,
+        /usedFallbackStoryboardPlanner = reviewedStoryboard\.usedFallbackPlanner \|\| !reviewedPlanHasRenderableKeyframe/u,
+      );
+      assert.match(gameSurfaceSource, /preview\.plannerWarning/);
       assert.match(gameRouteSource, /storyboardPromptOverrideById\.get\(`storyboard:\$\{frame\.index\}`\)/);
       assert.match(gameRouteSource, /\[debug\/game\/storyboard-image-preview\]/);
     },
@@ -3655,6 +3812,7 @@ const cases: RegressionCase[] = [
           source,
           /mergeIllustratorNegativePrompt\(\s*compiledPrompt\.prompt,\s*compiledPrompt\.negativePrompt/,
         );
+        assert.match(source, /omitProfileSubjectTags:\s*illustratorPromptTemplateOwnsComposition\(/);
         assert.doesNotMatch(source, /ILLUSTRATOR_TEXT_NEGATIVE_PROMPT/);
       }
 
@@ -3684,6 +3842,58 @@ const cases: RegressionCase[] = [
         false,
       );
       assert.equal(illustratorPromptRequestsRenderedText('shopfront sign reading "OPEN ALL NIGHT"'), true);
+    },
+  },
+  {
+    name: "Illustrator injects configured Illustration tags while dedicated comic templates retain composition",
+    run() {
+      const styleProfiles = createDefaultImageStyleProfileSettings();
+      const profile = styleProfiles.profiles.find((candidate) => candidate.id === "danbooru");
+      assert.ok(profile);
+      const illustrationTemplate =
+        "Generate a polished single-scene illustration with composition, lighting, mood, and environment.";
+      const comicTemplate =
+        "Build the prompt as a complete comic page with panel composition, speech bubbles, captions, and SFX lettering.";
+
+      assert.equal(illustratorPromptTemplateOwnsComposition(illustrationTemplate), false);
+      assert.equal(illustratorPromptTemplateOwnsComposition(comicTemplate), true);
+
+      const compiled = compileImagePrompt({
+        kind: "illustration",
+        prompt: "Mira vaults over a rain-soaked gate under cold moonlight.",
+        styleProfiles,
+        styleProfileId: profile.id,
+        omitProfileStyleText: true,
+        omitProfileSubjectTags: illustratorPromptTemplateOwnsComposition(illustrationTemplate),
+      });
+      const subjectTags = profile.subjectTags.illustration ?? "";
+      assert.match(compiled.prompt, /^masterpiece, best quality, absurdres, anime screencap, detailed eyes,/u);
+      assert.match(compiled.prompt, /visual novel CG, cinematic composition, dramatic lighting/u);
+      assert.ok(compiled.prompt.indexOf(profile.positiveTags) < compiled.prompt.indexOf(subjectTags));
+      assert.ok(compiled.prompt.indexOf(subjectTags) < compiled.prompt.indexOf("Mira vaults"));
+    },
+  },
+  {
+    name: "Avatar prompts keep configured positive and per-image tags as the leading prefix",
+    run() {
+      const styleProfiles = createDefaultImageStyleProfileSettings();
+      const profile = styleProfiles.profiles.find((candidate) => candidate.id === "danbooru");
+      assert.ok(profile);
+      const compiled = compileImagePrompt({
+        kind: "avatar",
+        prompt: "Canonical appearance for Mira: young woman, long brown hair, amber eyes, dark travel coat.",
+        styleProfiles,
+        styleProfileId: profile.id,
+        hardNegative:
+          "text, captions, logos, watermarks, borders, UI, collage layouts, duplicate faces, extra people, cropped-off heads",
+      });
+
+      assert.match(
+        compiled.prompt,
+        /^masterpiece, best quality, absurdres, anime screencap, detailed eyes, solo, portrait, upper body, centered composition,/u,
+      );
+      assert.doesNotMatch(compiled.prompt, /readable expression|clear silhouette|face-and-shoulders/iu);
+      assert.match(compiled.negativePrompt, /collage layouts/iu);
     },
   },
   {
@@ -3717,10 +3927,27 @@ const cases: RegressionCase[] = [
       assert.deepEqual(resolution.characterIds, ["character-maukie", "character-dottore"]);
       assert.equal(resolution.personaId, "persona-mari");
       assert.deepEqual(resolution.referenceImages, []);
+
+      const groupSelfieResolution = await resolveIllustratorCharacterReferences({
+        charactersStore: {
+          list: async () => [],
+        },
+        chatCharacters: [
+          { id: "character-maukie", name: "Maukie", avatarPath: null, appearance: "Wet brown hair." },
+          { id: "character-dottore", name: "Dottore", avatarPath: null, appearance: "A masked scientist." },
+        ],
+        persona: { id: "persona-mari", name: "Mari", avatarPath: null, appearance: "Chubby woman." },
+        requestedNames: [],
+        promptText: "A group selfie of Maukie and Dottore, seen from Mari's point of view.",
+        includeReferenceImages: false,
+        includePersonaWhenMentionedInPrompt: false,
+      });
+      assert.deepEqual(groupSelfieResolution.characterIds, ["character-maukie", "character-dottore"]);
+      assert.equal(groupSelfieResolution.personaId, null);
     },
   },
   {
-    name: "Game planner always receives card appearance while final attachment stays optional",
+    name: "Storyboard appearance is gated and injected once across planner and fallback paths",
     async run() {
       const appearance = "auburn hair, green eyes, leather jacket";
       const description = "A verbose roleplay card description that must not be sent as visual appearance.";
@@ -3948,6 +4175,27 @@ const cases: RegressionCase[] = [
         "SCENE Lyra standing in a moonlit forest\nSCOPE Final visibility rule: Only depict these named visible characters: Lyra.",
       );
 
+      const fallbackFirstFrameCompiled = await buildSceneIllustrationProviderPrompt({
+        chatId: "prompt-regression",
+        prompt: "Lyra standing in a moonlit forest",
+        characters: ["Lyra"],
+        characterDescriptions: [`Lyra's Appearance: ${appearance}`],
+        ensureCharacterAppearance: true,
+        storyboardImagePromptTemplateId: "storyboard-first-frame",
+        storyboardImagePromptTemplates: [
+          {
+            id: "storyboard-first-frame",
+            name: "Storyboard First Frame",
+            promptTemplate: "${scenePrompt}",
+          },
+        ],
+        imgModel: "unused",
+        imgBaseUrl: "",
+        imgApiKey: "",
+      });
+      assert.match(fallbackFirstFrameCompiled.prompt, /Character appearance notes:\s*Lyra's Appearance:/u);
+      assert.equal(fallbackFirstFrameCompiled.prompt.match(/Character appearance notes:/gu)?.length, 1);
+
       const compiledWithoutAttachedAppearance = await buildSceneIllustrationProviderPrompt({
         chatId: "prompt-regression",
         prompt: "Lyra standing in a moonlit forest",
@@ -4043,8 +4291,19 @@ const cases: RegressionCase[] = [
       assert.doesNotMatch(gameSurfaceSource, /useGamePromptTemplate/u);
       assert.match(gameRouteSource, /characterAppearanceContextBlock:\s*storyboardAppearanceContextBlock/u);
       assert.equal(gameRouteSource.match(/^\s+characterAppearanceContextBlock,\s*$/gmu)?.length, 2);
-      assert.equal(gameRouteSource.match(/includeCharacterDescriptions:\s*true,/gu)?.length, 1);
+      assert.equal(gameRouteSource.match(/includeCharacterDescriptions:\s*true,/gu)?.length ?? 0, 0);
       assert.equal(gameRouteSource.match(/includeCharacterDescriptions:\s*includeCharacterAppearance,/gu)?.length, 5);
+      assert.equal(
+        gameRouteSource.match(
+          /includeCharacterDescriptions:\s*includeCharacterAppearanceAtRender && characterPrompts\.length === 0,/gu,
+        )?.length,
+        1,
+      );
+      assert.match(
+        gameRouteSource,
+        /const includeCharacterAppearanceAtRender = includeCharacterAppearance && usedFallbackStoryboardPlanner/u,
+      );
+      assert.match(gameRouteSource, /Marinara used narration-based fallback keyframes and skipped video generation/u);
       assert.equal(gameRouteSource.match(/meta\.storyboardAgentIncludeCharacterAppearance !== false/gu)?.length, 1);
       assert.equal(gameRouteSource.match(/meta\.storyboardAgentUseAvatarReferences !== false/gu)?.length, 1);
       assert.equal(gameRouteSource.match(/meta\.gameImageIncludeCharacterAppearance !== false/gu)?.length, 2);
@@ -6725,7 +6984,11 @@ Use HTML sparingly and diegetically. Do not replace normal prose/dialogue unless
   {
     name: "chat summary prompt settings reject malformed values and preserve only valid active templates",
     run() {
-      const emptySettings = { templates: [], activeTemplateId: null };
+      const emptySettings = {
+        templates: [],
+        activeTemplateId: null,
+        combinePrompt: DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT,
+      };
       assert.deepEqual(normalizeChatSummaryPromptSettings("{not json"), emptySettings);
       assert.deepEqual(
         normalizeChatSummaryPromptSettings({
@@ -6748,15 +7011,31 @@ Use HTML sparingly and diegetically. Do not replace normal prose/dialogue unless
           ],
           activeTemplateId: " summary ",
         }),
-        { templates, activeTemplateId: "summary" },
+        { templates, activeTemplateId: "summary", combinePrompt: DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT },
       );
       assert.deepEqual(normalizeChatSummaryPromptSettings({ templates, activeTemplateId: "missing" }), {
         templates,
         activeTemplateId: null,
+        combinePrompt: DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT,
       });
       assert.deepEqual(
         normalizeChatSummaryPromptSettings({ templates, activeTemplateId: LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID }),
-        { templates, activeTemplateId: LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID },
+        {
+          templates,
+          activeTemplateId: LONG_TERM_MEMORY_CHAT_SUMMARY_PROMPT_ID,
+          combinePrompt: DEFAULT_CHAT_SUMMARY_COMBINE_PROMPT,
+        },
+      );
+      assert.equal(
+        resolveChatSummaryCombinePrompt(
+          JSON.stringify({ templates, activeTemplateId: null, combinePrompt: " Merge these notes. " }),
+        ),
+        "Merge these notes.",
+      );
+      assert.equal(
+        normalizeChatSummaryPromptSettings({ combinePrompt: "x".repeat(CHAT_SUMMARY_PROMPT_MAX_LENGTH + 1) })
+          .combinePrompt.length,
+        CHAT_SUMMARY_PROMPT_MAX_LENGTH,
       );
       assert.equal(
         resolveChatSummaryPrompt({
@@ -6785,6 +7064,15 @@ Use HTML sparingly and diegetically. Do not replace normal prose/dialogue unless
         }),
         DEFAULT_CHAT_SUMMARY_PROMPT,
       );
+    },
+  },
+  {
+    name: "Spotify tools stay agent-owned when chat function calls are enabled",
+    run() {
+      for (const toolName of DEFAULT_AGENT_TOOLS.spotify ?? []) {
+        assert.equal(isChatToolEnabledByDefault(toolName), false, `${toolName} must require Music DJ selection`);
+      }
+      assert.equal(isChatToolEnabledByDefault("roll_dice"), true);
     },
   },
   {
@@ -6830,6 +7118,27 @@ Use HTML sparingly and diegetically. Do not replace normal prose/dialogue unless
         compiledLargeSummary,
         largeSummary.trim(),
         "Compiled chat metadata must preserve summaries larger than the former 64 KiB ceiling",
+      );
+
+      assert.deepEqual(
+        parseChatSummaryResult('```json\n{"name":"  Moonlit   promise  ","summary":"They promised to return."}\n```'),
+        { title: "Moonlit promise", summary: "They promised to return." },
+        "Summary JSON should preserve the summary and normalize its generated name",
+      );
+      assert.deepEqual(
+        parseChatSummaryResult('{"title":"Legacy title field","summary":"Old clients remain compatible."}'),
+        { title: "Legacy title field", summary: "Old clients remain compatible." },
+        "The parser should accept title as an alias for name",
+      );
+      assert.deepEqual(parseChatSummaryResult("Plain-text summary"), {
+        title: "",
+        summary: "Plain-text summary",
+      });
+      assert.match(DEFAULT_CHAT_SUMMARY_PROMPT, /"name": "short one-line title/u);
+      assert.equal(
+        generateChatSummaryEntryTitle({ origin: "manual" }),
+        "Manual summary",
+        "Fallback titles should not duplicate the message range shown in metadata",
       );
     },
   },
@@ -8395,6 +8704,53 @@ Use HTML sparingly and diegetically. Do not replace normal prose/dialogue unless
       assert.equal(returningCharacters[0]?.characterId, "mira-card");
       assert.equal(returningCharacters[0]?.avatarPath, "/api/avatars/file/mira.png");
       assert.equal(matchedCards.has("mira-card"), true);
+
+      const canonicalPartyCharacters: Array<Record<string, unknown>> = [
+        {
+          name: 'Marisol "Mari"',
+          mood: "Concerned",
+          appearance: "Expanded-name appearance",
+        },
+        {
+          name: "Mari",
+          mood: "Focused",
+          appearance: "Canonical-name appearance",
+        },
+      ];
+      const canonicalPartyMatches = applyTrackerCharacterCardIdentity(canonicalPartyCharacters, [
+        {
+          id: "party-card",
+          name: "Mari",
+          avatarPath: "/api/avatars/file/party-card.png",
+        },
+      ]);
+      assert.equal(canonicalPartyMatches.has("party-card"), true);
+      assert.deepEqual(canonicalPartyCharacters, [
+        {
+          characterId: "party-card",
+          name: "Mari",
+          mood: "Focused",
+          appearance: "Canonical-name appearance",
+          avatarPath: "/api/avatars/file/party-card.png",
+          avatarCrop: null,
+        },
+      ]);
+
+      const unrelatedLongName: Array<Record<string, unknown>> = [{ name: "Mari Calder" }];
+      applyTrackerCharacterCardIdentity(unrelatedLongName, [{ id: "party-card", name: "Mari" }]);
+      assert.deepEqual(unrelatedLongName, [{ name: "Mari Calder" }]);
+
+      assert.equal(
+        canonicalizeGamePartySpeakerLabels(
+          '[Marisol "Mari"] [main] [happy]: "Ready."\n\nMarisol "Mari" crosses the room.',
+          ["Mari"],
+        ),
+        '[Mari] [main] [happy]: "Ready."\n\nMarisol "Mari" crosses the room.',
+      );
+      assert.equal(
+        canonicalizeGamePartySpeakerLabels('[Mari Calder] [main] [happy]: "Ready."', ["Mari"]),
+        '[Mari Calder] [main] [happy]: "Ready."',
+      );
 
       assert.equal(resolveCharacterCustomFieldName("  ", "Goal"), "Goal");
       assert.equal(makeUniqueCharacterCustomFieldName({ "New Field": "", "new   field 2": "" }), "New Field 3");

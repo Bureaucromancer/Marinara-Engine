@@ -46,7 +46,8 @@ import {
 } from "../../lib/slash-commands";
 import { createInputMacroResolverForChat, isPromptPreviewMacro } from "../../lib/chat-macros";
 import { parseChatMetadata } from "../../lib/chat-display";
-import { cn, getAvatarCropStyle, type AvatarCropValue } from "../../lib/utils";
+import type { AvatarCrop } from "@marinara-engine/shared";
+import { cn, getAvatarCropStyle } from "../../lib/utils";
 import { applyTextareaQuoteFormat } from "../../lib/textarea-quotes";
 import { translateDraftText } from "../../lib/draft-translation";
 import { prepareImageAttachment } from "../../lib/chat-attachment-images";
@@ -187,7 +188,7 @@ interface ChatInputProps {
     id: string;
     name: string;
     avatarUrl: string | null;
-    avatarCrop?: AvatarCropValue | null;
+    avatarCrop?: AvatarCrop | null;
   }>;
   onExpressionChange?: (
     characterId: string,
@@ -765,7 +766,13 @@ export const ChatInput = memo(function ChatInput({
     return {
       chatId: activeChatId,
       mode,
-      generate: generateWithNarrativeDirector,
+      generate: (params) =>
+        generateWithNarrativeDirector({
+          ...params,
+          ...(params.impersonate && canSubmitSpatialMove && pendingSpatialTransition
+            ? { pendingSpatialTransition: pendingSpatialTransition.transition }
+            : {}),
+        }),
       createMessage: async (data) => {
         await createMessage.mutateAsync(data);
         requestChatScrollToBottom({ chatId: activeChatId, behavior: "auto" });
@@ -790,6 +797,7 @@ export const ChatInput = memo(function ChatInput({
     createMessage,
     activeCharacterNames,
     activeChatCharacters,
+    canSubmitSpatialMove,
     requiresManualGuideTarget,
     removeFromResponseQueue,
     latestAssistantMessage,
@@ -797,6 +805,7 @@ export const ChatInput = memo(function ChatInput({
     onExpressionChange,
     onIllustrate,
     availableCapabilityIds,
+    pendingSpatialTransition,
     qc,
   ]);
 
@@ -1862,6 +1871,7 @@ export const ChatInput = memo(function ChatInput({
           view="runtime"
           capabilityProps={{
             chatId: activeChatId,
+            chatMode: mode,
             disabled: isInputBusy,
             pendingTransition: pendingSpatialTransition,
             onPendingTransitionChange: (pending: unknown) => {

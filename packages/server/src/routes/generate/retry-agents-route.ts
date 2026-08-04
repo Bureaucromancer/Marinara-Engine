@@ -157,6 +157,7 @@ import {
 import {
   suppressesReferencePromptLine,
   mergeIllustratorNegativePrompt,
+  illustratorPromptTemplateOwnsComposition,
   resolveIllustratorCharacterReferences,
 } from "./illustrator-references.js";
 import {
@@ -1227,7 +1228,17 @@ async function resolveRetryAgents(args: {
       .filter((agentType) => isAgentAvailableInChatMode(chatMode, agentType))
       .filter((agentType) => activeAgentTypeSet.has(agentType)),
   );
-  const configs = (await agentsStore.list()).filter(
+  const allConfigs = await agentsStore.list();
+  const skippedImportedConfigs = args.allowExternalAgentImports
+    ? []
+    : allConfigs.filter((config) => isExternallyImportedAgent(config.type, config.settings));
+  if (skippedImportedConfigs.length > 0) {
+    logger.debug(
+      "[agents] Retry skipped %d externally imported Agent configurations because custom imports are disabled",
+      skippedImportedConfigs.length,
+    );
+  }
+  const configs = allConfigs.filter(
     (config) => args.allowExternalAgentImports || !isExternallyImportedAgent(config.type, config.settings),
   );
   const deletedBuiltInTypes = new Set(
@@ -2960,12 +2971,12 @@ async function applyRetryResultEffects(args: {
             previousCharacters = [];
           }
         }
+        applyTrackerCharacterCardIdentity(presentCharacters, agentContext.characters);
         preserveTrackerCharacterUiFields(presentCharacters, previousCharacters);
         preserveTrackerCharacterUiFields(
           presentCharacters,
           (agentContext.characterTrackerHistory ?? []) as unknown as Array<Record<string, unknown>>,
         );
-        applyTrackerCharacterCardIdentity(presentCharacters, agentContext.characters);
         const lockedCharacterPatch = applyTrackerFieldLocksToGameStatePatch(
           { presentCharacters },
           previousSnapshot ? parseGameStateRow(previousSnapshot as Record<string, unknown>) : null,
@@ -3312,6 +3323,7 @@ async function applyRetryResultEffects(args: {
                 : null,
               requestedNames: illCharacters.filter((name): name is string => typeof name === "string"),
               promptText: [
+                [...agentContext.recentMessages].reverse().find((message) => message.role === "user")?.content ?? "",
                 imagePrompt,
                 style,
                 typeof illData.reason === "string" ? illData.reason : "",
@@ -3319,6 +3331,7 @@ async function applyRetryResultEffects(args: {
               ].join("\n"),
               fallbackToChatCharacters: false,
               includeReferenceImages: useAvatarRefs,
+              includePersonaWhenMentionedInPrompt: false,
               maxReferences: spatialLocationReferenceImage ? 5 : 6,
             });
             if (includeCharacterAppearance && referenceResolution.appearanceBlock) {
@@ -3361,7 +3374,9 @@ async function applyRetryResultEffects(args: {
               omitProfileStyleText:
                 illData._styleProfileInstructionApplied === true ||
                 typeof agentContext.memory._illustratorImageStyleInstruction === "string",
-              omitProfileSubjectTags: true,
+              omitProfileSubjectTags: illustratorPromptTemplateOwnsComposition(
+                imagePromptAgent?.resolved.promptTemplate ?? "",
+              ),
             });
             const finalNegativePrompt = mergeIllustratorNegativePrompt(
               compiledPrompt.prompt,

@@ -31,7 +31,6 @@ import {
   normalizeTextForMatch,
   formatRpgStatsForPrompt,
   normalizeRpgStatPools,
-  localAuthProviderBaseUrl,
 } from "@marinara-engine/shared";
 import type {
   CharacterData,
@@ -63,10 +62,10 @@ import { createSpatialContextStorage } from "../services/storage/spatial-context
 import { createRegexScriptsStorage } from "../services/storage/regex-scripts.storage.js";
 import { processLorebooks } from "../services/lorebook/index.js";
 import { injectAtDepth } from "../services/lorebook/prompt-injector.js";
-import { createLLMProvider } from "../services/llm/provider-registry.js";
-import { withConnectionFallbackProvider } from "../services/llm/connection-fallback-provider.js";
-import { createReplyFallbackNotifier } from "./generate/fallback-notification.js";
-import { resolveChatSummaryConnection } from "../services/chat-summary/connection-resolution.js";
+import {
+  resolveChatSummaryConnection,
+  resolveChatSummaryTemperatureOptions,
+} from "../services/chat-summary/connection-resolution.js";
 import { generateMissingConversationSummaries } from "../services/conversation/auto-summary.service.js";
 import { clearChatActivity, recordUserReaction } from "../services/conversation/autonomous.service.js";
 import { rebuildMemoryChunks } from "../services/memory-recall.js";
@@ -82,6 +81,7 @@ import { normalizeTimestampOverrides } from "../services/import/import-timestamp
 import {
   appendNonLeadingSystemMessagesToLastUser,
   computeSummaryHideIds,
+  computeSummaryMessageRange,
   selectRollingSummaryMessages,
   findTrackerContextInsertIndex,
   isManualTrackerCharacterId,
@@ -117,7 +117,10 @@ import { persistLorebookKeeperUpdates } from "./generate/lorebook-keeper-utils.j
 import {
   clampRoleplaySummaryMaxTokens,
   formatRoleplaySummaryChatLog,
+  normalizeChatSummaryTitle,
+  parseChatSummaryResult,
   resolveChatSummaryPrompt,
+  resolveChatSummaryCombinePrompt,
 } from "../services/generation/roleplay-summary-runtime.js";
 import { resolveLorebookTokenBudget } from "../services/generation/lorebook-generation-runtime.js";
 import { resolveGameGmPromptTemplate } from "../services/generation/game-gm-prompt-runtime.js";
@@ -128,7 +131,7 @@ const MEMORY_RECALL_IMPORT_BODY_LIMIT_BYTES = 25 * 1024 * 1024;
 const MEMORY_RECALL_IMPORT_BATCH_SIZE = 500;
 const PROFESSOR_MARI_INTERNAL_CHAT_MARKER = "professor-mari";
 const SUMMARY_COMBINE_DEFAULT_CONTEXT_TOKENS = 32_768;
-const SUMMARY_COMBINE_PROMPT_RESERVE_TOKENS = 1_024;
+const SUMMARY_COMBINE_MESSAGE_OVERHEAD_TOKENS = 64;
 
 function presetStringField(preset: Record<string, unknown> | null | undefined, field: string): string {
   const value = preset?.[field];
@@ -255,24 +258,6 @@ function getMemoryRecallChunkImportKey(
   chunk: Pick<ChatMemoryRecallExportChunk, "content" | "firstMessageAt" | "lastMessageAt">,
 ): string {
   return JSON.stringify([chunk.firstMessageAt, chunk.lastMessageAt, chunk.content]);
-}
-
-function extractGeneratedSummary(content: string): string {
-  try {
-    const cleaned = content
-      .trim()
-      .replace(/```(?:json)?\s*/giu, "")
-      .replace(/```/gu, "");
-    const first = cleaned.indexOf("{");
-    const last = cleaned.lastIndexOf("}");
-    if (first >= 0 && last > first) {
-      const parsed = JSON.parse(cleaned.slice(first, last + 1)) as { summary?: unknown };
-      if (typeof parsed.summary === "string" && parsed.summary.trim()) return parsed.summary.trim();
-    }
-  } catch {
-    // Plain-text summary responses are valid.
-  }
-  return content.trim();
 }
 
 function readMemoryRecallImportPayload(
@@ -1260,6 +1245,19 @@ export async function chatsRoutes(app: FastifyInstance) {
         typeof payload.promptTemplateId === "string" && payload.promptTemplateId.trim()
           ? payload.promptTemplateId.trim()
           : null;
+      const summaryTitle = normalizeChatSummaryTitle(payload.summaryTitle);
+      const rangeStartIndex =
+        typeof payload.rangeStartIndex === "number" &&
+        Number.isInteger(payload.rangeStartIndex) &&
+        payload.rangeStartIndex > 0
+          ? payload.rangeStartIndex
+          : undefined;
+      const rangeEndIndex =
+        typeof payload.rangeEndIndex === "number" &&
+        Number.isInteger(payload.rangeEndIndex) &&
+        payload.rangeEndIndex > 0
+          ? payload.rangeEndIndex
+          : undefined;
       let combined: string | null = text;
       let createdEntry: ChatSummaryEntry | null = null;
       let summaryEntries: ChatSummaryEntry[] = [];
@@ -1271,9 +1269,12 @@ export async function chatsRoutes(app: FastifyInstance) {
             kind: "rolling",
             origin: "automated",
             sourceMode: "agent",
+            ...(summaryTitle ? { title: summaryTitle } : {}),
             content: text,
             enabled: true,
             ...(messageCount ? { messageCount } : {}),
+            ...(rangeStartIndex ? { rangeStartIndex } : {}),
+            ...(rangeEndIndex ? { rangeEndIndex } : {}),
             ...(messageIds.length > 0 ? { messageIds } : {}),
             promptTemplateId,
             createdAt: now,
@@ -1339,20 +1340,29 @@ export async function chatsRoutes(app: FastifyInstance) {
     const chatMeta = typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {});
 
     const connections = createConnectionsStorage(app.db);
-    const connId = chat.connectionId ?? (await connections.getDefault())?.id;
-    if (!connId) return reply.status(400).send({ error: "No API connection configured for this chat" });
-    const conn = await connections.getWithKey(connId);
-    if (!conn) return reply.status(400).send({ error: "API connection not found" });
-
-    let baseUrl = conn.baseUrl;
-    if (!baseUrl) {
-      const { PROVIDERS } = await import("@marinara-engine/shared");
-      const providerDef = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
-      baseUrl = providerDef?.defaultBaseUrl ?? "";
+    const resolvedSummaryConnection = await resolveChatSummaryConnection({
+      chatConnectionId: chat.connectionId,
+      chatMetadata: chatMeta,
+      connections,
+      resolveBaseUrl,
+    });
+    if (!resolvedSummaryConnection.ok) {
+      return reply.status(400).send({
+        error: resolvedSummaryConnection.error,
+        warnings: resolvedSummaryConnection.warnings,
+      });
     }
-    const localAuthBaseUrl = localAuthProviderBaseUrl(conn.provider);
-    if (!baseUrl && localAuthBaseUrl) baseUrl = localAuthBaseUrl;
-    if (!baseUrl) return reply.status(400).send({ error: "No base URL for this connection" });
+    if (resolvedSummaryConnection.warnings.length > 0) {
+      logger.warn(
+        {
+          chatId: req.params.id,
+          connectionId: resolvedSummaryConnection.connectionId,
+          source: resolvedSummaryConnection.source,
+          warnings: resolvedSummaryConnection.warnings,
+        },
+        "[conversation-summary] Resolved backfill summary connection after fallback",
+      );
+    }
 
     const characterIds: string[] = Array.isArray(chat.characterIds)
       ? chat.characterIds
@@ -1389,33 +1399,15 @@ export async function chatsRoutes(app: FastifyInstance) {
     }
     const scopedMessages = startIdx > 0 ? allMessages.slice(startIdx) : allMessages;
 
-    const fallbackConnection = await connections.getFallbackForAgents();
-    const provider = withConnectionFallbackProvider({
-      primary: createLLMProvider(
-        conn.provider,
-        baseUrl,
-        conn.apiKey,
-        conn.maxContext,
-        conn.openrouterProvider,
-        conn.maxTokensOverride,
-        conn.claudeFastMode === "true",
-        conn.treatAsLocalEndpoint === "true",
-        conn.defaultParameters,
-      ),
-      primaryConnectionId: conn.id,
-      fallbackConnection,
-      fallbackBaseUrl: fallbackConnection ? resolveBaseUrl(fallbackConnection) : "",
-      category: "agents",
-      onFallback: createReplyFallbackNotifier(reply),
-    });
     const result = await generateMissingConversationSummaries({
       messages: scopedMessages,
       metadata: chatMeta,
-      provider,
-      model: conn.model,
+      provider: resolvedSummaryConnection.provider,
+      model: resolvedSummaryConnection.model,
       personaName,
       charIdToName,
       rolloverHour: Math.max(0, Math.min(11, Math.floor((chatMeta.dayRolloverHour as number | undefined) ?? 4))),
+      maxTokens: clampRoleplaySummaryMaxTokens(chatMeta.summaryMaxTokens),
       maxMissingDays,
     });
 
@@ -2493,6 +2485,7 @@ export async function chatsRoutes(app: FastifyInstance) {
           applyRegexScriptsToPromptMessages(mappedMessages, await regexStore.list(), {
             resolveMacros: (value, randomSeed) =>
               resolveMacros(value, promptMacroContext, { trimResult: false, randomSeed }),
+            targetPromptPresetId: presetId,
           });
           promptMacroContext.lastInput = [...mappedMessages]
             .reverse()
@@ -3923,6 +3916,7 @@ export async function chatsRoutes(app: FastifyInstance) {
       );
     }
     const { provider, model } = resolvedSummaryConnection;
+    const summaryTemperatureOptions = resolveChatSummaryTemperatureOptions(resolvedSummaryConnection);
 
     if (requestedSummaryEntryIds.length >= 2) {
       const currentEntries = normalizeChatSummaryEntries(chatMeta.summaryEntries, {
@@ -3937,20 +3931,6 @@ export async function chatsRoutes(app: FastifyInstance) {
         summaryMaxTokens,
         provider.maxTokensOverrideValue ?? summaryMaxTokens,
       );
-      const combinedSummaryInputBudget = Math.max(
-        0,
-        (provider.maxContextValue ?? SUMMARY_COMBINE_DEFAULT_CONTEXT_TOKENS) -
-          effectiveSummaryMaxTokens -
-          SUMMARY_COMBINE_PROMPT_RESERVE_TOKENS,
-      );
-      const combinedTokenEstimate = selectedEntries.reduce(
-        (total, entry) => total + Math.max(entry.tokenEstimate, estimateChatSummaryTokens(entry.content)),
-        0,
-      );
-      if (combinedTokenEstimate > combinedSummaryInputBudget) {
-        return reply.status(400).send({ error: "Selected summaries are too large to combine at once" });
-      }
-
       const requestedPromptTemplateId =
         typeof body.promptTemplateId === "string" && body.promptTemplateId.trim()
           ? body.promptTemplateId.trim()
@@ -3963,29 +3943,43 @@ export async function chatsRoutes(app: FastifyInstance) {
         chatMetadata: chatMeta,
         globalSettingsValue: globalSummaryPromptSettings,
       });
+      const combinePrompt = resolveChatSummaryCombinePrompt(globalSummaryPromptSettings);
       const sourceText = selectedEntries
         .map((entry, index) => `Summary ${index + 1} — ${entry.title}:\n${entry.content}`)
         .join("\n\n");
+      const combinedSummaryInputBudget = Math.max(
+        0,
+        (provider.maxContextValue ?? SUMMARY_COMBINE_DEFAULT_CONTEXT_TOKENS) -
+          effectiveSummaryMaxTokens -
+          estimateChatSummaryTokens(summaryPrompt) -
+          estimateChatSummaryTokens(combinePrompt) -
+          SUMMARY_COMBINE_MESSAGE_OVERHEAD_TOKENS,
+      );
+      if (estimateChatSummaryTokens(sourceText) > combinedSummaryInputBudget) {
+        return reply.status(400).send({ error: "Selected summaries are too large to combine at once" });
+      }
       const result = await provider.chatComplete(
         [
           { role: "system", content: summaryPrompt },
           {
             role: "user",
-            content:
-              "Condense the ordered summaries below into one summary. Preserve durable facts, relationships, decisions, and chronological order. Return the same summary format requested by the system prompt.\n\n" +
-              sourceText,
+            content: `${combinePrompt}\n\n${sourceText}`,
           },
         ],
         {
           model,
-          temperature: 0.5,
+          ...summaryTemperatureOptions,
           maxTokens: effectiveSummaryMaxTokens,
         },
       );
       if (!result.content) {
         return reply.status(500).send({ error: "No response from AI" });
       }
-      const summaryText = extractGeneratedSummary(result.content);
+      const parsedSummary = parseChatSummaryResult(result.content);
+      const summaryText = parsedSummary.summary;
+      if (!summaryText) {
+        return reply.status(500).send({ error: "No summary returned by AI" });
+      }
 
       let combinedEntry: ChatSummaryEntry | null = null;
       let combinedEntries: ChatSummaryEntry[] = [];
@@ -4009,7 +4003,7 @@ export async function chatsRoutes(app: FastifyInstance) {
           {
             kind: "rolling",
             origin: "manual",
-            title: "Combined summary",
+            title: parsedSummary.title || "Combined summary",
             content: summaryText,
             enabled: selected.some((entry) => entry.enabled),
             sourceMode: starts.length > 0 || ends.length > 0 ? "range" : "last",
@@ -4090,6 +4084,13 @@ export async function chatsRoutes(app: FastifyInstance) {
     if (selectedMessages.length === 0) {
       return reply.status(400).send({ error: "No non-hidden messages available for the requested summary range" });
     }
+    if (selectedRangeStartIndex === undefined || selectedRangeEndIndex === undefined) {
+      const selectedRange = computeSummaryMessageRange(allMessages, selectedMessages);
+      if (selectedRange) {
+        selectedRangeStartIndex = selectedRange.startIndex;
+        selectedRangeEndIndex = selectedRange.endIndex;
+      }
+    }
     const chatLog = formatRoleplaySummaryChatLog(selectedMessages);
 
     const previousSummary = chatMeta.summary ?? null;
@@ -4117,7 +4118,7 @@ export async function chatsRoutes(app: FastifyInstance) {
 
     const result = await provider.chatComplete(messages, {
       model,
-      temperature: 0.5,
+      ...summaryTemperatureOptions,
       maxTokens: summaryMaxTokens,
     });
 
@@ -4125,7 +4126,11 @@ export async function chatsRoutes(app: FastifyInstance) {
       return reply.status(500).send({ error: "No response from AI" });
     }
 
-    const summaryText = extractGeneratedSummary(result.content);
+    const parsedSummary = parseChatSummaryResult(result.content);
+    const summaryText = parsedSummary.summary;
+    if (!summaryText) {
+      return reply.status(500).send({ error: "No summary returned by AI" });
+    }
 
     const messageIds = selectedMessages.map((message) => message.id);
     // Subset eligible to be hidden when "Hide summarised messages" is on: the
@@ -4173,6 +4178,7 @@ export async function chatsRoutes(app: FastifyInstance) {
             kind: "rolling",
             origin: "manual",
             sourceMode: hasRange ? "range" : "last",
+            ...(parsedSummary.title ? { title: parsedSummary.title } : {}),
             content: summaryText,
             enabled: true,
             messageCount: selectedMessages.length,

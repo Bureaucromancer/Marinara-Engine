@@ -45,7 +45,7 @@ import { handleFolderRenameKeyDown, useFolderRenameGesture } from "../../hooks/u
 import { useChatStore } from "../../stores/chat.store";
 import { confirmNonEmptyFolderDelete, showConfirmDialog } from "../../lib/app-dialogs";
 import { useUIStore, type UserStatus } from "../../stores/ui.store";
-import { cn, getAvatarCropStyle, type AvatarCropValue } from "../../lib/utils";
+import { cn, getAvatarCropStyle } from "../../lib/utils";
 import { chatBackgroundMetadataToUrl } from "../../lib/backgrounds";
 import { formatRelativeContact } from "../../lib/relative-time";
 import { ChatRowPeek } from "./ChatRowPeek";
@@ -55,7 +55,9 @@ import { toast } from "sonner";
 import {
   BACKGROUND_THUMBNAIL_WIDTH,
   includesTextForMatch,
+  normalizeAvatarCrop,
   normalizeTextForMatch,
+  type AvatarCrop,
   type Chat,
   type ChatFolder,
   type ChatMode,
@@ -76,6 +78,7 @@ import { SelectionActionBar } from "../ui/SelectionActionBar";
 import { SmoothFolderContent } from "../ui/SmoothFolderContent";
 import { useTranslation, useTranslation as useUiTranslation } from "react-i18next";
 import { useLocalizedUiText } from "../../localization/use-localized-ui-text";
+import { PersonalExtensionContributionSlot } from "../extensions/PersonalExtensionContributionSlot";
 
 type ChatSortOption = "recent" | "newest" | "oldest" | "name-asc" | "name-desc";
 const CHAT_LIST_PAGE_SIZE = 100;
@@ -352,7 +355,7 @@ export function ChatSidebar() {
       {
         name: string;
         avatarUrl: string | null;
-        avatarCrop?: AvatarCropValue | null;
+        avatarCrop?: AvatarCrop | null;
         conversationStatus?: string;
       }
     >();
@@ -361,7 +364,7 @@ export function ChatSidebar() {
       map.set(character.id, {
         name: character.name,
         avatarUrl: character.avatarUrl,
-        avatarCrop: (character.avatarCrop as AvatarCropValue | undefined) ?? null,
+        avatarCrop: normalizeAvatarCrop(character.avatarCrop),
         conversationStatus: character.conversationStatus,
       });
     }
@@ -1074,7 +1077,7 @@ export function ChatSidebar() {
               .filter(Boolean) as {
               name: string;
               avatarUrl: string | null;
-              avatarCrop?: AvatarCropValue | null;
+              avatarCrop?: AvatarCrop | null;
               conversationStatus?: string;
             }[];
 
@@ -1267,11 +1270,12 @@ export function ChatSidebar() {
       {/* Header */}
       <div className="mari-sidebar-header relative flex h-12 items-center justify-between bg-[var(--card)]/80 px-4 backdrop-blur-sm">
         <div className="absolute inset-x-0 bottom-0 h-px bg-[var(--border)]/30" />
-        <div className="flex items-center gap-2.5">
+        <div className="flex min-w-0 items-center gap-2.5">
           <ChatSidebarTitleIcon />
-          <h2 className="mari-chrome-text-strong text-sm font-semibold">{localize("Chats")}</h2>
+          <h2 className="mari-chrome-text-strong truncate text-sm font-semibold">{localize("Chats")}</h2>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex min-w-0 shrink-0 items-center gap-1">
+          <PersonalExtensionContributionSlot surface="chats" position="header" className="max-w-28" />
           <button
             onClick={() => setSidebarOpen(false)}
             className="mari-chrome-control mari-chrome-control--small mari-accent-animated p-1.5 active:scale-90 md:hidden"
@@ -1282,6 +1286,12 @@ export function ChatSidebar() {
           </button>
         </div>
       </div>
+
+      <PersonalExtensionContributionSlot
+        surface="chats"
+        position="before-content"
+        className="shrink-0 border-b border-[var(--border)]/40"
+      />
 
       {/* Tabs */}
       <div className="px-3 pt-3">
@@ -1630,6 +1640,12 @@ export function ChatSidebar() {
           className="static mx-0"
         />
       )}
+
+      <PersonalExtensionContributionSlot
+        surface="chats"
+        position="after-content"
+        className="shrink-0 border-t border-[var(--border)]/40"
+      />
 
       {/* ── User Status Selector ── */}
       <UserStatusFooter />

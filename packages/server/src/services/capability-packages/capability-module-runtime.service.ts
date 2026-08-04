@@ -28,6 +28,10 @@ import { createCapabilityEmbeddingHost } from "./capability-embedding.service.js
 import { createCapabilityPersistenceHost } from "./capability-persistence.service.js";
 import { createCapabilityResourceHost } from "./capability-resources.service.js";
 import { registerCapabilityPrivilegedRoutes } from "./capability-route-registration.service.js";
+import {
+  registerCapabilityPromptContext,
+  type CapabilityPromptContextContributor,
+} from "./capability-prompt-context.service.js";
 
 type Cleanup = () => void | Promise<void>;
 type CapabilityActivationContext = {
@@ -39,6 +43,8 @@ type CapabilityActivationContext = {
     registerTurnGameEngine(engine: AnyTurnGameEngine): Cleanup;
     registerConversationCommand(registration: CapabilityConversationCommandRegistration): Cleanup;
     registerService<T>(key: string, service: T): Cleanup;
+    /** Contribute text to each turn's system prompt. Requires the `prompt-context` permission. */
+    registerPromptContext(contributor: CapabilityPromptContextContributor): Cleanup;
     registerPrivilegedRoutes(routes: import("fastify").FastifyPluginAsync, options: { prefix: string }): Promise<Cleanup>;
   };
 };
@@ -162,6 +168,16 @@ class CapabilityModuleRuntime {
           registerConversationCommand: (registration) =>
             trackCleanup(registerCapabilityConversationCommand(registration)),
           registerService: (key, service) => trackCleanup(registerCapabilityService(key, service)),
+          // Gated on the permission the manifest already declares, so a package can't reach the prompt
+          // without asking for it up front. Contract in capability-prompt-context.service.ts.
+          registerPromptContext: (contributor) => {
+            if (!installed.manifest.permissions?.includes("prompt-context")) {
+              throw new Error(
+                `Capability package ${installed.id} must declare the "prompt-context" permission to contribute prompt context`,
+              );
+            }
+            return trackCleanup(registerCapabilityPromptContext(installed.id, contributor));
+          },
           registerPrivilegedRoutes: async (routes, options) =>
             trackCleanup(await registerCapabilityPrivilegedRoutes(app, installed, routes, options)),
         },

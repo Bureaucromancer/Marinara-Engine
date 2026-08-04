@@ -82,7 +82,7 @@ try {
   const legacyManifest = capabilityPackageManifestSchema.parse(installedPackage("legacy", ["agent"]).manifest);
   assert.equal(legacyManifest.schemaVersion, 1, "Existing manifest v1 packages must remain readable");
   assert.equal(getCapabilityApiCompatibilityIssue(legacyManifest), null);
-  assert.deepEqual(supportedCapabilityApi, { major: 1, minor: 7 });
+  assert.deepEqual(supportedCapabilityApi, { major: 1, minor: 8 });
 
   const manifestV2 = capabilityPackageManifestSchema.parse({
     ...legacyManifest,
@@ -118,20 +118,20 @@ try {
   });
   assert.match(
     getCapabilityApiCompatibilityIssue(unsupportedMajorManifest) ?? "",
-    /requires capability API 2\.0; this Engine supports 1\.7/,
+    /requires capability API 2\.0; this Engine supports 1\.8/,
   );
   const currentMinorManifest = capabilityPackageManifestSchema.parse({
     ...manifestV2,
-    capabilityApi: { major: 1, minor: 7 },
+    capabilityApi: { major: 1, minor: 8 },
   });
   assert.equal(getCapabilityApiCompatibilityIssue(currentMinorManifest), null);
   const unsupportedMinorManifest = capabilityPackageManifestSchema.parse({
     ...manifestV2,
-    capabilityApi: { major: 1, minor: 8 },
+    capabilityApi: { major: 1, minor: 9 },
   });
   assert.match(
     getCapabilityApiCompatibilityIssue(unsupportedMinorManifest) ?? "",
-    /requires capability API 1\.8; this Engine supports 1\.7/,
+    /requires capability API 1\.9; this Engine supports 1\.8/,
   );
 
   const forwardCompatibleCatalog = capabilityCatalogSchema.parse({
@@ -356,6 +356,16 @@ try {
     chatSettingsSource,
     /gameAgentPool\.map\(\(agent\)[\s\S]{0,7000}agent\.id === "long-term-memory" && ltmPackage[\s\S]{0,2500}<CapabilityElement/u,
     "Game chat settings must render the Long-Term Memory package controls",
+  );
+  assert.match(
+    chatSettingsSource,
+    /callsPackage \?\s[\s\S]{0,2200}ltmPackage \?\s[\s\S]{0,1800}setLtmEnabledForChat/u,
+    "Conversation chat settings must place Long-Term Memory below Calls with its activation control",
+  );
+  assert.match(
+    chatSettingsSource,
+    /const setLtmEnabledForChat = useCallback\([\s\S]{0,900}activeAgentIds: enabled[\s\S]{0,300}filter\(\(id\) => id !== ltmPackageId\)/u,
+    "Long-Term Memory activation must preserve other active agents while toggling its own ID",
   );
   const serverlessTurnGameManifest = capabilityPackageManifestSchema.parse({
     ...legacyManifest,
@@ -783,6 +793,7 @@ try {
   }
   const agentSuite = {
     ...installedPackage("agent-suite", ["agent"]),
+    readiness: "ready" as const,
     manifest: {
       ...installedPackage("agent-suite", ["agent"]).manifest,
       entrypoints: { server: "server.mjs", client: "client.js", agents: "agents.json" },
@@ -815,6 +826,14 @@ try {
         defaultPromptTemplate: "Helper prompt.",
       },
     ]),
+  );
+  assert.deepEqual(
+    (await capabilityPackageManager.agentDefinitions()).map(({ id, packageId }) => ({ id, packageId })),
+    [
+      { id: "agent-suite", packageId: "agent-suite" },
+      { id: "suite-helper", packageId: "agent-suite" },
+    ],
+    "Capability agent registry rows must expose their owning package for package-aware uninstall controls",
   );
   assert.deepEqual(await capabilityPackageManager.packageAgentIds(agentSuite.id), ["agent-suite", "suite-helper"]);
   const removedAgentSuite = await capabilityPackageManager.uninstall(agentSuite.id);
