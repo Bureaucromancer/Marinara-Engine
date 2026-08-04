@@ -376,8 +376,12 @@ if /I "%PNPM_RUNNER%"=="corepack" (
 exit /b %errorlevel%
 
 :resolve_pnpm_runner
-set "PNPM_DESCRIPTOR=10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e"
-for /f "usebackq delims=" %%i in (`node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).packageManager?.replace(/^pnpm@/, '') || '10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e'"`) do set "PNPM_DESCRIPTOR=%%i"
+set "PNPM_DESCRIPTOR="
+for /f "usebackq delims=" %%i in (`node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).packageManager?.replace(/^^pnpm@/, '') || ''"`) do set "PNPM_DESCRIPTOR=%%i"
+if not defined PNPM_DESCRIPTOR (
+    echo  [ERROR] Could not read the pinned pnpm descriptor from package.json.
+    exit /b 1
+)
 for /f "tokens=1 delims=+" %%i in ("!PNPM_DESCRIPTOR!") do set "PNPM_VERSION=%%i"
 set "PNPM_RUNNER=pnpm"
 set "CURRENT_PNPM_VERSION="
@@ -419,7 +423,7 @@ if not defined CURRENT_PNPM_VERSION (
 if not defined CURRENT_PNPM_VERSION (
     echo  [ERROR] Failed to make pnpm !PNPM_VERSION! available.
     echo          Marinara can run without a global pnpm install, but Node.js must provide Corepack or npx/npm.
-    echo          Reinstall Node.js 24 LTS with npm enabled, or run: npm install -g pnpm@10.34.5
+    echo          Reinstall Node.js 24 LTS with npm enabled, or run: npm install -g pnpm@!PNPM_VERSION!
     exit /b 1
 )
 echo  [OK] pnpm !CURRENT_PNPM_VERSION! ready

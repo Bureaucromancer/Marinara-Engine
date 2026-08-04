@@ -37,17 +37,55 @@ assert.match(
   "Plain pnpm fallbacks must delegate project commands to the packageManager pin",
 );
 
-for (const pinBearingPath of [
+for (const descriptorBearingPath of [
+  "packages/server/src/routes/updates.routes.ts",
+  "win/installer/installer.nsi",
+]) {
+  const descriptorBearingSource = readFileSync(join(repositoryRoot, descriptorBearingPath), "utf8");
+  assert.ok(
+    descriptorBearingSource.includes(pinnedPnpmDescriptor),
+    `${descriptorBearingPath} must keep its compiled fallback aligned with package.json`,
+  );
+}
+
+for (const versionBearingPath of [
+  ".github/workflows/prealpha-platform-builds.yml",
+  "Dockerfile.lite",
+  "win/installer/installer.nsi",
+]) {
+  const versionBearingSource = readFileSync(join(repositoryRoot, versionBearingPath), "utf8");
+  assert.ok(
+    versionBearingSource.includes(pinnedPnpmVersion),
+    `${versionBearingPath} must keep its derived version aligned with package.json`,
+  );
+}
+
+for (const dynamicDescriptorPath of ["start-local.bat", "start.bat", "win/installer/install.bat"]) {
+  const dynamicDescriptorSource = readFileSync(join(repositoryRoot, dynamicDescriptorPath), "utf8");
+  assert.match(
+    dynamicDescriptorSource,
+    /packageManager\?\.replace\(\/\^\^pnpm@\//u,
+    `${dynamicDescriptorPath} must preserve the anchored packageManager check through cmd parsing`,
+  );
+  assert.ok(
+    !dynamicDescriptorSource.includes(pinnedPnpmDescriptor),
+    `${dynamicDescriptorPath} must read the canonical descriptor instead of duplicating it`,
+  );
+}
+
+for (const runtimePath of [
   ".github/workflows/prealpha-platform-builds.yml",
   "Dockerfile.lite",
   "packages/server/src/routes/updates.routes.ts",
   "start-local.bat",
+  "start-termux.sh",
+  "start.bat",
+  "start.sh",
   "win/installer/install.bat",
   "win/installer/installer.nsi",
 ]) {
-  const pinBearingSource = readFileSync(join(repositoryRoot, pinBearingPath), "utf8");
-  assert.match(pinBearingSource, /10\.34\.5/u, `${pinBearingPath} must use the patched pnpm pin`);
-  assert.doesNotMatch(pinBearingSource, /10\.33\.2/u, `${pinBearingPath} must not retain the affected pnpm pin`);
+  const runtimeSource = readFileSync(join(repositoryRoot, runtimePath), "utf8");
+  assert.doesNotMatch(runtimeSource, /10\.33\.2/u, `${runtimePath} must not retain the affected pnpm pin`);
 }
 
 const windowsInstallerSource = readFileSync(join(repositoryRoot, "win/installer/installer.nsi"), "utf8");
@@ -55,6 +93,15 @@ assert.match(
   windowsInstallerSource,
   /pnpm --version \| %SystemRoot%\\System32\\findstr\.exe \/x \/l \/c:\$\{PNPM_VERSION\}/u,
   "The Windows installer must reject a global pnpm version that differs from the repository pin",
+);
+
+const batchInstallerSource = readFileSync(join(repositoryRoot, "win/installer/install.bat"), "utf8");
+const batchInstallerDeps = batchInstallerSource.indexOf(":deps");
+const batchInstallerDescriptorLookup = batchInstallerSource.indexOf("packageManager?.replace", batchInstallerDeps);
+assert.ok(batchInstallerDeps >= 0, "The batch installer must define its dependency-install phase");
+assert.ok(
+  batchInstallerDescriptorLookup > batchInstallerDeps,
+  "The batch installer must read the pnpm descriptor from the checked-out release",
 );
 
 const troubleshootingSource = readFileSync(join(repositoryRoot, "docs/TROUBLESHOOTING.md"), "utf8");

@@ -54,9 +54,9 @@ const UPDATE_CHANNELS: Record<UpdateChannel, UpdateChannelInfo> = {
     warning: "Staging builds are pre-release tester builds. Back up your app data before applying them.",
   },
 };
-const DEFAULT_PNPM_VERSION = "10.34.5";
 const DEFAULT_PNPM_DESCRIPTOR =
   "10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e";
+const DEFAULT_PNPM_VERSION = DEFAULT_PNPM_DESCRIPTOR.slice(0, DEFAULT_PNPM_DESCRIPTOR.indexOf("+"));
 const PNPM_NONINTERACTIVE_ARGS = ["--config.trustPolicy=off", "--config.confirmModulesPurge=false"];
 const PNPM_UPDATE_INSTALL_ARGS = ["install", "--force", "--frozen-lockfile"];
 // A forced reinstall is verbose; the execFile default (1 MiB) can abort an
