@@ -166,7 +166,7 @@ assert.doesNotMatch(
   /useThrottledStreamBuffer/u,
   "Roleplay streaming should not rebuild ChatMessage from the growing buffer",
 );
-assert.doesNotMatch(pageActivitySource, /document\.hasFocus|addEventListener\("blur"/u);
+assert.doesNotMatch(pageActivitySource, /document\.hasFocus|addEventListener\(\s*["'](?:blur|focus)["']/u);
 assert.match(pageActivitySource, /document\.visibilityState === "visible"/u);
 const activeContextLinksButtonSource =
   chatRoleplaySurfaceSource.match(/function ActiveContextLinksButton[\s\S]*?\nfunction SummaryButton/u)?.[0] ?? "";
