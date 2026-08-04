@@ -2897,7 +2897,8 @@ function ViewerHub({
   // while discovery search has replaced it. Declared above the early returns so hook order
   // stays stable across the empty and error states below.
   // A search-filtered list is not the feed either, so it does not count as having seen it.
-  const feedIsOnScreen = Boolean(scope) && !isLoading && !isError && !discoveryOpen && !search.trim();
+  const feedIsOnScreen =
+    tab === "all" && Boolean(scope) && !isLoading && !isError && !discoveryOpen && !search.trim();
   useEffect(() => {
     if (feedIsOnScreen) onFeedShown();
   }, [feedIsOnScreen, onFeedShown]);

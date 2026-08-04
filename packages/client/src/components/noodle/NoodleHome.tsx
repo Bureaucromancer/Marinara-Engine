@@ -1850,7 +1850,11 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
   // notifications view is not the same as having seen the feed.
   // A filtered list is not the feed either, so a search does not count as having seen it.
   const timelineIsOnScreen =
-    activeNoodleView === "home" && !isAccountSearch && !normalizedPostSearch && Boolean(personaAccount);
+    activeNoodleView === "home" &&
+    timelineTab === "main" &&
+    !isAccountSearch &&
+    !normalizedPostSearch &&
+    Boolean(personaAccount);
   useEffect(() => {
     if (!timelineIsOnScreen || !personaAccount) return;
     if (timelineShownForAccountRef.current === personaAccount.id) return;
