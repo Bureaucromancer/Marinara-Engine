@@ -629,6 +629,8 @@ const EditTextarea = memo(function EditTextarea({
 interface ChatMessageProps {
   message: Message & { swipes?: Array<{ id: string; content: string }> };
   isStreaming?: boolean;
+  /** Lightweight live text rendered without rebuilding formatted message content on every character. */
+  streamingContent?: ReactNode;
   onDelete?: (messageId: string) => void;
   onRegenerate?: (messageId: string) => void;
   onEdit?: (messageId: string, content: string) => void;
@@ -1231,6 +1233,7 @@ function NameColorText({ color, children }: { color?: string; children: ReactNod
 export const ChatMessage = memo(function ChatMessage({
   message,
   isStreaming,
+  streamingContent,
   onDelete,
   onRegenerate,
   onEdit,
@@ -2287,7 +2290,12 @@ export const ChatMessage = memo(function ChatMessage({
         className={cn("mari-message-content break-words", !isHtmlContent && "whitespace-pre-wrap")}
         style={messageTextStyle}
       >
-        {isStreaming && !message.content ? (
+        {isStreaming && streamingContent ? (
+          <>
+            {streamingContent}
+            <span className="ml-0.5 inline-block h-4 w-[0.125rem] animate-pulse rounded-full bg-blue-400" />
+          </>
+        ) : isStreaming && !message.content ? (
           <PendingTypingDots className="mari-message-typing py-0.5" dotClassName="bg-blue-400/60" />
         ) : (
           <>
@@ -3208,7 +3216,12 @@ export const ChatMessage = memo(function ChatMessage({
                   className={cn("mari-message-content break-words", !isHtmlContent && "whitespace-pre-wrap")}
                   style={messageTextStyle}
                 >
-                  {isStreaming && !message.content ? (
+                  {isStreaming && streamingContent ? (
+                    <>
+                      {streamingContent}
+                      <span className="ml-0.5 inline-block h-4 w-[0.125rem] animate-pulse rounded-full bg-white/70" />
+                    </>
+                  ) : isStreaming && !message.content ? (
                     <PendingTypingDots
                       className="mari-message-typing py-0.5"
                       dotClassName="bg-[var(--muted-foreground)]/60"

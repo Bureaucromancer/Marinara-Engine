@@ -2584,6 +2584,46 @@ const cases: RegressionCase[] = [
     },
   },
   {
+    name: "conversation character macros defer to the active Individual group responder",
+    run() {
+      const initialContext = {
+        user: "Mari",
+        char: "Pantalone",
+        characters: ["Pantalone", "Dottore"],
+        variables: {},
+        convoFields: {
+          charDisplayName: "Regrator",
+          charAbout: "Runs the Northland Bank.",
+          personaAbout: "AI engineer.",
+          convoBehavior: "Keep the tone formal.",
+        },
+      };
+      const deferred = resolveMacros(
+        '{{convo_display}}|{{char_about}}|{{persona_about}}|{{convo_behavior}}|{{#if convo_behavior contains "playful"}}playful{{else}}formal{{/if}}',
+        initialContext,
+        { deferCharacterMacros: "all" },
+      );
+
+      assert.equal(hasDeferredCharacterMacros(deferred), true);
+      assert.equal(
+        resolveDeferredCharacterMacros(deferred, { name: "Pantalone" }, initialContext),
+        "Regrator|Runs the Northland Bank.|AI engineer.|Keep the tone formal.|formal",
+      );
+      assert.equal(
+        resolveDeferredCharacterMacros(deferred, { name: "Dottore" }, {
+          ...initialContext,
+          convoFields: {
+            charDisplayName: "Il Dottore",
+            charAbout: "A researcher from Snezhnaya.",
+            personaAbout: "AI engineer.",
+            convoBehavior: "Be playful with Mari.",
+          },
+        }),
+        "Il Dottore|A researcher from Snezhnaya.|AI engineer.|Be playful with Mari.|playful",
+      );
+    },
+  },
+  {
     name: "group macro uses the full active roster without changing existing identity macros",
     run() {
       const context = {

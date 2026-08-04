@@ -31,7 +31,6 @@ import {
   normalizeTextForMatch,
   formatRpgStatsForPrompt,
   normalizeRpgStatPools,
-  localAuthProviderBaseUrl,
 } from "@marinara-engine/shared";
 import type {
   CharacterData,
@@ -63,9 +62,6 @@ import { createSpatialContextStorage } from "../services/storage/spatial-context
 import { createRegexScriptsStorage } from "../services/storage/regex-scripts.storage.js";
 import { processLorebooks } from "../services/lorebook/index.js";
 import { injectAtDepth } from "../services/lorebook/prompt-injector.js";
-import { createLLMProvider } from "../services/llm/provider-registry.js";
-import { withConnectionFallbackProvider } from "../services/llm/connection-fallback-provider.js";
-import { createReplyFallbackNotifier } from "./generate/fallback-notification.js";
 import { resolveChatSummaryConnection } from "../services/chat-summary/connection-resolution.js";
 import { generateMissingConversationSummaries } from "../services/conversation/auto-summary.service.js";
 import { clearChatActivity, recordUserReaction } from "../services/conversation/autonomous.service.js";
@@ -1340,20 +1336,29 @@ export async function chatsRoutes(app: FastifyInstance) {
     const chatMeta = typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {});
 
     const connections = createConnectionsStorage(app.db);
-    const connId = chat.connectionId ?? (await connections.getDefault())?.id;
-    if (!connId) return reply.status(400).send({ error: "No API connection configured for this chat" });
-    const conn = await connections.getWithKey(connId);
-    if (!conn) return reply.status(400).send({ error: "API connection not found" });
-
-    let baseUrl = conn.baseUrl;
-    if (!baseUrl) {
-      const { PROVIDERS } = await import("@marinara-engine/shared");
-      const providerDef = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
-      baseUrl = providerDef?.defaultBaseUrl ?? "";
+    const resolvedSummaryConnection = await resolveChatSummaryConnection({
+      chatConnectionId: chat.connectionId,
+      chatMetadata: chatMeta,
+      connections,
+      resolveBaseUrl,
+    });
+    if (!resolvedSummaryConnection.ok) {
+      return reply.status(400).send({
+        error: resolvedSummaryConnection.error,
+        warnings: resolvedSummaryConnection.warnings,
+      });
     }
-    const localAuthBaseUrl = localAuthProviderBaseUrl(conn.provider);
-    if (!baseUrl && localAuthBaseUrl) baseUrl = localAuthBaseUrl;
-    if (!baseUrl) return reply.status(400).send({ error: "No base URL for this connection" });
+    if (resolvedSummaryConnection.warnings.length > 0) {
+      logger.warn(
+        {
+          chatId: req.params.id,
+          connectionId: resolvedSummaryConnection.connectionId,
+          source: resolvedSummaryConnection.source,
+          warnings: resolvedSummaryConnection.warnings,
+        },
+        "[conversation-summary] Resolved backfill summary connection after fallback",
+      );
+    }
 
     const characterIds: string[] = Array.isArray(chat.characterIds)
       ? chat.characterIds
@@ -1390,33 +1395,15 @@ export async function chatsRoutes(app: FastifyInstance) {
     }
     const scopedMessages = startIdx > 0 ? allMessages.slice(startIdx) : allMessages;
 
-    const fallbackConnection = await connections.getFallbackForAgents();
-    const provider = withConnectionFallbackProvider({
-      primary: createLLMProvider(
-        conn.provider,
-        baseUrl,
-        conn.apiKey,
-        conn.maxContext,
-        conn.openrouterProvider,
-        conn.maxTokensOverride,
-        conn.claudeFastMode === "true",
-        conn.treatAsLocalEndpoint === "true",
-        conn.defaultParameters,
-      ),
-      primaryConnectionId: conn.id,
-      fallbackConnection,
-      fallbackBaseUrl: fallbackConnection ? resolveBaseUrl(fallbackConnection) : "",
-      category: "agents",
-      onFallback: createReplyFallbackNotifier(reply),
-    });
     const result = await generateMissingConversationSummaries({
       messages: scopedMessages,
       metadata: chatMeta,
-      provider,
-      model: conn.model,
+      provider: resolvedSummaryConnection.provider,
+      model: resolvedSummaryConnection.model,
       personaName,
       charIdToName,
       rolloverHour: Math.max(0, Math.min(11, Math.floor((chatMeta.dayRolloverHour as number | undefined) ?? 4))),
+      maxTokens: clampRoleplaySummaryMaxTokens(chatMeta.summaryMaxTokens),
       maxMissingDays,
     });
 
