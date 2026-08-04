@@ -1896,7 +1896,9 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
       post.authorAccountId === personaAccount?.id ||
       timelineActivityAt(post) <= noodleSeenTime,
   );
-  const timelineDividerIndex = timelineNewRunLength > 0 ? timelineNewRunLength : -1;
+  // Search results are not the feed: a "where you stopped" marker means nothing in a filtered
+  // list, so the divider is suppressed while a post search is active.
+  const timelineDividerIndex = !normalizedPostSearch && timelineNewRunLength > 0 ? timelineNewRunLength : -1;
   const followableCharacterAccounts = useMemo(
     () =>
       accounts
@@ -4081,14 +4083,7 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
               </p>
             )
           ) : timelinePosts.length > 0 ? (
-            <div>
-              {timelinePosts.map((post, index) => (
-                <Fragment key={post.id}>
-                  {index === timelineDividerIndex && <NewSinceLastVisitDivider />}
-                  {renderPostArticle(post)}
-                </Fragment>
-              ))}
-            </div>
+            <div>{timelinePosts.map(renderPostArticle)}</div>
           ) : (
             <p className="px-4 py-6 text-sm text-[var(--muted-foreground)]">
               {localizeUi("ui.noodle.noodlehome.noPostsFound")}
@@ -4855,7 +4850,12 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
               </p>
             </div>
           ) : (
-            timelinePosts.map(renderPostArticle)
+            timelinePosts.map((post, index) => (
+              <Fragment key={post.id}>
+                {index === timelineDividerIndex && <NewSinceLastVisitDivider />}
+                {renderPostArticle(post)}
+              </Fragment>
+            ))
           )}
         </div>
       </div>
