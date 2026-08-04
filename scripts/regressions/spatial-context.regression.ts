@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import type {
   ResolvedOwnerSpatialProjection,
   SpatialContextDefinition,
@@ -33,6 +34,7 @@ import {
   updateGameMapBinding,
 } from "../../packages/server/src/services/spatial-context/game-map-binding.js";
 import {
+  createAssistantSpatialDirectiveStreamFilter,
   extractAssistantSpatialDirective,
   materializeAssistantSpatialState,
   resolveEffectiveSpatialState,
@@ -298,6 +300,7 @@ assert.deepEqual(
   {
     cleanContent: "The lift opens onto Level 1.",
     directive: { type: "move", destinationId: "tower_level_1" },
+    matched: true,
   },
 );
 assert.deepEqual(
@@ -312,7 +315,91 @@ assert.deepEqual(
       relation: "enter",
       description: "A concealed observatory above the tower.",
     },
+    matched: true,
   },
+);
+const ordinaryImpersonatedContent = "\n[Stage direction]\n\n\nContinue through the door.\n";
+assert.deepEqual(
+  extractAssistantSpatialDirective(ordinaryImpersonatedContent),
+  {
+    cleanContent: ordinaryImpersonatedContent,
+    directive: null,
+    matched: false,
+  },
+  "Ordinary bracketed impersonated prose must retain all surrounding whitespace",
+);
+assert.deepEqual(
+  extractAssistantSpatialDirective(
+    'The rewrite keeps this sentence.\n[spatial_move: destination_id="rewrite-must-not-apply"]',
+  ),
+  {
+    cleanContent: "The rewrite keeps this sentence.",
+    directive: { type: "move", destinationId: "rewrite-must-not-apply" },
+    matched: true,
+  },
+  "Text-rewrite output must expose clean content while its directive is discarded by the route",
+);
+const streamedSpatialDirective = createAssistantSpatialDirectiveStreamFilter();
+assert.equal(streamedSpatialDirective.push("We arrive at the infirmary.\n[spa"), "We arrive at the infirmary.\n");
+assert.equal(streamedSpatialDirective.push('tial_move: destination_id="moonwell"'), "");
+assert.equal(streamedSpatialDirective.push("]"), "");
+assert.equal(streamedSpatialDirective.flush(), "");
+const streamedOrdinaryBracket = createAssistantSpatialDirectiveStreamFilter();
+assert.equal(streamedOrdinaryBracket.push("[Stage direction] Continue."), "[Stage direction] Continue.");
+assert.equal(streamedOrdinaryBracket.flush(), "");
+const streamedDirectiveSplitAfterPrefix = createAssistantSpatialDirectiveStreamFilter();
+assert.equal(streamedDirectiveSplitAfterPrefix.push("[spatial_move:\n"), "");
+assert.equal(streamedDirectiveSplitAfterPrefix.push(' destination_id="moonwell"'), "");
+assert.equal(streamedDirectiveSplitAfterPrefix.push("]Arrival text."), "Arrival text.");
+assert.equal(streamedDirectiveSplitAfterPrefix.flush(), "");
+
+const generateRouteSource = readFileSync(
+  new URL("../../packages/server/src/routes/generate.routes.ts", import.meta.url),
+  "utf8",
+);
+const inlineThinkingStart = generateRouteSource.indexOf(
+  "const inlineThinking = extractLeadingThinkingBlocks(fullResponse, customThinkingTags);",
+);
+const inlineThinkingEnd = generateRouteSource.indexOf("// ── LOG_LEVEL=debug", inlineThinkingStart);
+const spatialSanitizationStart = generateRouteSource.indexOf(
+  "const parsedSpatial = extractAssistantSpatialDirective(fullResponse);",
+  inlineThinkingEnd,
+);
+const consolidatedReplacementStart = generateRouteSource.indexOf(
+  "if (contentReplaced) {",
+  spatialSanitizationStart,
+);
+assert.ok(inlineThinkingStart >= 0 && inlineThinkingEnd > inlineThinkingStart, "Inline-thinking route block is present");
+assert.doesNotMatch(
+  generateRouteSource.slice(inlineThinkingStart, inlineThinkingEnd),
+  /type:\s*"content_replace"/u,
+  "Inline-thinking cleanup must not emit content before spatial sanitization",
+);
+assert.ok(
+  spatialSanitizationStart > inlineThinkingEnd && consolidatedReplacementStart > spatialSanitizationStart,
+  "The consolidated content replacement must run after spatial sanitization",
+);
+const textRewriteStart = generateRouteSource.indexOf("// ── Text rewrite/editing agents:");
+const textRewriteEnd = generateRouteSource.indexOf(
+  "if (holdForTextRewrite && !textRewriteApplied",
+  textRewriteStart,
+);
+assert.ok(textRewriteStart >= 0 && textRewriteEnd > textRewriteStart, "Text-rewrite route block is present");
+const textRewriteSource = generateRouteSource.slice(textRewriteStart, textRewriteEnd);
+assert.match(
+  textRewriteSource,
+  /const parsedRewriteSpatial = extractAssistantSpatialDirective\(editedText\);/u,
+  "Text-rewrite output must run through spatial sanitization",
+);
+assert.match(
+  textRewriteSource,
+  /updateMessageContent\(messageId, sanitizedEditedText\)/u,
+  "Text-rewrite persistence must use sanitized content",
+);
+assert.match(
+  textRewriteSource,
+  /type: "text_rewrite",[\s\S]*?editedText: sanitizedEditedText/u,
+  "Text-rewrite events must emit sanitized content",
 );
 
 const validDefinition = definition(
