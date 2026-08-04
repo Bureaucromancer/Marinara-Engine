@@ -2301,6 +2301,7 @@ export function HomeProfessorMariChat({
   const connectionPersistInFlightRef = useRef(false);
   const attachmentRemovalInFlightRef = useRef<Set<string>>(new Set());
   const regenerationInFlightRef = useRef(false);
+  const messageMutationBusyRef = useRef(false);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -2377,6 +2378,9 @@ export function HomeProfessorMariChat({
     selectedConnection ?? connectionOptions.find((connection) => connection.isDefault) ?? connectionOptions[0] ?? null;
   const effectiveConnectionId = effectiveConnection?.id ?? null;
   const isBusy = sending || hasActiveGeneration || workspaceActive;
+  useEffect(() => {
+    messageMutationBusyRef.current = isBusy;
+  }, [isBusy]);
   const canSubmitMessage = (draft.trim().length > 0 || attachments.length > 0) && !isReadingAttachments;
   const visibleSuggestionChips =
     professorMariSuggestionsEnabled && mariChipsChatId === chatId && mariChips.length > 0
@@ -3474,14 +3478,14 @@ export function HomeProfessorMariChat({
     [clearMariPlan, effectiveConnectionId, setMariChips, setMariPlan],
   );
   const handleDeleteMessage = useCallback(async (messageId: string) => {
-    if (!chatId) return;
+    if (!chatId || isBusy) return;
     const confirmed = await showConfirmDialog({
       title: localizeUi("ui.chat.homeprofessormarichat.deleteMessage"),
       message: localizeUi("ui.chat.homeprofessormarichat.deleteMessageConfirmation"),
       confirmLabel: localizeUi("lorebook.editor.batch.delete"),
       tone: "destructive",
     });
-    if (!confirmed) return;
+    if (!confirmed || messageMutationBusyRef.current) return;
     // Optimistic update from local state
     setMessages((current) => current.filter((m) => m.id !== messageId));
     try {
@@ -3490,10 +3494,10 @@ export function HomeProfessorMariChat({
       await loadMessages(chatId).catch(() => undefined);
       toast.error(localizeUi("ui.chat.homeprofessormarichat.professorMariCouldNotDeleteThatMessage"));
     }
-  }, [chatId, loadMessages, localizeUi]);
+  }, [chatId, isBusy, loadMessages, localizeUi]);
 
   const handleEditMessage = useCallback(async (messageId: string, content: string) => {
-    if (!chatId) return;
+    if (!chatId || isBusy || messageMutationBusyRef.current) return;
     setMessages((current) =>
       current.map((m) => m.id === messageId ? { ...m, content } : m)
     );
@@ -3503,7 +3507,7 @@ export function HomeProfessorMariChat({
       await loadMessages(chatId).catch(() => undefined);
       toast.error(localizeUi("ui.chat.homeprofessormarichat.professorMariCouldNotSaveThatEdit"));
     }
-  }, [chatId, loadMessages, localizeUi]);
+  }, [chatId, isBusy, loadMessages, localizeUi]);
 
   const handleRegenerateMessage = useCallback(async (messageId: string) => {
     if (isBusy || regenerationInFlightRef.current || !chatId) return;
@@ -3562,7 +3566,7 @@ export function HomeProfessorMariChat({
   }, [chatId, effectiveConnectionId, isBusy, loadMessages, localizeUi, sendWorkspaceMessage]);
 
   const handleRemoveAttachment = useCallback(async (messageId: string, attachmentIndex: number) => {
-    if (!chatId || attachmentRemovalInFlightRef.current.has(messageId)) return;
+    if (!chatId || isBusy || attachmentRemovalInFlightRef.current.has(messageId)) return;
     attachmentRemovalInFlightRef.current.add(messageId);
     try {
       const confirmed = await showConfirmDialog({
@@ -3571,7 +3575,7 @@ export function HomeProfessorMariChat({
         confirmLabel: localizeUi("ui.panels.agentspanel.remove"),
         tone: "destructive",
       });
-      if (!confirmed) return;
+      if (!confirmed || messageMutationBusyRef.current) return;
       const message = messages.find((item) => item.id === messageId);
       if (!message) return;
       const currentAttachments = getProfessorMariAttachments(message);
@@ -3591,7 +3595,7 @@ export function HomeProfessorMariChat({
     } finally {
       attachmentRemovalInFlightRef.current.delete(messageId);
     }
-  }, [chatId, loadMessages, localizeUi, messages]);
+  }, [chatId, isBusy, loadMessages, localizeUi, messages]);
 
   const handleSubmit = async (overrideText?: string) => {
     const text = (overrideText ?? draft).trim();
@@ -3653,13 +3657,13 @@ export function HomeProfessorMariChat({
         key={message.id}
         message={message}
         thinking={message.role === "assistant" ? getMessageThinking(message) : null}
-        onDelete={canManageMessage ? handleDeleteMessage : undefined}
-        onEdit={canManageMessage ? handleEditMessage : undefined}
+        onDelete={canManageMessage && !isBusy ? handleDeleteMessage : undefined}
+        onEdit={canManageMessage && !isBusy ? handleEditMessage : undefined}
         onRegenerate={canManageMessage ? handleRegenerateMessage : undefined}
         canRegenerate={
           canManageMessage && !isBusy && message.id === messages[messages.length - 1]?.id
         }
-        onRemoveAttachment={canManageMessage ? handleRemoveAttachment : undefined}
+        onRemoveAttachment={canManageMessage && !isBusy ? handleRemoveAttachment : undefined}
       />
     );
   };
