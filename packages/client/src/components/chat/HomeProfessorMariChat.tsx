@@ -76,6 +76,7 @@ import { useAgentStore } from "../../stores/agent.store";
 import { useSidecarStore } from "../../stores/sidecar.store";
 import { useUIStore } from "../../stores/ui.store";
 import { showLocalMessageNotification, showNativeMessageNotification } from "../../lib/local-notifications";
+import { scrollProfessorMariTranscriptToBottom } from "../../lib/professor-mari-transcript-scroll";
 import { applyInlineMarkdown, renderMarkdownBlocks } from "../../lib/markdown";
 import { prepareImageAttachment } from "../../lib/chat-attachment-images";
 import { cn } from "../../lib/utils";
@@ -1456,6 +1457,7 @@ function CompactMariMessage({ message, thinking }: { message: Message; thinking?
   if (message.role === "user") {
     return (
       <TranscriptRow
+        className="border-y border-[var(--border)]/60 py-2.5"
         marker={<span className="pt-0.5 text-[0.6875rem] font-semibold text-[var(--muted-foreground)]">{localizeUi("ui.chat.compactmarimessage.you")}</span>}
       >
         <CompactMarkdown content={content} />
@@ -2089,6 +2091,7 @@ export function HomeProfessorMariChat({
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const [skillDraft, setSkillDraft] = useState<SkillDraftState>({ name: "", description: "", content: "" });
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [loadedMessagesChatId, setLoadedMessagesChatId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [connectionMenuOpen, setConnectionMenuOpen] = useState(false);
   const [faqOpenItemId, setFaqOpenItemId] = useState<string | null>(null);
@@ -2100,7 +2103,10 @@ export function HomeProfessorMariChat({
   const [floatingPosition, setFloatingPosition] = useState<{ x: number; y: number } | null>(null);
   const hasLoadedRef = useRef(false);
   const notifiedApprovalIdsRef = useRef<Set<string>>(new Set());
+  const activeChatIdRef = useRef<string | null>(null);
+  const messageLoadAbortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const transcriptScrollFrameRef = useRef<number | null>(null);
   const floatingSurfaceRef = useRef<HTMLDivElement>(null);
   const floatingButtonRef = useRef<HTMLDivElement>(null);
   const floatingDragRef = useRef<FloatingDragState | null>(null);
@@ -2118,6 +2124,27 @@ export function HomeProfessorMariChat({
   const latestConnectionSelectionRef = useRef<string | null>(selectedConnectionId);
   const pendingConnectionPersistRef = useRef<string | null>(null);
   const connectionPersistInFlightRef = useRef(false);
+
+  const setActiveChatId = useCallback((id: string) => {
+    activeChatIdRef.current = id;
+    setChatId(id);
+  }, []);
+
+  const setTranscriptScrollNode = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (transcriptScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(transcriptScrollFrameRef.current);
+        transcriptScrollFrameRef.current = null;
+      }
+      scrollRef.current = node;
+      if (!node || loadingHistory || !chatId || loadedMessagesChatId !== chatId) return;
+      transcriptScrollFrameRef.current = window.requestAnimationFrame(() => {
+        transcriptScrollFrameRef.current = null;
+        if (scrollRef.current === node) scrollProfessorMariTranscriptToBottom(node);
+      });
+    },
+    [chatId, loadedMessagesChatId, loadingHistory],
+  );
 
   const resizeComposer = useCallback((textarea: HTMLTextAreaElement | null) => {
     if (!textarea) return;
@@ -2224,9 +2251,29 @@ export function HomeProfessorMariChat({
 
   const loadMessages = useCallback(
     async (id: string, options: { clearSuggestions?: boolean } = {}) => {
-      const items = await api.get<Message[]>(`/chats/${id}/messages?limit=80`);
-      setMessages(items.map((message) => ({ ...message, extra: toMessageExtra(message) })));
-      if (options.clearSuggestions) clearMariChips();
+      messageLoadAbortRef.current?.abort();
+      const controller = new AbortController();
+      messageLoadAbortRef.current = controller;
+      try {
+        const items = await api.get<Message[]>(`/chats/${id}/messages?limit=80`, {
+          signal: controller.signal,
+        });
+        if (
+          controller.signal.aborted ||
+          messageLoadAbortRef.current !== controller ||
+          activeChatIdRef.current !== id
+        ) {
+          return;
+        }
+        setMessages(items.map((message) => ({ ...message, extra: toMessageExtra(message) })));
+        setLoadedMessagesChatId(id);
+        if (options.clearSuggestions) clearMariChips();
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        throw error;
+      } finally {
+        if (messageLoadAbortRef.current === controller) messageLoadAbortRef.current = null;
+      }
     },
     [clearMariChips],
   );
@@ -2266,11 +2313,11 @@ export function HomeProfessorMariChat({
       if (connectionId) params.set("connectionId", connectionId);
       const query = params.toString();
       const chat = await api.get<Chat>(`/chats/internal/professor-mari${query ? `?${query}` : ""}`);
-      setChatId(chat.id);
+      setActiveChatId(chat.id);
       qc.setQueryData(chatKeys.detail(chat.id), chat);
       return chat;
     },
-    [qc],
+    [qc, setActiveChatId],
   );
 
   const refreshWorkspaceStatus = useCallback(async () => {
@@ -2442,7 +2489,7 @@ export function HomeProfessorMariChat({
   useEffect(() => {
     const node = scrollRef.current;
     if (!node) return;
-    node.scrollTop = node.scrollHeight;
+    scrollProfessorMariTranscriptToBottom(node);
   }, [messages, workspaceTimeline, workspaceActivity, visiblePendingChangeReviewKey, workspaceStatus?.error]);
 
   const displayMessages = useMemo(() => [createWelcomeMessage(chatId), ...messages], [chatId, messages]);
@@ -2656,7 +2703,7 @@ export function HomeProfessorMariChat({
     if (effectiveConnectionId) params.set("connectionId", effectiveConnectionId);
     const query = params.toString();
     const chat = await api.post<Chat>(`/chats/internal/professor-mari/restart${query ? `?${query}` : ""}`);
-    setChatId(chat.id);
+    setActiveChatId(chat.id);
     qc.setQueryData(chatKeys.detail(chat.id), chat);
     await api.post("/professor-mari/workspace/reset", { clearHistory: true });
     setMessages([]);
@@ -2672,7 +2719,7 @@ export function HomeProfessorMariChat({
     if (chatHistoryOpen) await loadChatHistory();
     await qc.invalidateQueries({ queryKey: chatKeys.messages(chat.id) });
     toast.success(localizeUi("ui.chat.homeprofessormarichat.professorMariSPreviousChatWasSaved"));
-  }, [chatHistoryOpen, clearMariChips, effectiveConnectionId, loadChatHistory, qc, localizeUi]);
+  }, [chatHistoryOpen, clearMariChips, effectiveConnectionId, loadChatHistory, qc, setActiveChatId, localizeUi]);
 
   const guidedPlan = professorMariSuggestionsEnabled && mariPlanChatId === chatId ? mariPlan : null;
   const guidedPlanStep = guidedPlan ? (guidedPlan[mariPlanCursor] ?? null) : null;
@@ -2935,7 +2982,7 @@ export function HomeProfessorMariChat({
       }
       try {
         const chat = await api.post<Chat>(`/chats/internal/professor-mari/chats/${id}/activate`);
-        setChatId(chat.id);
+        setActiveChatId(chat.id);
         qc.setQueryData(chatKeys.detail(chat.id), chat);
         setSkillsMenuOpen(false);
         setChatHistoryOpen(false);
@@ -2952,7 +2999,7 @@ export function HomeProfessorMariChat({
         });
       }
     },
-    [isBusy, loadChatHistory, loadMessages, qc, localizeUi],
+    [isBusy, loadChatHistory, loadMessages, qc, setActiveChatId, localizeUi],
   );
 
   const handleRenameProfessorChat = useCallback(
@@ -2984,7 +3031,7 @@ export function HomeProfessorMariChat({
         await api.delete(`/chats/internal/professor-mari/chats/${id}`);
         if (id === chatId) {
           const chat = await ensureProfessorMariChat(effectiveConnectionId);
-          setChatId(chat.id);
+          setActiveChatId(chat.id);
           await loadMessages(chat.id);
         }
         await loadChatHistory();
@@ -2996,7 +3043,16 @@ export function HomeProfessorMariChat({
         });
       }
     },
-    [chatHistory, chatId, effectiveConnectionId, ensureProfessorMariChat, loadChatHistory, loadMessages, localizeUi],
+    [
+      chatHistory,
+      chatId,
+      effectiveConnectionId,
+      ensureProfessorMariChat,
+      loadChatHistory,
+      loadMessages,
+      setActiveChatId,
+      localizeUi,
+    ],
   );
 
   const toggleProfessorChatSelection = useCallback((id: string) => {
@@ -3033,7 +3089,7 @@ export function HomeProfessorMariChat({
       setSelectedChatHistoryIds(new Set());
       if (chatId && deletedIds.has(chatId)) {
         const chat = await ensureProfessorMariChat(effectiveConnectionId);
-        setChatId(chat.id);
+        setActiveChatId(chat.id);
         await loadMessages(chat.id);
       }
       await loadChatHistory();
@@ -3052,6 +3108,7 @@ export function HomeProfessorMariChat({
     ensureProfessorMariChat,
     loadChatHistory,
     loadMessages,
+    setActiveChatId,
     localizeUi,
     selectedChatHistoryIds,
   ]);
@@ -3280,7 +3337,11 @@ export function HomeProfessorMariChat({
 
   const renderFloatingChatBody = () => (
     <>
-      <div ref={scrollRef} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3 pb-4 text-left">
+      <div
+        ref={setTranscriptScrollNode}
+        data-component="HomeProfessorMariChat.Transcript"
+        className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3 pb-4 text-left"
+      >
         {loadingHistory ? (
           <LoadingHistoryState />
         ) : (
@@ -3925,7 +3986,8 @@ export function HomeProfessorMariChat({
                       </div>
 
                       <div
-                        ref={scrollRef}
+                        ref={setTranscriptScrollNode}
+                        data-component="HomeProfessorMariChat.Transcript"
                         className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3 pb-4 text-left"
                       >
                         {loadingHistory ? (

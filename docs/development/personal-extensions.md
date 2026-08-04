@@ -88,15 +88,17 @@ Capabilities are declared in the extension payload, persisted with every revisio
 
 `marinara.ui.showWindow({ title, elements, onEvent, onClose })` returns a handle with `update({ title?, elements? })` and `close()`. The worker only sends descriptors, and the trusted iframe bootstrap builds every element with DOM APIs and `textContent` (never `innerHTML`). The host reveals the otherwise-hidden sandbox iframe only while a window is open and hides it again on close.
 
-`marinara.ui.registerContribution({ id, kind, label, description?, icon?, elements?, onActivate?, onEvent? })` returns a frozen handle with `update(patch)` and `remove()`. It supports three fixed locations:
+`marinara.ui.registerContribution({ id, kind, label, description?, icon?, surface?, position?, elements?, onActivate?, onEvent? })` returns a frozen handle with `update(patch)` and `remove()`. It supports these trusted host locations:
 
-- `button`: a compact top-bar action on larger screens and an action in the Extensions menu everywhere;
+- `button`: a compact top-bar action by default, or a host-rendered action on the `chats`, `bots`, `characters`, `personas`, `lorebooks`, `presets`, `connections`, `agents`, or `settings` surface;
 - `menu-item`: an action in the Extensions menu;
 - `panel`: an entry that opens Marinara's trusted Extensions side panel.
 
+Side-panel buttons accept `position: "header"`, `"before-content"`, or `"after-content"`. Top-bar buttons omit `position`. Icons are bounded kebab-case names from Marinara's Lucide icon catalog; unsupported names fall back to the puzzle icon.
+
 Panel elements use the same declarative vocabulary as constrained windows: `heading`, `text`, `pre`, `button`, `input`, `select`, `toggle`, `slider`, `color`, and `spacer`. Interactive controls require unique IDs. A panel button posts `{ contributionId, elementId, values }` to `onEvent`; `values` contains the current string value of every control. `onActivate` runs inside the extension Worker when the user opens or invokes the contribution. The extension can call `handle.update(...)` to replace its label, description, icon, or panel elements after state changes.
 
-The client independently validates every descriptor before adding it to the runtime store. Contribution kinds, icons, controls, IDs, option lists, text lengths, total panel text, element count, and per-extension contribution count are allowlisted and capped. React renders extension text as text. No extension-controlled HTML, CSS, URL, React component, or host callback is accepted. The host removes all contributions when the worker is stopped, its hash changes, or it disappears from the approved runtime response. Events are dispatched only to the worker registered for the same extension ID and content hash.
+The client independently validates every descriptor before adding it to the runtime store. Contribution kinds, surfaces, positions, controls, IDs, option lists, icon-name syntax, text lengths, total panel text, element count, and per-extension contribution count are validated and capped. React renders extension text as text. No extension-controlled HTML, CSS, URL, React component, or host callback is accepted. The host removes all contributions when the worker is stopped, its hash changes, or it disappears from the approved runtime response. Events are dispatched only to the worker registered for the same extension ID and content hash.
 
 There is no DOM helper, Marinara API fetch, parent event access, or arbitrary network capability. The iframe validates and rate-limits messages. A heartbeat watchdog terminates an unresponsive or busy-looping worker.
 

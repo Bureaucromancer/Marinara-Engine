@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 const fixtureRoot = mkdtempSync(join(tmpdir(), "marinara-docs-pack-regression-"));
 process.env.DATA_DIR = fixtureRoot;
 
-const { normalizeDocsLanguage, DEFAULT_DOCS_LANGUAGE, DOCS_LANGUAGE_LABELS } = await import(
+const { normalizeDocsLanguage, DEFAULT_DOCS_LANGUAGE, DOCS_LANGUAGE_LABELS, docsLanguageDirection } = await import(
   "../../packages/shared/src/constants/docs-languages.ts"
 );
 const { resolvePhysical, supportedDocLanguages } = await import("../../packages/server/src/routes/docs.routes.ts");
@@ -66,7 +66,22 @@ try {
   assert.ok(supported.includes("ru"), "the shared label map must offer Russian");
   assert.ok(supported.includes("ja"), "the shared label map must offer Japanese");
   assert.ok(supported.includes("ko"), "the shared label map must offer Korean");
+  assert.ok(supported.includes("zh-hans"), "the shared label map must offer Simplified Chinese");
+  assert.ok(supported.includes("hi"), "the shared label map must offer Hindi");
   assert.deepEqual([...supported].sort(), Object.keys(DOCS_LANGUAGE_LABELS).sort());
+
+  // ── Direction metadata: LTR unless a language declares otherwise ──
+  assert.equal(docsLanguageDirection("en"), "ltr");
+  assert.equal(docsLanguageDirection("hi"), "ltr", "non-Latin scripts are not automatically RTL");
+  assert.equal(docsLanguageDirection("xx"), "ltr", "unknown codes must fall back to LTR");
+  assert.equal(docsLanguageDirection(null), "ltr");
+  assert.equal(docsLanguageDirection(undefined), "ltr");
+  DOCS_LANGUAGE_LABELS["zz-test"] = { label: "Test", englishLabel: "Test", direction: "rtl" };
+  try {
+    assert.equal(docsLanguageDirection("zz-test"), "rtl", "a declared rtl language must resolve rtl");
+  } finally {
+    delete DOCS_LANGUAGE_LABELS["zz-test"];
+  }
 
   // ── Build a valid installed fixture pack under DATA_DIR/doc-packs/es ──
   const packDir = docsPackRoot("es");
@@ -193,6 +208,34 @@ try {
     !viewerSource.includes("dangerouslySetInnerHTML"),
     "DocsViewerModal must keep using the React-node markdown renderer — downloaded packs are less-trusted than in-repo docs",
   );
+
+  // ── RTL wiring pins ──
+  assert.ok(
+    viewerSource.includes("docsLanguageDirection(doc.language)"),
+    "the reader pane's direction must key off the SERVED doc's language (doc.language, never index.language) — an English fallback doc inside an RTL pack must stay LTR",
+  );
+  const markdownSource = readFileSync(join(repoRoot, "packages", "client", "src", "lib", "markdown.tsx"), "utf8");
+  // JSX path only: the HTML path is re-sanitized by sanitizeChatHtml, whose
+  // attribute allowlist strips `dir`, so its LTR forcing lives in CSS instead.
+  for (const marker of [
+    'className="mari-md-inline-code" dir="ltr"', // JSX inline code
+    'className="mari-md-codeblock" dir="ltr"', // JSX fence
+  ]) {
+    assert.ok(
+      markdownSource.includes(marker),
+      `code must render dir="ltr" (missing: ${marker}) — inside an RTL container the bidi algorithm reorders flags/braces (\`--flag value\` -> \`flag value--\`)`,
+    );
+  }
+  const globalsCss = readFileSync(join(repoRoot, "packages", "client", "src", "styles", "globals.css"), "utf8");
+  for (const cssRule of [".mari-md-inline-code", ".mari-md-codeblock"]) {
+    const ruleStart = globalsCss.indexOf(`.mari-message-content ${cssRule} {`);
+    assert.ok(ruleStart >= 0, `globals.css must keep the ${cssRule} rule`);
+    const ruleBody = globalsCss.slice(ruleStart, globalsCss.indexOf("}", ruleStart));
+    assert.ok(
+      ruleBody.includes("direction: ltr"),
+      `${cssRule} must force direction: ltr in CSS — the chat HTML path strips dir attributes, so the stylesheet is the only protection there`,
+    );
+  }
 
   console.log(`docs-language regression passed: languages ${supported.join(", ")}; fixture pack at ${packDir}`);
 } finally {

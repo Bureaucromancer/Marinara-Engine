@@ -35,6 +35,8 @@ export function ConversationMessageLine({ ctx }: { ctx: MessageRenderContext }) 
     avatarCornerClass,
     nameColor,
     mentionNames,
+    selfCharacterId,
+    galleryIndex,
     quoteFormat,
     renderedContent,
     renderedContentParts,
@@ -186,14 +188,14 @@ export function ConversationMessageLine({ ctx }: { ctx: MessageRenderContext }) 
                   <div className="space-y-1.5">
                     {renderedContentParts.map((part, i) => (
                       <div key={i} className="animate-[fadeSlideIn_0.4s_ease-out]">
-                        <MessageContent content={part} mentionNames={mentionNames} emojiMap={emojiMap} stickerMap={stickerMap} onImageOpen={(url) => onImageOpen(url)} />
+                        <MessageContent content={part} mentionNames={mentionNames} emojiMap={emojiMap} stickerMap={stickerMap} onImageOpen={(url) => onImageOpen(url)} selfCharacterId={selfCharacterId} galleryIndex={galleryIndex} />
                       </div>
                     ))}
                   </div>
                 ) : extra.diceRollResult ? (
                   <DiceMessageContent diceRollResult={extra.diceRollResult} createdAt={message.createdAt} />
                 ) : (
-                  <MessageContent content={renderedContent} mentionNames={mentionNames} emojiMap={emojiMap} stickerMap={stickerMap} onImageOpen={(url) => onImageOpen(url)} />
+                  <MessageContent content={renderedContent} mentionNames={mentionNames} emojiMap={emojiMap} stickerMap={stickerMap} onImageOpen={(url) => onImageOpen(url)} selfCharacterId={selfCharacterId} galleryIndex={galleryIndex} />
                 )}
                 {isStreaming && (
                   <span className="ml-0.5 inline-block h-4 w-[0.125rem] animate-pulse rounded-full bg-[var(--foreground)]/50" />

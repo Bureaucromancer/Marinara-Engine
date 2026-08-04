@@ -53,6 +53,7 @@ import { resolveSpriteExpression } from "../../lib/sprite-expression-match";
 import { parseCharacterDisplayData } from "../../lib/character-display";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { parseMessageExtraRecord } from "../../lib/chat-message-extra";
+import { normalizeSpriteExpressionMap, resolveSpriteExpressionState } from "../../lib/sprite-expression-state";
 import { chatBackgroundMetadataToUrl, chatBackgroundUrlToMetadata } from "../../lib/backgrounds";
 import { useGameStateStore } from "../../stores/game-state.store";
 import { useGalleryStore } from "../../stores/gallery.store";
@@ -97,9 +98,10 @@ import {
   readAnnouncedChatToolbarPanelAction,
   readChatToolbarFloatingPanelAnchor,
 } from "./ChatToolbarControls";
-import { mirrorSpritePlacements, normalizeSpritePlacements } from "./sprite-placement";
+import { mirrorCharacterSpritePlacements, mirrorSpritePlacements, normalizeSpritePlacements } from "./sprite-placement";
 import {
   loadLocalSpriteVisualSettings,
+  normalizeSpriteCharacterVisualSettingsMap,
   saveLocalSpriteVisualSettings,
   type LocalSpriteVisualSettings,
 } from "./local-sprite-visual-settings";
@@ -241,17 +243,6 @@ const normalizeSpriteDisplayValue = (value: unknown, fallback: number, min: numb
 
 function startsNewAssistantBubble(message: { extra?: unknown } | null | undefined): boolean {
   return parseMessageExtraRecord(message?.extra).startsNewAssistantBubble === true;
-}
-
-function normalizeMessageSpriteExpressions(value: unknown): Record<string, string> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const expressions: Record<string, string> = {};
-  for (const [key, expression] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof expression !== "string") continue;
-    const trimmed = expression.trim();
-    if (key && trimmed) expressions[key] = trimmed;
-  }
-  return expressions;
 }
 
 function getPersonaSnapshotName(extra: Record<string, unknown>): string | null {
@@ -794,7 +785,9 @@ export function ChatArea() {
   const setActiveChatId = useChatStore((s) => s.setActiveChatId);
   const pendingNewChatMode = useChatStore((s) => s.pendingNewChatMode);
   const failedAgentTypes = useAgentStore((s) =>
-    activeChatId && s.failedAgentChatId && s.failedAgentChatId !== activeChatId ? EMPTY_AGENT_TYPES : s.failedAgentTypes,
+    activeChatId && s.failedAgentChatId && s.failedAgentChatId !== activeChatId
+      ? EMPTY_AGENT_TYPES
+      : s.failedAgentTypes,
   );
   const agentProcessing = useAgentStore((s) =>
     activeChatId ? s.processingChatIds.includes(activeChatId) : s.isProcessing,
@@ -1157,23 +1150,23 @@ export function ChatArea() {
     : chatMeta.spritePlacements;
   const spritePlacements = useMemo(() => normalizeSpritePlacements(spritePlacementsSource), [spritePlacementsSource]);
   const hasCustomSpritePlacements = Object.keys(spritePlacements).length > 0;
-  // Prefer per-swipe expressions from the last assistant message's extra (survives swipe switching),
-  // falling back to chat-level metadata for backward compatibility.
-  const spriteExpressions: Record<string, string> = useMemo(() => {
-    if (messages?.length) {
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const m = messages[i]!;
-        if (m.role === "assistant") {
-          const extra = typeof m.extra === "string" ? JSON.parse(m.extra) : (m.extra ?? {});
-          if (extra.spriteExpressions && Object.keys(extra.spriteExpressions).length > 0) {
-            return extra.spriteExpressions as Record<string, string>;
-          }
-          break; // only check the last assistant message
-        }
-      }
-    }
-    return chatMeta.spriteExpressions ?? {};
-  }, [messages, chatMeta.spriteExpressions]);
+  const hasLocalCharacterVisualSettings = Object.prototype.hasOwnProperty.call(
+    localSpriteVisualSettings,
+    "characterOverrides",
+  );
+  const spriteCharacterVisualSettingsSource = hasLocalCharacterVisualSettings
+    ? localSpriteVisualSettings.characterOverrides
+    : chatMeta.spriteCharacterVisualSettings;
+  const spriteCharacterVisualSettings = useMemo(
+    () => normalizeSpriteCharacterVisualSettingsMap(spriteCharacterVisualSettingsSource),
+    [spriteCharacterVisualSettingsSource],
+  );
+  // Expression Engine results are sparse updates. Fold every loaded per-swipe update so
+  // a round that omits a character preserves that character's previous expression.
+  const spriteExpressions = useMemo(
+    () => resolveSpriteExpressionState(messages, chatMeta.spriteExpressions),
+    [messages, chatMeta.spriteExpressions],
+  );
   const groupChatMode: string | undefined = chatCharIds.length > 1 ? (chatMeta.groupChatMode ?? "merged") : undefined;
 
   const updateMeta = useUpdateChatMetadata();
@@ -1539,11 +1532,7 @@ export function ChatArea() {
   useEffect(() => {
     if (!chat?.id) return;
     const savedUrl = chatBackgroundMetadataToUrl(chatMeta.background);
-    const restoredUrl =
-      savedUrl ??
-      (chat.mode === "roleplay"
-        ? useUIStore.getState().defaultRoleplayBackground
-        : null);
+    const restoredUrl = savedUrl ?? (chat.mode === "roleplay" ? useUIStore.getState().defaultRoleplayBackground : null);
     restoredChatBackgroundRef.current = { chatId: chat.id, url: restoredUrl, isSyncing: true };
     useUIStore.getState().setChatBackground(restoredUrl);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1596,7 +1585,6 @@ export function ChatArea() {
   }, []);
 
   const expressionSaveTimer = useRef<ReturnType<typeof setTimeout>>(null);
-  const spritePlacementSaveTimer = useRef<ReturnType<typeof setTimeout>>(null);
   const pendingExpressions = useRef<Record<string, string>>(spriteExpressions);
   const pendingSpritePlacements = useRef<Record<string, SpritePlacement>>(spritePlacements);
 
@@ -1616,7 +1604,6 @@ export function ChatArea() {
   useEffect(() => {
     return () => {
       if (expressionSaveTimer.current) clearTimeout(expressionSaveTimer.current);
-      if (spritePlacementSaveTimer.current) clearTimeout(spritePlacementSaveTimer.current);
     };
   }, []);
 
@@ -1661,10 +1648,7 @@ export function ChatArea() {
     (placementKey: string, placement: SpritePlacement) => {
       if (!chat?.id) return;
       pendingSpritePlacements.current = { ...pendingSpritePlacements.current, [placementKey]: placement };
-      if (spritePlacementSaveTimer.current) clearTimeout(spritePlacementSaveTimer.current);
-      spritePlacementSaveTimer.current = setTimeout(() => {
-        patchLocalSpriteVisualSettings({ spritePlacements: pendingSpritePlacements.current });
-      }, 250);
+      patchLocalSpriteVisualSettings({ spritePlacements: pendingSpritePlacements.current });
     },
     [chat?.id, patchLocalSpriteVisualSettings],
   );
@@ -1672,22 +1656,70 @@ export function ChatArea() {
   const handleResetSpritePlacements = useCallback(() => {
     if (!chat?.id) return;
     pendingSpritePlacements.current = {};
-    if (spritePlacementSaveTimer.current) clearTimeout(spritePlacementSaveTimer.current);
     patchLocalSpriteVisualSettings({ spritePlacements: {} });
   }, [chat?.id, patchLocalSpriteVisualSettings]);
 
   const handleSetSpritePosition = useCallback(
-    (nextSide: SpriteSide) => {
-      if (!chat?.id || nextSide === spritePosition) return;
-      const nextPlacements = hasCustomSpritePlacements ? mirrorSpritePlacements(spritePlacements) : spritePlacements;
+    (nextSide: SpriteSide, characterId?: string) => {
+      if (!chat?.id) return;
+
+      if (characterId) {
+        const currentSettings = spriteCharacterVisualSettings[characterId] ?? {};
+        const currentSide = currentSettings.spritePosition ?? spritePosition;
+        if (nextSide === currentSettings.spritePosition) return;
+        const nextPlacements =
+          nextSide === currentSide ? spritePlacements : mirrorCharacterSpritePlacements(spritePlacements, characterId);
+        pendingSpritePlacements.current = nextPlacements;
+        patchLocalSpriteVisualSettings({
+          characterOverrides: {
+            ...spriteCharacterVisualSettings,
+            [characterId]: { ...currentSettings, spritePosition: nextSide },
+          },
+          spritePlacements: nextPlacements,
+        });
+        return;
+      }
+
+      if (nextSide === spritePosition) return;
+      const explicitSideCharacterIds = Object.entries(spriteCharacterVisualSettings)
+        .filter(([, settings]) => settings.spritePosition)
+        .map(([id]) => id);
+      const nextPlacements = hasCustomSpritePlacements
+        ? mirrorSpritePlacements(spritePlacements, explicitSideCharacterIds)
+        : spritePlacements;
       pendingSpritePlacements.current = nextPlacements;
-      if (spritePlacementSaveTimer.current) clearTimeout(spritePlacementSaveTimer.current);
       patchLocalSpriteVisualSettings({
         spritePosition: nextSide,
         spritePlacements: nextPlacements,
       });
     },
-    [chat?.id, hasCustomSpritePlacements, patchLocalSpriteVisualSettings, spritePlacements, spritePosition],
+    [
+      chat?.id,
+      hasCustomSpritePlacements,
+      patchLocalSpriteVisualSettings,
+      spriteCharacterVisualSettings,
+      spritePlacements,
+      spritePosition,
+    ],
+  );
+
+  const handleResetSpriteCharacterVisualSettings = useCallback(
+    (characterId: string) => {
+      if (!chat?.id || !spriteCharacterVisualSettings[characterId]) return;
+      const currentSettings = spriteCharacterVisualSettings[characterId];
+      const nextPlacements =
+        currentSettings.spritePosition && currentSettings.spritePosition !== spritePosition
+          ? mirrorCharacterSpritePlacements(spritePlacements, characterId)
+          : spritePlacements;
+      const nextCharacterVisualSettings = { ...spriteCharacterVisualSettings };
+      delete nextCharacterVisualSettings[characterId];
+      pendingSpritePlacements.current = nextPlacements;
+      patchLocalSpriteVisualSettings({
+        characterOverrides: nextCharacterVisualSettings,
+        spritePlacements: nextPlacements,
+      });
+    },
+    [chat?.id, patchLocalSpriteVisualSettings, spriteCharacterVisualSettings, spritePlacements, spritePosition],
   );
 
   // Set of active agent type IDs for this chat.
@@ -1731,6 +1763,7 @@ export function ChatArea() {
       expressionSpriteOpacity,
       fullBodySpriteOpacity,
       expressionAvatarsEnabled: expressionAvatarsPreferenceEnabled,
+      characterOverrides: spriteCharacterVisualSettings,
     }),
     [
       expressionAvatarsPreferenceEnabled,
@@ -1738,6 +1771,7 @@ export function ChatArea() {
       expressionSpriteScale,
       fullBodySpriteOpacity,
       fullBodySpriteScale,
+      spriteCharacterVisualSettings,
       spritePlacements,
       spritePosition,
     ],
@@ -1775,7 +1809,7 @@ export function ChatArea() {
     if (!expressionAvatarsEnabled) return undefined;
     return (message, characterId) => {
       const extra = parseMessageExtraRecord(message.extra);
-      const expressions = normalizeMessageSpriteExpressions(extra.spriteExpressions);
+      const expressions = normalizeSpriteExpressionMap(extra.spriteExpressions);
       const characterName = characterMap.get(characterId)?.name;
       const personaName =
         characterId === personaInfo?.id ? (getPersonaSnapshotName(extra) ?? personaInfo.name) : undefined;
@@ -2624,8 +2658,7 @@ export function ChatArea() {
     if (!cfg?.enabled) return;
 
     const mode = chatModeRef.current;
-    const shouldAutoplay =
-      mode === "roleplay" ? cfg.autoplayRP : mode === "game" ? false : cfg.autoplayConvo;
+    const shouldAutoplay = mode === "roleplay" ? cfg.autoplayRP : mode === "game" ? false : cfg.autoplayConvo;
     if (!shouldAutoplay) return;
 
     const msgs = messagesRef.current ?? [];
@@ -3407,6 +3440,7 @@ export function ChatArea() {
           }}
           onClosePeekPrompt={() => setPeekPromptData(null)}
           onResetSpritePlacements={handleResetSpritePlacements}
+          onResetSpriteCharacterVisualSettings={handleResetSpriteCharacterVisualSettings}
           onSpriteSideChange={handleSetSpritePosition}
           onToggleSpriteArrange={() => setSpriteArrangeMode((prev) => !prev)}
           spriteVisualSettings={effectiveSpriteVisualSettings}

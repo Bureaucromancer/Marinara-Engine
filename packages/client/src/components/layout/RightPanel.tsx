@@ -19,7 +19,9 @@ import { useUIStore } from "../../stores/ui.store";
 import { cn } from "../../lib/utils";
 import { usePersonalExtensionContributions } from "../../lib/personal-extension-contributions";
 import { PersonalExtensionContributionIcon } from "../extensions/PersonalExtensionContributionIcon";
+import { PersonalExtensionContributionSlot } from "../extensions/PersonalExtensionContributionSlot";
 import { useTranslation as useUiTranslation } from "react-i18next";
+import type { PersonalExtensionContributionSurface } from "@marinara-engine/shared";
 
 const CharactersPanel = lazy(() =>
   import("../panels/CharactersPanel").then((module) => ({ default: module.CharactersPanel })),
@@ -94,6 +96,17 @@ const PANELS: Record<string, LazyExoticComponent<ComponentType>> = {
   extensions: PersonalExtensionPanel,
 };
 
+const PANEL_CONTRIBUTION_SURFACES: Partial<Record<string, Exclude<PersonalExtensionContributionSurface, "top-bar">>> = {
+  "bot-browser": "bots",
+  characters: "characters",
+  personas: "personas",
+  lorebooks: "lorebooks",
+  presets: "presets",
+  connections: "connections",
+  agents: "agents",
+  settings: "settings",
+};
+
 // Module-level set survives component remounts (e.g. mobile AnimatePresence unmount/remount)
 const mountedPanels = new Set<string>();
 
@@ -115,6 +128,7 @@ export function RightPanel() {
   const activeExtensionPanel = contributions.find(
     (contribution) => contribution.key === activePanelKey && contribution.kind === "panel",
   );
+  const contributionSurface = PANEL_CONTRIBUTION_SURFACES[panel];
   const config: { title: string; icon: ReactNode; gradient?: string; gradientClass?: string } =
     panel === "extensions" && activeExtensionPanel
       ? {
@@ -132,7 +146,7 @@ export function RightPanel() {
       {/* Header - OS window style */}
       <div className="mari-right-panel-header relative flex h-12 flex-shrink-0 items-center justify-between bg-[var(--card)]/80 px-4 backdrop-blur-sm">
         <div className="absolute inset-x-0 bottom-0 h-px bg-[var(--border)]/30" />
-        <div className="flex items-center gap-2.5">
+        <div className="flex min-w-0 items-center gap-2.5">
           <div
             data-component="RightPanelHeaderIcon"
             className={cn(
@@ -143,15 +157,24 @@ export function RightPanel() {
           >
             {config.icon}
           </div>
-          <h2 className="mari-chrome-text-strong text-sm font-semibold">{config.title}</h2>
+          <h2 className="mari-chrome-text-strong truncate text-sm font-semibold">{config.title}</h2>
         </div>
-        <button
-          onClick={close}
-          aria-label={localizeUi("ui.layout.rightpanel.closePanel")}
-          className="mari-chrome-control mari-chrome-control--small mari-accent-animated p-1.5 active:scale-90"
-        >
-          <X size="0.875rem" />
-        </button>
+        <div className="flex min-w-0 shrink-0 items-center gap-1">
+          {contributionSurface && (
+            <PersonalExtensionContributionSlot
+              surface={contributionSurface}
+              position="header"
+              className="max-w-28"
+            />
+          )}
+          <button
+            onClick={close}
+            aria-label={localizeUi("ui.layout.rightpanel.closePanel")}
+            className="mari-chrome-control mari-chrome-control--small mari-accent-animated shrink-0 p-1.5 active:scale-90"
+          >
+            <X size="0.875rem" />
+          </button>
+        </div>
       </div>
 
       {/* Content — keep visited panels mounted but hidden to avoid re-animation */}
@@ -159,20 +182,43 @@ export function RightPanel() {
         {Object.entries(PANELS).map(([key, PanelComp]) => {
           if (!mountedPanels.has(key)) return null;
           const active = key === panel;
+          const panelContent = (
+            <Suspense fallback={active ? <PanelFallback /> : null}>
+              <PanelComp />
+            </Suspense>
+          );
           return (
             <div
               key={key}
               data-panel-key={key}
               className={cn(
                 "absolute inset-0",
-                key === "characters" ? "overflow-hidden" : "overflow-y-auto [scrollbar-gutter:stable]",
+                key === "characters"
+                  ? "flex min-h-0 flex-col overflow-hidden"
+                  : "overflow-y-auto [scrollbar-gutter:stable]",
                 !active && "hidden",
               )}
               aria-hidden={!active}
             >
-              <Suspense fallback={active ? <PanelFallback /> : null}>
-                <PanelComp />
-              </Suspense>
+              {active && contributionSurface && (
+                <PersonalExtensionContributionSlot
+                  surface={contributionSurface}
+                  position="before-content"
+                  className="shrink-0 border-b border-[var(--border)]/40"
+                />
+              )}
+              {key === "characters" ? (
+                <div className="min-h-0 flex-1 overflow-hidden">{panelContent}</div>
+              ) : (
+                panelContent
+              )}
+              {active && contributionSurface && (
+                <PersonalExtensionContributionSlot
+                  surface={contributionSurface}
+                  position="after-content"
+                  className="shrink-0 border-t border-[var(--border)]/40"
+                />
+              )}
             </div>
           );
         })}

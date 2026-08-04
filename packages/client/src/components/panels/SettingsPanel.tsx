@@ -524,7 +524,7 @@ const SETTINGS_SEARCHABLE_CONTROLS: readonly SettingsSearchableControlMeta[] = [
     sectionId: "application",
     label: "Documentation Language",
     description: "Choose the language for Marinara's built-in guides.",
-    aliases: ["documentation", "guides", "docs", "manual", "spanish", "español", "german", "deutsch", "french", "français", "portuguese", "português", "brazilian", "polish", "polski", "russian", "русский", "japanese", "日本語", "korean", "한국어"],
+    aliases: ["documentation", "guides", "docs", "manual", "spanish", "español", "german", "deutsch", "french", "français", "portuguese", "português", "brazilian", "polish", "polski", "russian", "русский", "japanese", "日本語", "korean", "한국어", "chinese", "simplified", "简体中文", "中文", "hindi", "हिन्दी"],
     kind: "Select",
   },
   {
@@ -1057,6 +1057,14 @@ const SETTINGS_SEARCHABLE_CONTROLS: readonly SettingsSearchableControlMeta[] = [
     label: "Scrollable Avatars",
     description: "Keep roleplay avatars visible while scrolling long messages.",
     aliases: ["roleplay", "avatars", "sticky"],
+    kind: "Toggle",
+  },
+  {
+    id: "narrator-cycling-avatars",
+    sectionId: "roleplay-messages",
+    label: "Narrator's Cycling Avatars",
+    description: "Cycle Narrator avatars or show active characters together.",
+    aliases: ["roleplay", "narrator", "avatars", "cycle", "group"],
     kind: "Toggle",
   },
   {
@@ -2722,7 +2730,7 @@ function QuickRepliesSetting() {
       {showQuickRepliesMenu && drawerOpen && (
         <div
           id="quick-replies-actions-drawer"
-          className="grid gap-1 border-t border-[var(--border)]/60 bg-[var(--background)]/25 p-1"
+          className="grid min-w-0 max-w-full gap-1 overflow-hidden border-t border-[var(--border)]/60 bg-[var(--background)]/25 p-1"
           role="group"
           aria-label={localize("Quick replies actions to include")}
         >
@@ -2757,7 +2765,7 @@ function QuickRepliesSetting() {
                 aria-pressed={option.checked}
                 onClick={() => option.onChange(!option.checked)}
                 className={cn(
-                  "group flex min-h-10 w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] active:scale-[0.99]",
+                  "group flex min-h-10 min-w-0 max-w-full items-center gap-2.5 overflow-hidden rounded-md px-2 py-1.5 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] active:scale-[0.99]",
                   option.checked
                     ? "bg-[var(--primary)]/8 text-[var(--foreground)] ring-1 ring-[var(--primary)]/30"
                     : "text-[var(--muted-foreground)] ring-1 ring-transparent hover:bg-[var(--secondary)]/45 hover:text-[var(--foreground)]",
@@ -2845,15 +2853,15 @@ function CustomQuickRepliesManager() {
   const removeCustomQuickReply = useUIStore((s) => s.removeCustomQuickReply);
 
   return (
-    <div className="mt-1 border-t border-[var(--border)]/60 pt-2">
-      <div className="mb-1 flex items-center justify-between gap-2 px-1">
-        <span className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+    <div className="mt-1 min-w-0 max-w-full overflow-hidden border-t border-[var(--border)]/60 pt-2">
+      <div className="mb-1 flex min-w-0 items-center justify-between gap-2 px-1">
+        <span className="min-w-0 truncate text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
           {localize("Custom quick replies")}
         </span>
         <button
           type="button"
           onClick={() => addCustomQuickReply("", "")}
-          className="flex items-center gap-1 rounded-md bg-[var(--secondary)]/50 px-2 py-1 text-[0.65rem] font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--secondary)] hover:text-[var(--foreground)] active:scale-[0.98]"
+          className="flex shrink-0 items-center gap-1 rounded-md bg-[var(--secondary)]/50 px-2 py-1 text-[0.65rem] font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--secondary)] hover:text-[var(--foreground)] active:scale-[0.98]"
           title={localize("Add a custom quick reply")}
         >
           <Plus size="0.75rem" aria-hidden="true" />
@@ -2867,13 +2875,13 @@ function CustomQuickRepliesManager() {
           )}
         </p>
       ) : (
-        <div className="grid gap-1.5">
+        <div className="grid min-w-0 max-w-full gap-1.5">
           {customQuickReplies.map((entry) => (
             <div
               key={entry.id}
-              className="grid gap-1 rounded-md border border-[var(--border)]/60 bg-[var(--background)]/30 p-1.5"
+              className="grid min-w-0 max-w-full gap-1 overflow-hidden rounded-md border border-[var(--border)]/60 bg-[var(--background)]/30 p-1.5"
             >
-              <div className="flex items-center gap-1.5">
+              <div className="flex min-w-0 max-w-full items-center gap-1.5">
                 <CustomQuickReplyIconButton
                   icon={entry.icon}
                   onSelect={(icon) => updateCustomQuickReply(entry.id, { icon })}
@@ -2887,7 +2895,7 @@ function CustomQuickRepliesManager() {
                 <button
                   type="button"
                   onClick={() => removeCustomQuickReply(entry.id)}
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--destructive)] transition-colors hover:bg-[var(--destructive)]/10 active:scale-90"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--primary)] transition-colors hover:bg-[var(--primary)]/10 active:scale-90"
                   title={localize("Remove quick reply")}
                   aria-label={localize("Remove quick reply")}
                 >
@@ -2899,7 +2907,7 @@ function CustomQuickRepliesManager() {
                 onChange={(event) => updateCustomQuickReply(entry.id, { content: event.target.value })}
                 placeholder={localize("Message, macro, or /slash command to send")}
                 rows={2}
-                className="w-full resize-y rounded bg-[var(--secondary)]/60 px-2 py-1 text-xs outline-none ring-1 ring-transparent focus:ring-[var(--primary)]/40"
+                className="min-w-0 max-w-full resize-y rounded bg-[var(--secondary)]/60 px-2 py-1 text-xs outline-none ring-1 ring-transparent focus:ring-[var(--primary)]/40"
               />
             </div>
           ))}
@@ -3751,22 +3759,22 @@ function VideoGenerationSettings() {
           <div className="rounded-lg bg-[var(--background)]/55 p-3 ring-1 ring-[var(--border)]">
             <div className="mb-2 flex items-center gap-1 text-xs font-medium text-[var(--foreground)]">{localizeUi("ui.panels.videogenerationsettings.conversationCallClips")}<HelpTooltip text={localizeUi("ui.panels.videogenerationsettings.lengthsForGeneratedCharacterVideoCallPresenceClipsIdle")} />
             </div>
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))] gap-2">
               {CONVERSATION_CALL_CHARACTER_VIDEO_CLIP_KINDS.map((kind) => (
                 <label
                   key={kind}
-                  className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-[var(--secondary)]/60 px-2.5 py-2 ring-1 ring-[var(--border)]/80"
+                  className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md bg-[var(--secondary)]/60 px-2.5 py-2 ring-1 ring-[var(--border)]/80"
                 >
                   <span className="truncate text-xs text-[var(--foreground)]">
                     {CONVERSATION_CALL_VIDEO_CLIP_LABELS[kind]}
                   </span>
-                  <span className="grid w-20 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5">
+                  <span className="grid w-[3.75rem] grid-cols-[minmax(0,1fr)_auto] items-center gap-1">
                     <DraftNumberInput
                       value={draft.callClipDurations[kind]}
                       min={VIDEO_CALL_CLIP_DURATION_MIN}
                       max={VIDEO_CALL_CLIP_DURATION_MAX}
                       onCommit={(duration) => handleCallClipDurationChange(kind, duration)}
-                      className="min-w-0 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs"
+                      className="min-w-0 rounded-md border border-[var(--border)] bg-[var(--background)] px-1.5 py-1 text-xs"
                       ariaLabel={`${CONVERSATION_CALL_VIDEO_CLIP_LABELS[kind]} length in seconds`}
                     />
                     <span className="text-[0.625rem] text-[var(--muted-foreground)]">{localizeUi("ui.noodle.stageprofileview.s")}</span>
@@ -3774,18 +3782,18 @@ function VideoGenerationSettings() {
                 </label>
               ))}
             </div>
-            <label className="mt-2 flex min-w-0 items-center justify-between gap-3 rounded-md bg-[var(--secondary)]/60 px-2.5 py-2 ring-1 ring-[var(--border)]/80">
+            <label className="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md bg-[var(--secondary)]/60 px-2.5 py-2 ring-1 ring-[var(--border)]/80">
               <span className="flex min-w-0 flex-col gap-0.5">
                 <span className="truncate text-xs text-[var(--foreground)]">{localizeUi("ui.panels.videogenerationsettings.customRequest")}</span>
                 <span className="text-[0.55rem] leading-snug text-[var(--muted-foreground)]">{localizeUi("ui.panels.videogenerationsettings.usedForOneOffClipsCharactersGenerateFromExplicit")}</span>
               </span>
-              <span className="grid w-20 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5">
+              <span className="grid w-[3.75rem] grid-cols-[minmax(0,1fr)_auto] items-center gap-1">
                 <DraftNumberInput
                   value={draft.callCustomClipDurationSeconds}
                   min={VIDEO_CALL_CLIP_DURATION_MIN}
                   max={VIDEO_CALL_CLIP_DURATION_MAX}
                   onCommit={handleCustomClipDurationChange}
-                  className="min-w-0 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs"
+                  className="min-w-0 rounded-md border border-[var(--border)] bg-[var(--background)] px-1.5 py-1 text-xs"
                   ariaLabel="Custom call clip length in seconds"
                 />
                 <span className="text-[0.625rem] text-[var(--muted-foreground)]">{localizeUi("ui.noodle.stageprofileview.s")}</span>
@@ -4218,6 +4226,8 @@ function AppearanceSettings() {
   const setRoleplayAvatarScale = useUIStore((s) => s.setRoleplayAvatarScale);
   const roleplayAvatarsScrollable = useUIStore((s) => s.roleplayAvatarsScrollable);
   const setRoleplayAvatarsScrollable = useUIStore((s) => s.setRoleplayAvatarsScrollable);
+  const roleplayNarratorAvatarCycling = useUIStore((s) => s.roleplayNarratorAvatarCycling);
+  const setRoleplayNarratorAvatarCycling = useUIStore((s) => s.setRoleplayNarratorAvatarCycling);
   const roleplaySpriteScale = useUIStore((s) => s.roleplaySpriteScale);
   const setRoleplaySpriteScale = useUIStore((s) => s.setRoleplaySpriteScale);
   const gameDialogueDisplayMode = useUIStore((s) => s.gameDialogueDisplayMode);
@@ -4814,6 +4824,13 @@ function AppearanceSettings() {
               onChange={setRoleplayAvatarsScrollable}
               help={localizeUi("settings.controls.scrollableAvatars.help")}
             />
+            <ToggleSetting
+              anchorId={getSettingsControlAnchorId("narrator-cycling-avatars")}
+              label={localizeUi("settings.controls.narratorCyclingAvatars.label")}
+              checked={roleplayNarratorAvatarCycling}
+              onChange={setRoleplayNarratorAvatarCycling}
+              help={localizeUi("settings.controls.narratorCyclingAvatars.help")}
+            />
             <div
               id={getSettingsControlAnchorId("roleplay-avatar-style")}
               className="grid scroll-mt-3 grid-cols-1 gap-2 sm:grid-cols-2"
@@ -5342,6 +5359,8 @@ function AddonsSettings() {
   );
 }
 
+const THEME_PREVIEW_DEBOUNCE_MS = 300;
+
 function ThemesSettings({ showIntro = true }: { showIntro?: boolean } = {}) {
   const { t: localizeUi } = useUiTranslation();
   const { data: syncedThemes = [], isLoading } = useThemes();
@@ -5359,26 +5378,39 @@ function ThemesSettings({ showIntro = true }: { showIntro?: boolean } = {}) {
   const [themeCss, setThemeCss] = useState("");
   const [livePreview, setLivePreview] = useState(true);
 
-  // Inject live preview CSS
+  // Replacing a dense app-level stylesheet invalidates styles across the full
+  // document. Keep typing immediate and apply only the settled preview instead
+  // of forcing that work for every character entered.
   useEffect(() => {
+    const previewStyleId = "marinara-css-editor-preview";
+    const existingStyle = document.getElementById(previewStyleId) as HTMLStyleElement | null;
+
     if (!editorOpen || !livePreview) {
-      const el = document.getElementById("marinara-css-editor-preview");
-      if (el) el.textContent = "";
+      existingStyle?.remove();
       return;
     }
-    let style = document.getElementById("marinara-css-editor-preview") as HTMLStyleElement | null;
-    if (!style) {
-      style = document.createElement("style");
-      style.id = "marinara-css-editor-preview";
+
+    const style = existingStyle ?? document.createElement("style");
+    if (!existingStyle) {
+      style.id = previewStyleId;
+      document.head.appendChild(style);
     }
-    style.textContent = sanitizeAppCss(themeCss);
-    // Always (re-)append so it's the last <style> in <head>,
-    // overriding the active-theme injector's saved CSS.
-    document.head.appendChild(style);
-    return () => {
-      style!.textContent = "";
-    };
+
+    const previewTimeout = window.setTimeout(() => {
+      style.textContent = sanitizeAppCss(themeCss);
+      // Keep the preview after the active-theme injector's saved CSS.
+      document.head.appendChild(style);
+    }, THEME_PREVIEW_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(previewTimeout);
   }, [editorOpen, livePreview, themeCss]);
+
+  useEffect(
+    () => () => {
+      document.getElementById("marinara-css-editor-preview")?.remove();
+    },
+    [],
+  );
 
   const openNewTheme = useCallback(() => {
     setEditingId(null);

@@ -10,7 +10,8 @@ import {
   type AvatarCropValue,
 } from "../../lib/utils";
 import { applyInlineMarkdown, renderMarkdownBlocks, applyInlineMarkdownHTML } from "../../lib/markdown";
-import { normalizeCardAssetImageSyntax, resolveCardAssetUrl } from "../../lib/card-asset-links";
+import { normalizeCardAssetImageSyntax, resolveCardAssetUrl, resolveSelfCardAssets, type ChatGalleryIndex } from "../../lib/card-asset-links";
+import { useChatGalleryFilenameIndex } from "../../hooks/use-characters";
 import { PendingTypingDots } from "./PendingTypingDots";
 import { isDiceRollResult } from "../dice/AnimatedDiceRoll";
 import { DiceMessageContent } from "./ConversationMessageShared";
@@ -645,6 +646,8 @@ interface ChatMessageProps {
   personaInfo?: PersonaInfo;
   groupChatMode?: string;
   chatCharacterIds?: string[];
+  /** Active character IDs used for merged Narrator avatar presentation. */
+  mergedGroupCharacterIds?: string[];
   expressionAvatarResolver?: ExpressionAvatarResolver;
   /** Distance from the latest message (0 = newest). Used for depth-range regex filtering. */
   messageDepth?: number;
@@ -1028,8 +1031,16 @@ function renderContent(
   boldDialogue = true,
   htmlScopeClass = "mari-html-message-content",
   quoteFormat: QuoteFormat = "straight",
+  selfCharacterId?: string | null,
+  galleryIndex?: ChatGalleryIndex | null,
 ): ReactNode {
-  const normalized = decodeEncodedSpeakerTags(decodeEncodedChatHtmlTags(formatTextQuotes(text, quoteFormat)));
+  // Portable card://self/gallery refs resolve to the speaking character before
+  // any rendering, covering both the markdown branch and the embedded-HTML
+  // branch (whose resolveCardAssetUrl then sees an absolute card URL). The
+  // chat-wide index lets merged group replies fall back to whichever chat
+  // character owns the file when the speaker does not.
+  const selfResolved = resolveSelfCardAssets(text, selfCharacterId, galleryIndex);
+  const normalized = decodeEncodedSpeakerTags(decodeEncodedChatHtmlTags(formatTextQuotes(selfResolved, quoteFormat)));
 
   // Strip speaker tags before HTML detection (they aren't real HTML)
   const withoutSpeakerTags = normalized.replace(/<\/?speaker(?:="[^"]*")?>/g, "");
@@ -1142,10 +1153,13 @@ export function RoleplayMessagePreview({
   content,
   dialogueColor,
   className,
+  selfCharacterId,
 }: {
   content: string;
   dialogueColor?: string;
   className?: string;
+  /** Character the previewed greeting belongs to — resolves card://self refs. */
+  selfCharacterId?: string | null;
 }) {
   const previewId = useId();
   const { chatFontColor, defaultDialogueColor, theme, textStrokeWidth, textStrokeColor, boldDialogue, quoteFormat } =
@@ -1173,8 +1187,8 @@ export function RoleplayMessagePreview({
     [chatFontColor, textStrokeColor, textStrokeWidth],
   );
   const renderedContent = useMemo(
-    () => renderContent(content, resolvedDialogueColor, undefined, boldDialogue, htmlScopeClass, quoteFormat),
-    [boldDialogue, content, htmlScopeClass, quoteFormat, resolvedDialogueColor],
+    () => renderContent(content, resolvedDialogueColor, undefined, boldDialogue, htmlScopeClass, quoteFormat, selfCharacterId),
+    [boldDialogue, content, htmlScopeClass, quoteFormat, resolvedDialogueColor, selfCharacterId],
   );
 
   return (
@@ -1234,6 +1248,7 @@ export const ChatMessage = memo(function ChatMessage({
   personaInfo,
   groupChatMode,
   chatCharacterIds,
+  mergedGroupCharacterIds,
   expressionAvatarResolver,
   messageDepth,
   messageIndex,
@@ -1259,6 +1274,7 @@ export const ChatMessage = memo(function ChatMessage({
     roleplayAvatarStyle,
     roleplayAvatarScale,
     roleplayAvatarsScrollable,
+    roleplayNarratorAvatarCycling,
     textStrokeWidth,
     textStrokeColor,
     showModelName,
@@ -1279,6 +1295,7 @@ export const ChatMessage = memo(function ChatMessage({
       roleplayAvatarStyle: s.roleplayAvatarStyle,
       roleplayAvatarScale: s.roleplayAvatarScale,
       roleplayAvatarsScrollable: s.roleplayAvatarsScrollable,
+      roleplayNarratorAvatarCycling: s.roleplayNarratorAvatarCycling,
       textStrokeWidth: s.textStrokeWidth,
       textStrokeColor: s.textStrokeColor,
       showModelName: s.showModelName,
@@ -1843,6 +1860,13 @@ export const ChatMessage = memo(function ChatMessage({
   }, [chatCharacterIds, scopedCharacterMap]);
   const resolvedCharacterInfo = charInfo ?? fallbackChatCharacterEntry?.info ?? null;
   const resolvedCharacterId = charInfo ? message.characterId : (fallbackChatCharacterEntry?.id ?? message.characterId);
+  // Speaker for portable card://self/gallery refs. The isUser/isSystem gate is
+  // load-bearing: resolvedCharacterId is non-null even on user messages in a
+  // single-character chat, and self must never resolve in a user message.
+  const selfCharacterId = isUser || isSystem ? null : (resolvedCharacterId ?? null);
+  // Chat-wide filename index (group chats only) for card://self fallback in
+  // merged group replies where the speaker's gallery lacks the file.
+  const galleryIndex = useChatGalleryFilenameIndex(chatCharacterIds);
   const primaryCharInfo =
     resolvedCharacterInfo ??
     (scopedCharacterMap
@@ -1978,20 +2002,14 @@ export const ChatMessage = memo(function ChatMessage({
 
   // Merged group chat: cycling avatars + cycling name color
   const isMergedGroup = groupChatMode === "merged" && !isUser && chatCharacterIds && chatCharacterIds.length > 1;
+  const mergedCharacterIds = useMemo(
+    () => mergedGroupCharacterIds ?? chatCharacterIds ?? [],
+    [chatCharacterIds, mergedGroupCharacterIds],
+  );
+  const mergedCycleKey = JSON.stringify(mergedCharacterIds);
+  const cycleMergedNarratorAvatars = !isRoleplay || roleplayNarratorAvatarCycling;
   const mergedAvatars = useMemo(() => {
-    if (!isMergedGroup || !characterMap || !chatCharacterIds) return [];
-    return chatCharacterIds
-      .map((id) => {
-        const info = characterMap.get(id);
-        const expressionUrl = expressionAvatarResolver?.(message, id) ?? null;
-        const url = expressionUrl ?? info?.avatarUrl;
-        if (!url) return null;
-        return { id, url, crop: expressionUrl ? null : info?.avatarCrop };
-      })
-      .filter(Boolean) as { id: string; url: string; crop?: AvatarCropValue | null }[];
-  }, [isMergedGroup, characterMap, chatCharacterIds, expressionAvatarResolver, message]);
-  const mergedNameColors = useMemo(() => {
-    if (!isMergedGroup || !characterMap || !chatCharacterIds) return [];
+    if (!isMergedGroup || !characterMap) return [];
     const fallbackPalette = [
       "var(--marinara-chat-chrome-text)",
       "var(--marinara-chat-chrome-accent)",
@@ -2000,11 +2018,27 @@ export const ChatMessage = memo(function ChatMessage({
       "#60a5fa",
       "#facc15",
     ];
-    return chatCharacterIds.map((id, i) => {
-      const raw = characterMap.get(id)?.nameColor;
-      return raw || fallbackPalette[i % fallbackPalette.length]!;
-    });
-  }, [isMergedGroup, characterMap, chatCharacterIds]);
+    return mergedCharacterIds
+      .map((id, index) => {
+        const info = characterMap.get(id);
+        const expressionUrl = expressionAvatarResolver?.(message, id) ?? null;
+        const url = expressionUrl ?? info?.avatarUrl;
+        if (!url) return null;
+        return {
+          id,
+          url,
+          crop: expressionUrl ? null : info?.avatarCrop,
+          nameColor: info?.nameColor || fallbackPalette[index % fallbackPalette.length]!,
+        };
+      })
+      .filter(Boolean) as {
+        id: string;
+        url: string;
+        crop?: AvatarCropValue | null;
+        nameColor: string;
+      }[];
+  }, [isMergedGroup, characterMap, mergedCharacterIds, expressionAvatarResolver, message]);
+  const mergedNameColors = useMemo(() => mergedAvatars.map((avatar) => avatar.nameColor), [mergedAvatars]);
   // Cycle index for merged group avatars/names — driven by a ref + 2s setInterval to avoid re-renders
   const cycleIndexRef = useRef(0);
   const cycleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -2013,55 +2047,62 @@ export const ChatMessage = memo(function ChatMessage({
   const mergedAvatarTailRefs = useRef<(HTMLImageElement | null)[]>([]);
 
   useEffect(() => {
-    if (!isMergedGroup) return;
-    const total = Math.max(mergedAvatars.length, mergedNameColors.length);
-    if (total <= 1) return;
-    cycleTimerRef.current = setInterval(() => {
-      cycleIndexRef.current = (cycleIndexRef.current + 1) % total;
-      const idx = cycleIndexRef.current;
+    cycleIndexRef.current = 0;
+    if (!isMergedGroup || !cycleMergedNarratorAvatars) return;
+    const applyMergedCycleIndex = (index: number) => {
       // Update avatar opacity via DOM directly (no re-render)
       mergedAvatarRefs.current.forEach((img, i) => {
-        if (img) img.style.opacity = i === idx ? "1" : "0";
+        if (img) img.style.opacity = i === index ? "1" : "0";
       });
       mergedAvatarTailRefs.current.forEach((img, i) => {
-        if (img) img.style.opacity = i === idx ? "1" : "0";
+        if (img) img.style.opacity = i === index ? "1" : "0";
       });
       // Update name color opacity via DOM directly
       const nameEl = mergedNameRef.current;
       if (nameEl) {
         const spans = nameEl.querySelectorAll<HTMLSpanElement>("[data-cycle-name]");
         spans.forEach((span, i) => {
-          span.style.opacity = i === idx % mergedNameColors.length ? "1" : "0";
+          span.style.opacity = i === index % mergedNameColors.length ? "1" : "0";
         });
       }
+    };
+    applyMergedCycleIndex(0);
+    const total = Math.max(mergedAvatars.length, mergedNameColors.length);
+    if (total <= 1) return;
+    cycleTimerRef.current = setInterval(() => {
+      cycleIndexRef.current = (cycleIndexRef.current + 1) % total;
+      applyMergedCycleIndex(cycleIndexRef.current);
     }, 2000);
     return () => {
       if (cycleTimerRef.current) clearInterval(cycleTimerRef.current);
     };
-  }, [isMergedGroup, mergedAvatars.length, mergedNameColors.length]);
+  }, [cycleMergedNarratorAvatars, isMergedGroup, mergedCycleKey, mergedAvatars.length, mergedNameColors.length]);
 
   /** Render a stack of absolutely-positioned "Narrator" labels that crossfade via opacity. */
-  const mergedNameElement =
-    isMergedGroup && mergedNameColors.length > 0 ? (
-      <span ref={mergedNameRef} className="relative inline-block">
-        {/* Invisible sizer so the parent reserves the right width */}
-        <span className="invisible">{localizeUi("ui.chat.chatmessage.narrator")}</span>
-        {mergedNameColors.map((c, i) => (
-          <span
-            key={i}
-            data-cycle-name
-            className="absolute inset-0"
-            style={{
-              ...solidNameColorStyle(c),
-              opacity: i === 0 ? 1 : 0,
-              transition: "opacity 1s ease",
-            }}
-          >
-            <NameColorText color={c}>{localizeUi("ui.chat.chatmessage.narrator")}</NameColorText>
-          </span>
-        ))}
-      </span>
-    ) : null;
+  const mergedNameElement = !isMergedGroup ? null : mergedNameColors.length === 0 ? (
+    <NameColorText color={msgNameColor}>{localizeUi("ui.chat.chatmessage.narrator")}</NameColorText>
+  ) : cycleMergedNarratorAvatars ? (
+    <span ref={mergedNameRef} className="relative inline-block">
+      {/* Invisible sizer so the parent reserves the right width */}
+      <span className="invisible">{localizeUi("ui.chat.chatmessage.narrator")}</span>
+      {mergedNameColors.map((c, i) => (
+        <span
+          key={i}
+          data-cycle-name
+          className="absolute inset-0"
+          style={{
+            ...solidNameColorStyle(c),
+            opacity: i === 0 ? 1 : 0,
+            transition: "opacity 1s ease",
+          }}
+        >
+          <NameColorText color={c}>{localizeUi("ui.chat.chatmessage.narrator")}</NameColorText>
+        </span>
+      ))}
+    </span>
+  ) : (
+    <NameColorText color={mergedNameColors[0]}>{localizeUi("ui.chat.chatmessage.narrator")}</NameColorText>
+  );
 
   // Render content with dialogue highlighting (or HTML rendering)
   const text = typeof displayContent === "string" ? displayContent : message.content;
@@ -2072,17 +2113,17 @@ export const ChatMessage = memo(function ChatMessage({
   }, [message.id]);
 
   const renderedContent = useMemo(() => {
-    return renderContent(text, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass, quoteFormat);
-  }, [text, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass, quoteFormat]);
+    return renderContent(text, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass, quoteFormat, selfCharacterId, galleryIndex);
+  }, [text, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass, quoteFormat, selfCharacterId, galleryIndex]);
 
   // Translated text is rendered through the same markdown pipeline as the
   // message so bold/italics/quotes format identically.
   const renderedTranslation = useMemo(
     () =>
       translatedText
-        ? renderContent(translatedText, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass, quoteFormat)
+        ? renderContent(translatedText, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass, quoteFormat, selfCharacterId, galleryIndex)
         : null,
-    [translatedText, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass, quoteFormat],
+    [translatedText, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass, quoteFormat, selfCharacterId, galleryIndex],
   );
   const translationDisplayOnly = useMemo(
     () => parseChatMetadata(activeChatMetadata).translationDisplayOnly === true,
@@ -2139,7 +2180,7 @@ export const ChatMessage = memo(function ChatMessage({
     ? rectangleSafeCropStyle(compactAvatarCrop, avatarCropStyle)
     : avatarCropStyle;
   const compactMergedAvatarCropStyle = (avatar: { crop?: AvatarCropValue | null }): React.CSSProperties =>
-    useCompactRectangleAvatar
+    useCompactRectangleAvatar || !cycleMergedNarratorAvatars
       ? rectangleSafeCropStyle(avatar.crop, getAvatarCropStyle(avatar.crop))
       : getAvatarCropStyle(avatar.crop);
   const panelAvatarCropStyle: React.CSSProperties = rectangleSafeCropStyle(compactAvatarCrop, avatarCropStyle);
@@ -2155,7 +2196,12 @@ export const ChatMessage = memo(function ChatMessage({
   const showCompactRoleplayAvatar = isRoleplay && !isGrouped && !hideRoleplayAvatars && !showRoleplayAvatarPanel;
   const roleplayAvatarPanelTail = showRoleplayAvatarPanel ? (
     isMergedGroup && mergedAvatars.length > 0 ? (
-      <div className="rpg-avatar-panel-tail absolute inset-0 pointer-events-none overflow-hidden">
+      <div
+        className={cn(
+          "rpg-avatar-panel-tail absolute inset-0 pointer-events-none overflow-hidden",
+          !cycleMergedNarratorAvatars && "flex",
+        )}
+      >
         {mergedAvatars.map((avatar, i) => (
           <img
             key={`tail-${avatar.id}`}
@@ -2167,8 +2213,14 @@ export const ChatMessage = memo(function ChatMessage({
             aria-hidden="true"
             loading="lazy"
             decoding="async"
-            className="rpg-avatar-panel-tail-image absolute inset-0 h-full w-full object-cover object-top transition-opacity duration-700"
-            style={{ opacity: i === 0 ? 1 : 0, ...panelMergedAvatarCropStyle(avatar) }}
+            className={cn(
+              "rpg-avatar-panel-tail-image h-full object-cover object-top transition-opacity duration-700",
+              cycleMergedNarratorAvatars ? "absolute inset-0 w-full" : "relative w-0 min-w-0 flex-1",
+            )}
+            style={{
+              opacity: cycleMergedNarratorAvatars ? (i === 0 ? 1 : 0) : 1,
+              ...panelMergedAvatarCropStyle(avatar),
+            }}
           />
         ))}
       </div>
@@ -2257,7 +2309,9 @@ export const ChatMessage = memo(function ChatMessage({
           {isTranslating ? (
             <span className="text-[0.75rem] italic text-white/40">{localizeUi("ui.chat.chatmessage.translating")}</span>
           ) : (
-            <div className="text-[0.8125rem] leading-relaxed text-blue-200/70">{renderedTranslation}</div>
+            <div className="translation-text whitespace-pre-wrap">
+              {renderedTranslation}
+            </div>
           )}
         </div>
       )}
@@ -2458,6 +2512,7 @@ export const ChatMessage = memo(function ChatMessage({
                   className={cn(
                     "rpg-avatar-glow relative cursor-pointer overflow-hidden ring-2 ring-white/10",
                     compactAvatarFrameClass,
+                    !cycleMergedNarratorAvatars && "flex",
                   )}
                   onClick={() => {
                     const visible = mergedAvatars[cycleIndexRef.current];
@@ -2475,8 +2530,14 @@ export const ChatMessage = memo(function ChatMessage({
                       alt={localizeUi("ui.lorebooks.expandeddrawer.group")}
                       loading="lazy"
                       decoding="async"
-                      className="absolute inset-0 h-full w-full object-cover transition-opacity duration-700"
-                      style={{ opacity: i === 0 ? 1 : 0, ...compactMergedAvatarCropStyle(avatar) }}
+                      className={cn(
+                        "h-full object-cover transition-opacity duration-700",
+                        cycleMergedNarratorAvatars ? "absolute inset-0 w-full" : "relative w-0 min-w-0 flex-1",
+                      )}
+                      style={{
+                        opacity: cycleMergedNarratorAvatars ? (i === 0 ? 1 : 0) : 1,
+                        ...compactMergedAvatarCropStyle(avatar),
+                      }}
                     />
                   ))}
                 </button>
@@ -2629,7 +2690,10 @@ export const ChatMessage = memo(function ChatMessage({
                       {isMergedGroup && mergedAvatars.length > 0 ? (
                         <button
                           type="button"
-                          className="rpg-avatar-panel-media rpg-avatar-panel absolute inset-0 block h-full w-full cursor-zoom-in overflow-hidden"
+                          className={cn(
+                            "rpg-avatar-panel-media rpg-avatar-panel absolute inset-0 h-full w-full cursor-zoom-in overflow-hidden",
+                            cycleMergedNarratorAvatars ? "block" : "flex",
+                          )}
                           onClick={() => {
                             const visible = mergedAvatars[cycleIndexRef.current];
                             if (visible) openImageLightbox(visible.url);
@@ -2646,8 +2710,16 @@ export const ChatMessage = memo(function ChatMessage({
                               alt={localizeUi("ui.lorebooks.expandeddrawer.group")}
                               loading="lazy"
                               decoding="async"
-                              className="absolute inset-0 h-full w-full object-cover object-top transition-opacity duration-700"
-                              style={{ opacity: i === 0 ? 1 : 0, ...panelMergedAvatarCropStyle(avatar) }}
+                              className={cn(
+                                "h-full object-cover object-top transition-opacity duration-700",
+                                cycleMergedNarratorAvatars
+                                  ? "absolute inset-0 w-full"
+                                  : "relative w-0 min-w-0 flex-1",
+                              )}
+                              style={{
+                                opacity: cycleMergedNarratorAvatars ? (i === 0 ? 1 : 0) : 1,
+                                ...panelMergedAvatarCropStyle(avatar),
+                              }}
                             />
                           ))}
                         </button>
@@ -3162,7 +3234,7 @@ export const ChatMessage = memo(function ChatMessage({
                     {isTranslating ? (
                       <span className="text-[0.75rem] italic text-[var(--muted-foreground)]">{localizeUi("ui.chat.chatmessage.translating")}</span>
                     ) : (
-                      <div className="text-[0.8125rem] leading-relaxed text-[var(--muted-foreground)]">
+                      <div className="translation-text whitespace-pre-wrap">
                         {renderedTranslation}
                       </div>
                     )}

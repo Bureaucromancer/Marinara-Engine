@@ -90,6 +90,20 @@ export interface SpritePlacement {
   y: number;
 }
 
+/** Optional display overrides for one character or persona's roleplay sprites. */
+export interface SpriteCharacterVisualSettings {
+  /** Preferred default side for this subject when no freeform placement is saved. */
+  spritePosition?: SpriteSide;
+  /** Expression sprite scale multiplier. */
+  expressionSpriteScale?: number;
+  /** Full-body sprite scale multiplier. */
+  fullBodySpriteScale?: number;
+  /** Expression sprite opacity multiplier. */
+  expressionSpriteOpacity?: number;
+  /** Full-body sprite opacity multiplier. */
+  fullBodySpriteOpacity?: number;
+}
+
 /** A single chat conversation. */
 export interface Chat {
   id: string;
@@ -156,6 +170,7 @@ export const CHAT_SUMMARY_PROMPT_SETTINGS_KEY = "chat-summary-prompts";
 export interface ChatSummaryPromptSettings {
   templates: ChatSummaryPromptTemplate[];
   activeTemplateId: string | null;
+  combinePrompt: string;
 }
 
 /** Rolling summary entry category. Extensible beyond rolling summaries later. */
@@ -230,10 +245,7 @@ export type GameStoryboardViewerDisplayMode = "floating" | "background";
 /** Extra metadata stored on a chat. */
 export interface ChatMetadata {
   /** Chat-local tracker icon overrides keyed by persona id, unique character id, or tracker character slot. */
-  trackerStatIconOverrides?: Record<
-    string,
-    import("../constants/stat-icons.js").TrackerStatIconAssignment[]
-  >;
+  trackerStatIconOverrides?: Record<string, import("../constants/stat-icons.js").TrackerStatIconAssignment[]>;
   /** Compiled enabled rolling summary text for context injection. Derived from summaryEntries when present. */
   summary: string | null;
   /** Display label for a branch; absent on root chats and older branches. */
@@ -378,6 +390,8 @@ export interface ChatMetadata {
   fullBodySpriteOpacity?: number;
   /** Saved freeform positions for enabled roleplay sprites. */
   spritePlacements?: Record<string, SpritePlacement>;
+  /** Per-character or per-persona sprite layout overrides. Missing values inherit the chat-wide layout. */
+  spriteCharacterVisualSettings?: Record<string, SpriteCharacterVisualSettings>;
   /** When true, roleplay message avatars use the per-message Expression Engine sprite when one is available. */
   expressionAvatarsEnabled?: boolean;
   /** Non-empty text replaces individual character card scenarios for this group chat. */

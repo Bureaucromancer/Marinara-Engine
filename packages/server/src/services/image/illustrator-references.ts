@@ -291,6 +291,7 @@ export async function resolveIllustratorCharacterReferences(args: {
   fallbackToChatCharacters?: boolean;
   maxReferences?: number;
   includeReferenceImages?: boolean;
+  includePersonaWhenMentionedInPrompt?: boolean;
 }): Promise<IllustratorReferenceResolution> {
   const maxReferences = Math.max(1, Math.min(args.maxReferences ?? MAX_ILLUSTRATOR_REFERENCE_IMAGES, 12));
   const allRows = await args.charactersStore.list().catch(() => []);
@@ -340,12 +341,14 @@ export async function resolveIllustratorCharacterReferences(args: {
   const personaName = args.persona?.name?.trim() ?? "";
   const personaAliases = personaName ? buildNameAliases(personaName) : [];
   const personaPromptAliases = personaName ? buildNameAliases(personaName, { includeStandaloneTokens: false }) : [];
+  const personaExplicitlyRequested = requestedNames.some((requestedName) =>
+    personaAliases.some((alias) => alias === requestedName || textContainsAlias(requestedName, alias)),
+  );
   const personaRequested =
     personaAliases.length > 0 &&
-    (requestedNames.some((requestedName) =>
-      personaAliases.some((alias) => alias === requestedName || textContainsAlias(requestedName, alias)),
-    ) ||
-      personaPromptAliases.some((alias) => textContainsAlias(normalizedPromptText, alias)));
+    (personaExplicitlyRequested ||
+      (args.includePersonaWhenMentionedInPrompt !== false &&
+        personaPromptAliases.some((alias) => textContainsAlias(normalizedPromptText, alias))));
 
   if (selected.size === 0 && args.fallbackToChatCharacters === true) {
     for (const character of args.chatCharacters) {
@@ -409,6 +412,8 @@ export async function resolveIllustratorCharacterReferences(args: {
         ? `Attached are reference images of ${referenceNames.join(", ")}. Use them only to preserve character likeness and visual identity; the written scene prompt is authoritative for composition, setting, action, mood, framing, and whether any text appears.`
         : null,
     appearanceNames,
-    appearanceBlock: appearanceLines.length > 0 ? `Character appearance notes:\n${appearanceLines.join("\n")}` : null,
+    // No "Character appearance notes:" header: every consumer appends this straight to an image
+    // prompt, so the label is only ever read by a diffusion model as something to draw.
+    appearanceBlock: appearanceLines.length > 0 ? appearanceLines.join("\n") : null,
   };
 }

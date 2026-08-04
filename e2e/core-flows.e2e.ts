@@ -177,13 +177,21 @@ test("What's New opens once for each Marinara Engine version", async ({ page }) 
   const announcement = page.getByRole("dialog", { name: "What's New?" });
   await expect(announcement).toBeVisible();
   await expect(announcement.getByText(`Version ${APP_VERSION}`, { exact: true })).toBeVisible();
-  await expect(
-    announcement.getByRole("heading", { name: "Broader horizons, finer control, stronger foundations." }),
-  ).toBeVisible();
-  await expect(announcement.getByText(/Z\.AI image generation/)).toBeVisible();
-  await expect(announcement.getByText(/smarter Roleplay animation planning/)).toBeVisible();
-  await expect(announcement.getByText(/four new documentation languages/)).toBeVisible();
-  await expect(announcement.getByText(/runtime security/)).toBeVisible();
+  await expect(announcement.getByRole("heading", { name: "The extensions are back!" })).toBeVisible();
+  await expect(announcement.getByText(/new Personas icon/)).toBeVisible();
+  await expect(announcement.getByText(/edit presets, characters, personas, and lorebooks/)).toBeVisible();
+  await expect(announcement.getByText(/three new Agents/)).toBeVisible();
+  await expect(announcement.getByText(/many bug fixes and QoL updates/)).toBeVisible();
+  await expect(announcement.locator('[data-release-story="2.4.0"] img')).toHaveCount(12);
+  await expect(announcement.getByAltText("The new Personas icon in Marinara Engine")).toHaveAttribute(
+    "src",
+    "https://i.imgur.com/K4Z9rSA.png",
+  );
+  const announcementScrollArea = announcement.locator('[data-component="WhatsNewModal"]').locator("..");
+  await expect.poll(() => announcementScrollArea.evaluate((element) => getComputedStyle(element).overflowY)).toBe("auto");
+  await expect
+    .poll(() => announcementScrollArea.evaluate((element) => element.scrollHeight > element.clientHeight))
+    .toBe(true);
   await expect(announcement.getByText("Marinara Engine has been updated.", { exact: true })).toHaveCount(0);
   await expect(announcement.getByText("Tactical Combat Mode in Games")).toHaveCount(0);
   await expect(announcement.getByRole("link", { name: "View release" })).toHaveAttribute(
@@ -234,6 +242,60 @@ test("turning off the custom mouse pointer persists immediately and after reload
   await expect
     .poll(() => page.evaluate(() => document.documentElement.dataset.marinaraCustomCursor ?? null))
     .toBeNull();
+});
+
+test("custom theme live preview batches stylesheet updates while typing", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[data-tour="panel-settings"]').click();
+  await page.getByRole("tab", { name: "Addons" }).click();
+  await page.getByRole("button", { name: "Create Theme" }).click();
+
+  const themeCssEditor = page.getByPlaceholder("/* Enter your CSS here... */");
+  await expect(themeCssEditor).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => document.getElementById("marinara-css-editor-preview")?.textContent?.length ?? 0))
+    .toBeGreaterThan(0);
+
+  await page.evaluate(() => {
+    const previewStyle = document.getElementById("marinara-css-editor-preview");
+    if (!previewStyle) throw new Error("Expected the custom theme preview stylesheet");
+
+    const trackedWindow = window as Window & {
+      __themePreviewMutationCount?: number;
+      __themePreviewObserver?: MutationObserver;
+    };
+    trackedWindow.__themePreviewMutationCount = 0;
+    trackedWindow.__themePreviewObserver = new MutationObserver(() => {
+      trackedWindow.__themePreviewMutationCount = (trackedWindow.__themePreviewMutationCount ?? 0) + 1;
+    });
+    trackedWindow.__themePreviewObserver.observe(previewStyle, {
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+  });
+
+  const previewMarker = "\n:root { --issue-4452-preview: ready; }";
+  await themeCssEditor.pressSequentially(previewMarker, { delay: 2 });
+  expect(
+    await page.evaluate(
+      () =>
+        (window as Window & { __themePreviewMutationCount?: number }).__themePreviewMutationCount ?? 0,
+    ),
+  ).toBe(0);
+
+  await expect
+    .poll(() => page.evaluate(() => document.getElementById("marinara-css-editor-preview")?.textContent ?? ""))
+    .toContain("--issue-4452-preview: ready");
+  expect(
+    await page.evaluate(
+      () =>
+        (window as Window & { __themePreviewMutationCount?: number }).__themePreviewMutationCount ?? 0,
+    ),
+  ).toBe(1);
+
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect.poll(() => page.locator("#marinara-css-editor-preview").count()).toBe(0);
 });
 
 test("gradient Accent Pulse keeps animating while Appearance settings are open", async ({ page }, testInfo) => {
@@ -2233,7 +2295,7 @@ test("Character and Persona avatar actions stay separated and visually balanced"
     version: string,
   ) => {
     await page.locator(`[data-tour="panel-${panel}"]`).click();
-    await page.getByText(resourceName, { exact: true }).first().click();
+    await page.getByText(resourceName, { exact: true }).first().click({ position: { x: 2, y: 2 } });
 
     const editor = page.locator(".mari-editor-shell");
     await expect(editor).toBeVisible();
@@ -4209,7 +4271,7 @@ test("legacy browser records are cleaned while extension imports stay locked", a
         };
       }),
     )
-    .toEqual({ version: 87, hasExtensionRecords: false, hasCleanupFlag: false });
+    .toEqual({ version: 88, hasExtensionRecords: false, hasCleanupFlag: false });
 
   expect(
     await page.evaluate(
@@ -4526,6 +4588,9 @@ test("Roleplay Active Context shows rich lorebook activation provenance", async 
 
     const panel = page.locator('[data-component="RoleplayActiveContextPanel"]');
     await expect(panel).toBeVisible();
+    await expect.poll(() => panel.evaluate((element) => element.parentElement === document.body)).toBe(true);
+    await expect(panel).toHaveCSS("position", "fixed");
+    await expect(panel).toHaveCSS("z-index", "9999");
     await expect(panel.getByText("2 active • ~321 tokens", { exact: true })).toBeVisible();
     await expect(panel.getByRole("region", { name: "Current location lore" })).toContainText("Northland Bank");
     await expect(panel.getByText("Whispered Archive", { exact: true })).toBeVisible();
@@ -4703,6 +4768,47 @@ test("chat toolbar panels close when their trigger is clicked again across modes
     const summaryPanel = page.locator("[data-chat-floating-panel]").filter({ hasText: "Chat Summary" });
     await summaryButton.click();
     await expect(summaryPanel).toBeVisible();
+    await expect.poll(() => summaryPanel.evaluate((element) => element.parentElement === document.body)).toBe(true);
+    await expect(summaryPanel).toHaveCSS("position", "fixed");
+    await expect(summaryPanel).toHaveCSS("z-index", "9999");
+    const summaryPromptCard = summaryPanel
+      .getByText("Summary Prompt", { exact: true })
+      .locator("xpath=../../..");
+    const chatSummaryPromptTab = summaryPromptCard.getByRole("tab", { name: "Chat Summary", exact: true });
+    const combinePromptTab = summaryPromptCard.getByRole("tab", { name: "Combine prompt", exact: true });
+    await expect(chatSummaryPromptTab).toHaveAttribute("aria-selected", "true");
+    const summaryPromptViewHeight = await summaryPromptCard.locator(".h-48").first().evaluate((element) =>
+      element.getBoundingClientRect().height,
+    );
+    await combinePromptTab.click();
+    await expect(combinePromptTab).toHaveAttribute("aria-selected", "true");
+    const combinePromptViewHeight = await summaryPromptCard.locator(".h-48").first().evaluate((element) =>
+      element.getBoundingClientRect().height,
+    );
+    expect(combinePromptViewHeight).toBe(summaryPromptViewHeight);
+
+    const promptEditButton = summaryPromptCard.getByRole("button", { name: "Edit", exact: true });
+    await expect(promptEditButton).toBeEnabled();
+    await promptEditButton.click();
+    await expect(summaryPromptCard.getByRole("button", { name: "Done", exact: true })).toBeVisible();
+    const combinePromptInput = summaryPromptCard.getByRole("textbox", { name: "Combine prompt", exact: true });
+    const originalCombinePrompt = await combinePromptInput.inputValue();
+    const updatedCombinePrompt = `${originalCombinePrompt}\nE2E save probe`;
+    await expect(combinePromptInput).toHaveAttribute("rows", "5");
+    await combinePromptInput.fill(updatedCombinePrompt);
+    await summaryPromptCard.getByRole("button", { name: "Done", exact: true }).click();
+    await expect(combinePromptInput).toHaveCount(0);
+    await summaryPromptCard.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(combinePromptInput).toHaveValue(updatedCombinePrompt);
+    await combinePromptInput.fill(originalCombinePrompt);
+    await summaryPromptCard.getByRole("button", { name: "Done", exact: true }).click();
+    await expect(combinePromptInput).toHaveCount(0);
+
+    await chatSummaryPromptTab.click();
+    await summaryPromptCard.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(summaryPromptCard.getByRole("button", { name: "Done", exact: true })).toBeVisible();
+    await summaryPromptCard.getByRole("button", { name: "Done", exact: true }).click();
+    await expect(summaryPromptCard.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
     await summaryButton.click();
     await expect(summaryPanel).toHaveCount(0);
 
@@ -4782,6 +4888,11 @@ test("roleplay quick preset editor uses chat settings spacing and surfaces", asy
     await expect(quickEditorToggle).toHaveAttribute("aria-expanded", "true");
     await expect(quickEditorToggle).toContainText("Collapse preset editor");
     await expect(drawer.locator('[data-prompt-preset-chevron="select"]')).toBeVisible();
+
+    await quickEditor.getByRole("button", { name: "Add Section", exact: true }).click();
+    await expect(quickEditor.getByRole("button", { name: "ID Macro Cards", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(quickEditor.getByRole("button", { name: "ID Macro Cards", exact: true })).toBeHidden();
 
     const toolbar = quickEditor.locator(".mari-editor-toolbar");
     const firstToolbarControl = toolbar.locator("button").first();
@@ -5650,6 +5761,11 @@ test("PocketTTS discovers server voices and uses its speech endpoint", async ({ 
       receivedPath = incoming.url ?? "";
       receivedContentType = String(incoming.headers["content-type"] ?? "");
       receivedBody = Buffer.concat(chunks).toString("utf8");
+      if (incoming.method === "GET" && incoming.url === "/openapi.json") {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ paths: { "/v1/audio/speech": {}, "/v1/voices": {} } }));
+        return;
+      }
       if (incoming.method === "GET" && incoming.url === "/v1/voices") {
         response.writeHead(200, { "Content-Type": "application/json" });
         response.end(
@@ -5782,6 +5898,82 @@ test("PocketTTS discovers server voices and uses its speech endpoint", async ({ 
         return config.dialoguePauseMs;
       })
       .toBe(60_000);
+  } finally {
+    try {
+      if (originalConfig !== undefined) await request.put("/api/tts/config", { data: originalConfig });
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        pocketTts.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  }
+});
+
+test("PocketTTS uses the official multipart speech API", async ({ request }, testInfo) => {
+  test.skip(!testInfo.project.name.includes("desktop"), "PocketTTS routing is covered on desktop.");
+
+  let receivedPath = "";
+  let receivedContentType = "";
+  let receivedBody = "";
+  const pocketTts = createServer((incoming, response) => {
+    const chunks: Buffer[] = [];
+    incoming.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    incoming.on("end", () => {
+      receivedPath = incoming.url ?? "";
+      receivedContentType = String(incoming.headers["content-type"] ?? "");
+      receivedBody = Buffer.concat(chunks).toString("utf8");
+      if (incoming.method === "GET" && incoming.url === "/openapi.json") {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ paths: { "/health": {}, "/tts": {} } }));
+        return;
+      }
+      if (incoming.method === "POST" && incoming.url === "/tts") {
+        response.writeHead(200, { "Content-Type": "audio/wav" });
+        response.end(Buffer.from("RIFF\u0000\u0000\u0000\u0000WAVE", "binary"));
+        return;
+      }
+      response.writeHead(404).end();
+    });
+  });
+  await new Promise<void>((resolve) => pocketTts.listen(0, "127.0.0.1", resolve));
+  let originalConfig: unknown;
+
+  try {
+    const address = pocketTts.address();
+    if (!address || typeof address === "string") throw new Error("PocketTTS mock did not bind to a TCP port");
+
+    const originalConfigResponse = await request.get("/api/tts/config");
+    expect(originalConfigResponse.ok()).toBeTruthy();
+    originalConfig = await originalConfigResponse.json();
+
+    const configResponse = await request.put("/api/tts/config", {
+      data: {
+        enabled: true,
+        source: "pockettts",
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        model: "pocket-tts",
+        voice: "alba",
+        audioFormat: "wav",
+      },
+    });
+    expect(configResponse.ok()).toBeTruthy();
+
+    const voicesResponse = await request.get("/api/tts/voices");
+    expect(voicesResponse.ok()).toBeTruthy();
+    const voices = (await voicesResponse.json()) as { voices: string[]; fromProvider: boolean };
+    expect(voices.fromProvider).toBe(false);
+    expect(voices.voices).toEqual(expect.arrayContaining(["alba", "giovanni", "lola", "estelle"]));
+
+    const speechResponse = await request.post("/api/tts/speak", {
+      data: { text: "Hello from the official server." },
+    });
+    expect(speechResponse.ok()).toBeTruthy();
+    expect(receivedPath).toBe("/tts");
+    expect(receivedContentType).toContain("multipart/form-data; boundary=");
+    expect(receivedBody).toContain('name="text"');
+    expect(receivedBody).toContain("Hello from the official server.");
+    expect(receivedBody).toContain('name="voice_url"');
+    expect(receivedBody).toContain("alba");
   } finally {
     try {
       if (originalConfig !== undefined) await request.put("/api/tts/config", { data: originalConfig });
@@ -6230,6 +6422,180 @@ test("settings search divider stays aligned with editor headers across text scal
         }),
       )
       .toEqual({ shellHeadersAligned: true, contentHeadersAligned: true });
+  }
+});
+
+test("Storyboard Agent settings stay organized and contained at phone widths", async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.includes("desktop"), "Responsive Storyboard settings are covered once.");
+
+  const suffix = Date.now().toString(36);
+  const connectionResponse = await page.request.post("/api/connections", {
+    data: {
+      name: `A deliberately long Storyboard image connection name for narrow screens ${suffix}`,
+      provider: "image_generation",
+      imageGenerationSource: "openai",
+    },
+  });
+  expect(connectionResponse.ok()).toBeTruthy();
+  const connection = (await connectionResponse.json()) as { id: string };
+
+  await page.route("**/api/capability-packages/agents", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([
+        {
+          id: "storyboard",
+          name: "Storyboard",
+          description: "Plans still and animated storyboards.",
+          author: "Pasta Devs",
+          phase: "post_processing",
+          execution: "host",
+          enabledByDefault: false,
+          category: "misc",
+          modeAllowlist: ["roleplay", "game"],
+          defaultPromptTemplate: "Plan storyboard keyframes.",
+          promptTemplates: [
+            { id: "still", name: "Still planner", promptTemplate: "Plan one still frame." },
+            { id: "animation", name: "Animation planner", promptTemplate: "Plan an animation." },
+          ],
+          defaultSettings: {
+            illustrationPlannerTemplateIds: ["still"],
+            animationPlannerTemplateIds: ["animation"],
+            illustrationTemplates: [
+              { id: "image-default", name: "Image default", promptTemplate: "Format the image prompt." },
+            ],
+            videoTemplates: [
+              { id: "video-default", name: "Video default", promptTemplate: "Format the video prompt." },
+            ],
+            roleplayEpisodeTemplates: [
+              { id: "episode-default", name: "Episode default", promptTemplate: "Plan the episode." },
+            ],
+            roleplayStyleTemplates: [
+              { id: "style-default", name: "Style default", promptTemplate: "Apply the visual style." },
+            ],
+            roleplayAnimationTemplates: [
+              { id: "motion-default", name: "Motion default", promptTemplate: "Plan motion." },
+            ],
+            roleplayOutputTemplates: [
+              { id: "output-default", name: "Output default", promptTemplate: "Return structured output." },
+            ],
+          },
+        },
+      ]),
+    });
+  });
+
+  try {
+    await page.goto("/");
+    await page.evaluate(async () => {
+      const module = await import("/src/stores/ui.store.ts");
+      module.useUIStore.getState().openAgentDetail("storyboard");
+    });
+
+    const editor = page.locator(".mari-editor-shell");
+    const settingsPanel = editor.locator(".mari-editor-panel").filter({
+      has: page.getByRole("heading", { name: "Storyboard settings", exact: true }),
+    });
+    const shared = settingsPanel.locator('[data-storyboard-settings-scope="shared"]');
+    const roleplay = settingsPanel.locator('[data-storyboard-settings-scope="roleplay"]');
+    const game = settingsPanel.locator('[data-storyboard-settings-scope="game"]');
+
+    await expect(settingsPanel).toBeVisible();
+    await expect(shared).toBeVisible();
+    await expect(roleplay).toBeVisible();
+    await expect(game).toBeVisible();
+    await expect
+      .poll(() =>
+        settingsPanel.evaluate((panel) =>
+          Array.from(panel.querySelectorAll<HTMLElement>("[data-storyboard-settings-scope]")).map(
+            (section) => section.dataset.storyboardSettingsScope,
+          ),
+        ),
+      )
+      .toEqual(["shared", "roleplay", "game"]);
+
+    const gamePromptLibrary = editor.locator(".mari-editor-panel").filter({
+      has: page.getByRole("heading", { name: "Game prompt library", exact: true }),
+    });
+    await expect(gamePromptLibrary).toBeVisible();
+    expect(
+      await settingsPanel.evaluate(
+        (settingsElement, promptElement) => {
+          return Boolean(
+            settingsElement.compareDocumentPosition(promptElement as Node) & Node.DOCUMENT_POSITION_FOLLOWING,
+          );
+        },
+        await gamePromptLibrary.elementHandle(),
+      ),
+    ).toBe(true);
+
+    const imageConnection = shared.locator("select").first();
+    await imageConnection.selectOption(connection.id);
+    await expect(imageConnection).toHaveValue(connection.id);
+
+    const roleplayInterval = roleplay.getByLabel("Default Roleplay episode interval", { exact: true });
+    await roleplayInterval.fill("7");
+    await expect(roleplayInterval).toHaveValue("7");
+
+    const scopeToggle = (scope: Locator) => scope.locator(":scope > button");
+    await scopeToggle(roleplay).click();
+    await expect(scopeToggle(roleplay)).toHaveAttribute("aria-expanded", "false");
+    await expect(roleplayInterval).toHaveCount(0);
+    await scopeToggle(roleplay).click();
+    await expect(roleplay.getByLabel("Default Roleplay episode interval", { exact: true })).toHaveValue("7");
+
+    await scopeToggle(shared).click();
+    await expect(scopeToggle(shared)).toHaveAttribute("aria-expanded", "false");
+    await scopeToggle(shared).click();
+    await expect(shared.locator("select").first()).toHaveValue(connection.id);
+
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "18px";
+    });
+
+    for (const width of [320, 360, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      await expect
+        .poll(() =>
+          settingsPanel.evaluate((panel) => {
+            const panelRect = panel.getBoundingClientRect();
+            const visibleControls = Array.from(
+              panel.querySelectorAll<HTMLElement>("button, input, select, textarea"),
+            ).filter((control) => control.getClientRects().length > 0);
+            const overflowingControls = visibleControls.filter((control) => {
+              const rect = control.getBoundingClientRect();
+              return rect.left < panelRect.left - 1 || rect.right > panelRect.right + 1;
+            });
+            const overflowingScopes = Array.from(
+              panel.querySelectorAll<HTMLElement>("[data-storyboard-settings-scope]"),
+            ).filter((scope) => scope.scrollWidth > scope.clientWidth + 1);
+            return {
+              panelFits: panel.scrollWidth <= panel.clientWidth + 1,
+              overflowingControls: overflowingControls.length,
+              overflowingScopes: overflowingScopes.length,
+            };
+          }),
+        )
+        .toEqual({ panelFits: true, overflowingControls: 0, overflowingScopes: 0 });
+
+      for (const scope of [shared, roleplay, game]) {
+        const box = await scopeToggle(scope).boundingBox();
+        expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      }
+
+      for (const control of [
+        settingsPanel.locator('button[title="Restore default prompt"]').first(),
+        settingsPanel.locator('button[title="Remove prompt option"]').first(),
+        settingsPanel.getByRole("button", { name: "Expand editor" }).first(),
+      ]) {
+        const box = await control.boundingBox();
+        expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+        expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      }
+    }
+  } finally {
+    await page.request.delete(`/api/connections/${connection.id}`).catch(() => undefined);
   }
 });
 
@@ -9244,6 +9610,57 @@ test("Professor Mari chat fills the mobile home viewport and keeps its composer 
       );
     })
     .toBe(true);
+});
+
+test("Professor Mari history opens a loaded chat at its newest message", async ({ page }) => {
+  const createdChatIds: string[] = [];
+
+  try {
+    const firstResponse = await page.request.get("/api/chats/internal/professor-mari");
+    expect(firstResponse.ok()).toBeTruthy();
+    const firstChat = (await firstResponse.json()) as { id: string };
+    createdChatIds.push(firstChat.id);
+    for (let index = 0; index < 18; index += 1) {
+      const messageResponse = await page.request.post(`/api/chats/${firstChat.id}/messages`, {
+        data: {
+          role: index % 2 === 0 ? "user" : "assistant",
+          content: `Professor Mari history message ${index + 1}. ${"A long transcript line makes the pane overflow. ".repeat(8)}`,
+        },
+      });
+      expect(messageResponse.ok()).toBeTruthy();
+    }
+    const secondResponse = await page.request.post("/api/chats/internal/professor-mari/restart");
+    expect(secondResponse.ok()).toBeTruthy();
+    const secondChat = (await secondResponse.json()) as { id: string };
+    createdChatIds.push(secondChat.id);
+
+    await page.goto("/");
+    await page
+      .locator('[data-component="HomeProfessorMariChat.MariPanel"]')
+      .getByRole("button", { name: "Ask Professor Mari" })
+      .click();
+
+    const window = page.locator('[data-component="HomeProfessorMariChat.Window"]');
+    await window.getByRole("button", { name: "Chats" }).click();
+    await window.locator(`[data-professor-mari-chat-id="${firstChat.id}"] button`).first().click();
+
+    const transcript = window.locator('[data-component="HomeProfessorMariChat.Transcript"]');
+    await expect(transcript).toBeVisible();
+    await expect
+      .poll(() =>
+        transcript.evaluate((node) => ({
+          atBottom: Math.abs(node.scrollHeight - node.clientHeight - node.scrollTop) <= 2,
+          overflows: node.scrollHeight > node.clientHeight,
+        })),
+      )
+      .toEqual({ atBottom: true, overflows: true });
+  } finally {
+    await Promise.all(
+      createdChatIds.map((id) =>
+        page.request.delete(`/api/chats/internal/professor-mari/chats/${id}`).catch(() => undefined),
+      ),
+    );
+  }
 });
 
 test("Professor Mari bulk chat deletion follows the active accent", async ({ page }) => {

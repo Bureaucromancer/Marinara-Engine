@@ -27,6 +27,7 @@ import { processLorebooks } from "../../services/lorebook/index.js";
 import { resolveLorebookScopeExclusions } from "../../services/lorebook/game-lorebook-scope.js";
 import { injectAtDepth } from "../../services/lorebook/prompt-injector.js";
 import { createLLMProvider } from "../../services/llm/provider-registry.js";
+import { withConnectionAdmissionProvider } from "../../services/generation/connection-admission.js";
 import { getLocalSidecarProvider } from "../../services/llm/local-sidecar.js";
 import {
   assemblePrompt,
@@ -845,6 +846,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     applyRegexScriptsToPromptMessages(mappedMessages, await regexScriptsStore.list(), {
       resolveMacros: (value, randomSeed) => resolveMacros(value, promptMacroContext, { trimResult: false, randomSeed }),
       targetCharacterId: promptTargetCharacterId,
+      targetPromptPresetId: effectivePresetId,
     });
 
     for (const msg of mappedMessages) {
@@ -1603,7 +1605,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
 
     const provider: BaseLLMProvider =
       connId === LOCAL_SIDECAR_CONNECTION_ID
-        ? (getLocalSidecarProvider() as any)
+        ? withConnectionAdmissionProvider(getLocalSidecarProvider() as any, LOCAL_SIDECAR_CONNECTION_ID)
         : createLLMProvider(
             conn.provider,
             baseUrl,
@@ -1614,6 +1616,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
             conn.claudeFastMode === "true",
             conn.treatAsLocalEndpoint === "true",
             conn.defaultParameters,
+            connId ?? undefined,
           );
 
     // ── Mirror /api/generate: normalize + fit prompt to context ──

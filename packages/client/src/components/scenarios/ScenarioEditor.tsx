@@ -369,7 +369,7 @@ export function ScenarioEditor() {
   return (
     <div className="mari-editor-panel-root flex h-full min-h-0 flex-col">
       <header className="mari-editor-header">
-        <button onClick={handleClose} className="mari-editor-action" title={localizeUi("ui.noodle.agegate.back")} aria-label={localizeUi("ui.noodle.agegate.back")}>
+        <button onClick={handleClose} className="mari-editor-action" title={localizeUi("ui.scenarios.scenarioeditor.back")} aria-label={localizeUi("ui.scenarios.scenarioeditor.back")}>
           <ArrowLeft size="1rem" />
         </button>
         <div className="mari-editor-icon-tile mari-panel-gradient-surface mari-panel-gradient--scenarios">

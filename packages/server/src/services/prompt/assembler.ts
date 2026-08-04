@@ -26,6 +26,7 @@ import {
   buildReferencedCharacterContext,
   buildPromptMacroContext,
   collectCharacterAdvancedPromptEntries,
+  MAX_REFERENCED_CHARACTERS,
   resolveMacrosWithVariableSnapshot,
 } from "./macro-context.js";
 
@@ -391,11 +392,59 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
     excludedLorebookSourceAgentIds: input.excludedLorebookSourceAgentIds,
   });
   macroCtx.characterReferences = referencedCharacterContext.references;
+  const referencedCharacterContextBlocks = referencedCharacterContext.content
+    ? [referencedCharacterContext.content]
+    : [];
 
   // Resolve macros inside variable values themselves (e.g. {{user}} in a choice value)
   for (const key of Object.keys(variableValues)) {
     variableValues[key] = resolveMacros(variableValues[key]!, macroCtx, deferAllMacroOptions);
   }
+
+  const addActivatedLorebookCharacterReferences = async (result: LorebookScanResult) => {
+    const existingReferenceIds = Object.keys(macroCtx.characterReferences ?? {});
+    const remainingReferenceSlots = Math.max(0, MAX_REFERENCED_CHARACTERS - existingReferenceIds.length);
+    if (remainingReferenceSlots === 0) return;
+
+    const extraContext = await buildReferencedCharacterContext({
+      db: input.db,
+      activeCharacterIds: [...(input.groupCharacterIds ?? input.characterIds), ...existingReferenceIds],
+      sources: result.activatedEntries.map((entry) => entry.content),
+      chatMessages: input.lorebookScanMessages ?? input.chatMessages,
+      macroCtx,
+      wrapFormat,
+      chatId: input.chatId,
+      gameState: input.gameState,
+      generationTriggers: input.generationTriggers,
+      includeLorebooks: input.disableLorebooks !== true,
+      excludedLorebookIds: input.excludedLorebookIds,
+      excludedLorebookSourceAgentIds: input.excludedLorebookSourceAgentIds,
+      maxReferences: remainingReferenceSlots,
+    });
+    if (Object.keys(extraContext.references).length === 0) return;
+
+    macroCtx.characterReferences = {
+      ...(macroCtx.characterReferences ?? {}),
+      ...extraContext.references,
+    };
+    if (extraContext.content) referencedCharacterContextBlocks.push(extraContext.content);
+
+    const resolveReferenceMacros = (value: string) =>
+      resolveMacros(value, { ...macroCtx, variables: { ...macroCtx.variables } }, deferNameMacroOptions);
+    result.worldInfoBefore = resolveReferenceMacros(result.worldInfoBefore);
+    result.worldInfoAfter = resolveReferenceMacros(result.worldInfoAfter);
+    result.depthEntries = result.depthEntries.map((entry) => ({
+      ...entry,
+      content: resolveReferenceMacros(entry.content),
+    }));
+    result.outlets = Object.fromEntries(
+      Object.entries(result.outlets).map(([name, content]) => [name, resolveReferenceMacros(content)]),
+    );
+    result.activatedEntries = result.activatedEntries.map((entry) => ({
+      ...entry,
+      content: resolveReferenceMacros(entry.content),
+    }));
+  };
 
   // Build marker context
   const markerCtx: MarkerContext = {
@@ -428,6 +477,7 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
     generationTriggers: input.generationTriggers ?? ["chat"],
     previewOnly: input.previewOnly === true,
     resolveLorebookContent: (value) => resolveMacrosWithVariableSnapshot(value, macroCtx, deferNameMacroOptions),
+    onLorebookScan: addActivatedLorebookCharacterReferences,
     groupScenarioOverrideText: input.groupScenarioOverrideText ?? null,
     hasDialogueExamplesMarker,
     macroCtx,
@@ -440,6 +490,7 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
   let lorebookDepthEntriesCount = 0;
   let hasChatSummaryMarker = false;
   let outletScanAttempted = false;
+  let idMacroCardMarkerSection: ResolvedSection | null = null;
   const runtimeAgentTypesUsed = new Set<string>();
 
   for (const sectionId of sectionOrder) {
@@ -496,12 +547,22 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
     }
 
     if (!resolved) continue;
+    if (resolved.isIdMacroCards && !idMacroCardMarkerSection) {
+      idMacroCardMarkerSection = resolved;
+    }
 
     if (!resolved.isChatHistory && section.injectionPosition === "depth" && section.injectionDepth >= 0) {
       depthSections.push(resolved);
     } else {
       orderedSections.push(resolved);
     }
+  }
+
+  const referencedCharacterContent = referencedCharacterContextBlocks.join("\n");
+  if (referencedCharacterContent && idMacroCardMarkerSection) {
+    idMacroCardMarkerSection.messages = [
+      { role: idMacroCardMarkerSection.role, content: referencedCharacterContent, contextKind: "prompt" },
+    ];
   }
 
   // ── Phase 2: Group wrapping ──
@@ -546,10 +607,10 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
       }
     }
   }
-  if (referencedCharacterContext.content) {
+  if (referencedCharacterContent && !idMacroCardMarkerSection) {
     messages.unshift({
       role: "system",
-      content: referencedCharacterContext.content,
+      content: referencedCharacterContent,
       contextKind: "prompt",
     });
   }
@@ -674,6 +735,8 @@ interface ResolvedSection {
   messages: ChatMLMessage[];
   depth: number;
   isChatHistory?: boolean;
+  /** Placement placeholder for dynamically discovered character-ID macro cards. */
+  isIdMacroCards?: boolean;
 }
 
 interface ResolveSectionCtx {
@@ -706,6 +769,16 @@ async function resolveSection(
   // Handle marker sections
   if (section.isMarker === "true" && section.markerConfig) {
     const markerConfig = JSON.parse(section.markerConfig) as MarkerConfig;
+    if (markerConfig.type === "id_macro_cards") {
+      return {
+        id: section.id,
+        groupId: section.groupId,
+        role,
+        messages: [],
+        depth: section.injectionDepth,
+        isIdMacroCards: true,
+      };
+    }
     const runtimeAgentType =
       markerConfig.type === "agent_data" && markerConfig.agentType ? markerConfig.agentType : null;
     const runtimeAgentData = runtimeAgentType !== null ? ctx.runtimeAgentData[runtimeAgentType] : undefined;
