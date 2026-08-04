@@ -268,7 +268,7 @@ function formatTokenCount(tokens: number): string {
 }
 
 function getSummaryEntrySourceLabel(entry: ChatSummaryEntry, t: TFunction): string | null {
-  if (entry.sourceMode === "range" && entry.rangeStartIndex && entry.rangeEndIndex) {
+  if (entry.rangeStartIndex && entry.rangeEndIndex) {
     return t("chat.summary.source.range", {
       start: entry.rangeStartIndex,
       end: entry.rangeEndIndex,

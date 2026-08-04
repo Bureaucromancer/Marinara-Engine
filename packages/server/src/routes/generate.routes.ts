@@ -393,7 +393,7 @@ import {
   clampRoleplaySummaryMaxTokens,
   formatRoleplaySummaryChatLog,
   isAutomaticRoleplaySummaryEnabled,
-  parseChatSummaryText,
+  parseChatSummaryResult,
   resolveChatSummaryPrompt,
   withoutRetiredChatSummaryAgentIds,
 } from "../services/generation/roleplay-summary-runtime.js";
@@ -7149,12 +7149,19 @@ export async function generateRoutes(app: FastifyInstance) {
             },
           );
           if (abortController.signal.aborted) return;
-          const newText = result.content ? parseChatSummaryText(result.content) : "";
+          const parsedSummary = result.content ? parseChatSummaryResult(result.content) : { summary: "", title: "" };
+          const newText = parsedSummary.summary;
 
           let createdEntry: ChatSummaryEntry | null = null;
           let summaryEntries: ChatSummaryEntry[] = [];
           const shouldReviewSummary = requireAgentWriteApproval && !!newText;
           const autoEntryMessageIds = selectedMessages.map((message: any) => message.id);
+          const messageIndexes = new Map(freshMessages.map((message, index) => [message.id, index + 1]));
+          const selectedIndexes = autoEntryMessageIds
+            .map((messageId) => messageIndexes.get(messageId))
+            .filter((index): index is number => index !== undefined);
+          const autoRangeStartIndex = selectedIndexes.length > 0 ? Math.min(...selectedIndexes) : undefined;
+          const autoRangeEndIndex = selectedIndexes.length > 0 ? Math.max(...selectedIndexes) : undefined;
           // Compute the hide subset up front so it can be persisted on the entry
           // (deletion restores exactly this set) and reused for the actual hide.
           const autoHideIds =
@@ -7183,9 +7190,12 @@ export async function generateRoutes(app: FastifyInstance) {
                   kind: "rolling",
                   origin: "automated",
                   sourceMode: "agent",
+                  ...(parsedSummary.title ? { title: parsedSummary.title } : {}),
                   content: newText,
                   enabled: true,
                   messageCount: selectedMessages.length,
+                  rangeStartIndex: autoRangeStartIndex,
+                  rangeEndIndex: autoRangeEndIndex,
                   messageIds: autoEntryMessageIds,
                   ...(autoHideIds.length > 0 ? { hiddenMessageIds: autoHideIds } : {}),
                   promptTemplateId:
@@ -7219,6 +7229,9 @@ export async function generateRoutes(app: FastifyInstance) {
                   payload: {
                     messageIds: selectedMessages.map((message: any) => message.id),
                     messageCount: selectedMessages.length,
+                    summaryTitle: parsedSummary.title,
+                    rangeStartIndex: autoRangeStartIndex,
+                    rangeEndIndex: autoRangeEndIndex,
                     promptTemplateId:
                       typeof chatMeta.activeSummaryPromptTemplateId === "string"
                         ? chatMeta.activeSummaryPromptTemplateId

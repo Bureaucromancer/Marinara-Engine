@@ -116,6 +116,8 @@ import { persistLorebookKeeperUpdates } from "./generate/lorebook-keeper-utils.j
 import {
   clampRoleplaySummaryMaxTokens,
   formatRoleplaySummaryChatLog,
+  normalizeChatSummaryTitle,
+  parseChatSummaryResult,
   resolveChatSummaryPrompt,
   resolveChatSummaryCombinePrompt,
 } from "../services/generation/roleplay-summary-runtime.js";
@@ -255,24 +257,6 @@ function getMemoryRecallChunkImportKey(
   chunk: Pick<ChatMemoryRecallExportChunk, "content" | "firstMessageAt" | "lastMessageAt">,
 ): string {
   return JSON.stringify([chunk.firstMessageAt, chunk.lastMessageAt, chunk.content]);
-}
-
-function extractGeneratedSummary(content: string): string {
-  try {
-    const cleaned = content
-      .trim()
-      .replace(/```(?:json)?\s*/giu, "")
-      .replace(/```/gu, "");
-    const first = cleaned.indexOf("{");
-    const last = cleaned.lastIndexOf("}");
-    if (first >= 0 && last > first) {
-      const parsed = JSON.parse(cleaned.slice(first, last + 1)) as { summary?: unknown };
-      if (typeof parsed.summary === "string" && parsed.summary.trim()) return parsed.summary.trim();
-    }
-  } catch {
-    // Plain-text summary responses are valid.
-  }
-  return content.trim();
 }
 
 function readMemoryRecallImportPayload(
@@ -1260,6 +1244,19 @@ export async function chatsRoutes(app: FastifyInstance) {
         typeof payload.promptTemplateId === "string" && payload.promptTemplateId.trim()
           ? payload.promptTemplateId.trim()
           : null;
+      const summaryTitle = normalizeChatSummaryTitle(payload.summaryTitle);
+      const rangeStartIndex =
+        typeof payload.rangeStartIndex === "number" &&
+        Number.isInteger(payload.rangeStartIndex) &&
+        payload.rangeStartIndex > 0
+          ? payload.rangeStartIndex
+          : undefined;
+      const rangeEndIndex =
+        typeof payload.rangeEndIndex === "number" &&
+        Number.isInteger(payload.rangeEndIndex) &&
+        payload.rangeEndIndex > 0
+          ? payload.rangeEndIndex
+          : undefined;
       let combined: string | null = text;
       let createdEntry: ChatSummaryEntry | null = null;
       let summaryEntries: ChatSummaryEntry[] = [];
@@ -1271,9 +1268,12 @@ export async function chatsRoutes(app: FastifyInstance) {
             kind: "rolling",
             origin: "automated",
             sourceMode: "agent",
+            ...(summaryTitle ? { title: summaryTitle } : {}),
             content: text,
             enabled: true,
             ...(messageCount ? { messageCount } : {}),
+            ...(rangeStartIndex ? { rangeStartIndex } : {}),
+            ...(rangeEndIndex ? { rangeEndIndex } : {}),
             ...(messageIds.length > 0 ? { messageIds } : {}),
             promptTemplateId,
             createdAt: now,
@@ -3974,7 +3974,11 @@ export async function chatsRoutes(app: FastifyInstance) {
       if (!result.content) {
         return reply.status(500).send({ error: "No response from AI" });
       }
-      const summaryText = extractGeneratedSummary(result.content);
+      const parsedSummary = parseChatSummaryResult(result.content);
+      const summaryText = parsedSummary.summary;
+      if (!summaryText) {
+        return reply.status(500).send({ error: "No summary returned by AI" });
+      }
 
       let combinedEntry: ChatSummaryEntry | null = null;
       let combinedEntries: ChatSummaryEntry[] = [];
@@ -3998,7 +4002,7 @@ export async function chatsRoutes(app: FastifyInstance) {
           {
             kind: "rolling",
             origin: "manual",
-            title: "Combined summary",
+            title: parsedSummary.title || "Combined summary",
             content: summaryText,
             enabled: selected.some((entry) => entry.enabled),
             sourceMode: starts.length > 0 || ends.length > 0 ? "range" : "last",
@@ -4079,6 +4083,16 @@ export async function chatsRoutes(app: FastifyInstance) {
     if (selectedMessages.length === 0) {
       return reply.status(400).send({ error: "No non-hidden messages available for the requested summary range" });
     }
+    if (selectedRangeStartIndex === undefined || selectedRangeEndIndex === undefined) {
+      const messageIndexes = new Map(allMessages.map((message, index) => [message.id, index + 1]));
+      const selectedIndexes = selectedMessages
+        .map((message) => messageIndexes.get(message.id))
+        .filter((index): index is number => index !== undefined);
+      if (selectedIndexes.length > 0) {
+        selectedRangeStartIndex = Math.min(...selectedIndexes);
+        selectedRangeEndIndex = Math.max(...selectedIndexes);
+      }
+    }
     const chatLog = formatRoleplaySummaryChatLog(selectedMessages);
 
     const previousSummary = chatMeta.summary ?? null;
@@ -4114,7 +4128,11 @@ export async function chatsRoutes(app: FastifyInstance) {
       return reply.status(500).send({ error: "No response from AI" });
     }
 
-    const summaryText = extractGeneratedSummary(result.content);
+    const parsedSummary = parseChatSummaryResult(result.content);
+    const summaryText = parsedSummary.summary;
+    if (!summaryText) {
+      return reply.status(500).send({ error: "No summary returned by AI" });
+    }
 
     const messageIds = selectedMessages.map((message) => message.id);
     // Subset eligible to be hidden when "Hide summarised messages" is on: the
@@ -4162,6 +4180,7 @@ export async function chatsRoutes(app: FastifyInstance) {
             kind: "rolling",
             origin: "manual",
             sourceMode: hasRange ? "range" : "last",
+            ...(parsedSummary.title ? { title: parsedSummary.title } : {}),
             content: summaryText,
             enabled: true,
             messageCount: selectedMessages.length,

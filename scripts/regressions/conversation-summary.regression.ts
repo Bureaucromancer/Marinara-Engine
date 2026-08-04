@@ -67,5 +67,30 @@ assert.match(
   /backfill-summaries[\s\S]*?resolveChatSummaryConnection\([\s\S]*?maxTokens: clampRoleplaySummaryMaxTokens/u,
   "Conversation backfills should use the selected summary connection and configured output budget",
 );
+assert.match(
+  chatsRouteSource,
+  /selectedRangeStartIndex = Math\.min\([\s\S]*?rangeStartIndex: selectedRangeStartIndex/u,
+  "Manual and backfilled summaries should persist their covered message range",
+);
+
+const generateRouteSource = await readFile(
+  new URL("../../packages/server/src/routes/generate.routes.ts", import.meta.url),
+  "utf8",
+);
+assert.match(
+  generateRouteSource,
+  /autoRangeStartIndex[\s\S]*?rangeStartIndex: autoRangeStartIndex/u,
+  "Automatic summaries should persist their covered message range",
+);
+
+const summaryPopoverSource = await readFile(
+  new URL("../../packages/client/src/components/chat/SummaryPopover.tsx", import.meta.url),
+  "utf8",
+);
+assert.match(
+  summaryPopoverSource,
+  /if \(entry\.rangeStartIndex && entry\.rangeEndIndex\)/u,
+  "Summary metadata should show ranges for every origin when range metadata exists",
+);
 
 process.stdout.write("Conversation summary regression passed.\n");
