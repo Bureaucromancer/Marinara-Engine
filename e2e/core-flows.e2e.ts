@@ -2949,12 +2949,12 @@ test("provider concurrency errors appear in generation toasts", async ({ page },
   }
 });
 
-test("sent text stays cleared and the first message edit persists after stopped generation", async ({
+test("stopped and refused generations keep sent text cleared and accept the first edit", async ({
   page,
   request,
 }, testInfo) => {
-  test.skip(!testInfo.project.name.includes("desktop"), "Stopped-generation edit persistence is covered on desktop.");
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
+  const mobile = testInfo.project.name.includes("mobile");
 
   const suffix = Date.now().toString(36);
   const providerRequests: Array<Record<string, unknown>> = [];
@@ -2969,6 +2969,11 @@ test("sent text stays cleared and the first message edit persists after stopped 
         return;
       }
       providerRequests.push(JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>);
+      if (providerRequests.length === 4) {
+        response.writeHead(403, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { message: "Content prohibited by the provider" } }));
+        return;
+      }
       openProviderResponses.add(response);
       response.on("close", () => openProviderResponses.delete(response));
       response.writeHead(200, {
@@ -3050,7 +3055,8 @@ test("sent text stays cleared and the first message edit persists after stopped 
     };
     const editMessageOnce = async (messageId: string, nextContent: string) => {
       const message = page.locator(`[data-message-id="${messageId}"]`);
-      await message.hover();
+      if (mobile) await message.click();
+      else await message.hover();
       await message.getByTitle("Edit", { exact: true }).click();
       const editor = message.locator("textarea");
       await editor.fill(nextContent);
@@ -3097,6 +3103,31 @@ test("sent text stays cleared and the first message edit persists after stopped 
         ),
       )
       .toBe(true);
+
+    await input.fill("Provider refusal must not duplicate this sent message");
+    await sendButton.click();
+    await expect.poll(() => providerRequests.length).toBe(4);
+    await expect(input).toHaveValue("");
+    await expect
+      .poll(async () =>
+        (await readMessages()).some(
+          (message) =>
+            message.role === "user" && message.content === "Provider refusal must not duplicate this sent message",
+        ),
+      )
+      .toBe(true);
+
+    const transportFailureDraft = "Restore this draft when transport fails before persistence";
+    await page.route("**/api/generate", async (route) => route.abort("failed"));
+    await input.fill(transportFailureDraft);
+    await sendButton.click();
+    await expect(input).toHaveValue(transportFailureDraft);
+    expect(
+      (await readMessages()).some(
+        (message) => message.role === "user" && message.content === transportFailureDraft,
+      ),
+    ).toBe(false);
+    await page.unroute("**/api/generate");
 
     await page.reload();
     await expect(page.locator(`[data-message-id="${firstMessage!.id}"]`)).toContainText(
@@ -7027,6 +7058,66 @@ test("Browser labels and the Persona full library stay available across viewport
   await expect(page.locator('[data-tour="panel-personas"]')).toHaveClass(/mari-topbar-panel-icon--active/);
   await expect(page.locator('[data-tour="panel-characters"]')).not.toHaveClass(/bg-\[var\(--accent\)\]/);
   expect(errors.filter((error) => !error.includes("status of 503 (Service Unavailable)"))).toEqual([]);
+});
+
+test("Chub NSFW search uses filtered totals and spaced pagination", async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.includes("desktop"), "Chub filter behavior is covered once on desktop.");
+
+  const observedSearches: Array<{ query: string; nsfw: string | null }> = [];
+  await page.route("**/api/bot-browser/chub/search?*", async (route) => {
+    const url = new URL(route.request().url());
+    const query = url.searchParams.get("q") ?? "";
+    const nsfw = url.searchParams.get("nsfw");
+    observedSearches.push({ query, nsfw });
+    const isReportedSearch = query === "Kathrin Vaughan" && nsfw === "true";
+    await route.fulfill({
+      json: {
+        data: {
+          count: isReportedSearch ? 11 : query ? 0 : 96,
+          cursor: isReportedSearch || !query ? "next-page" : null,
+          nodes: isReportedSearch
+            ? [
+                {
+                  fullPath: "blur/kathrin-vaughan",
+                  name: "Kathrin Vaughan",
+                  tagline: "Reported NSFW search result",
+                  topics: ["Fantasy", "NSFW"],
+                  nsfw: null,
+                  nTokens: 780,
+                },
+              ]
+            : query
+              ? []
+              : [
+                  {
+                    fullPath: "example/safe-card",
+                    name: "Safe Card",
+                    tagline: "Initial result",
+                    topics: ["SFW"],
+                    nsfw: false,
+                    nTokens: 500,
+                  },
+                ],
+        },
+      },
+    });
+  });
+
+  await page.goto("/");
+  await page.locator('[data-tour="panel-bot-browser"]').click();
+  await page.getByRole("button", { name: "Download Cards" }).click();
+  const library = page.locator('[data-component="BotBrowserView"]');
+  await expect(library.getByText("96 cards from ChubAI", { exact: true })).toBeVisible();
+  await expect(library.getByText("Page 1 of 2", { exact: true })).toBeVisible();
+
+  await library.getByRole("checkbox", { name: "NSFW", exact: true }).check();
+  await library.getByPlaceholder("Search characters").fill("Kathrin Vaughan");
+
+  await expect(library.getByText("Kathrin Vaughan", { exact: true })).toBeVisible();
+  await expect(library.getByText("11 cards from ChubAI", { exact: true })).toBeVisible();
+  const card = library.getByRole("button", { name: /Kathrin Vaughan/u });
+  await expect(card.getByText("NSFW", { exact: true })).toBeVisible();
+  expect(observedSearches).toContainEqual({ query: "Kathrin Vaughan", nsfw: "true" });
 });
 
 test("Character and Persona sidebars find cards by creator", async ({ page, request }, testInfo) => {

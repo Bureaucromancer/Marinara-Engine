@@ -1507,7 +1507,11 @@ export const ChatMessage = memo(function ChatMessage({
     if (!onEdit || isStreaming) return;
     const sp = msgRef.current?.closest("[class*='overflow-y']") as HTMLElement | null;
     if (sp) scrollRestoreRef.current = { el: sp, top: sp.scrollTop };
-    editSwipeIndexRef.current = message.activeSwipeIndex ?? null;
+    // Persisted messages may briefly alternate between an omitted swipe index
+    // and the explicit default index while generation cleanup refetches. Treat
+    // both as swipe zero so that harmless cache normalization cannot discard a
+    // user's first edit after stopping generation.
+    editSwipeIndexRef.current = message.activeSwipeIndex ?? 0;
     setEditing(true);
   }, [isStreaming, message.activeSwipeIndex, onEdit]);
 
@@ -1761,7 +1765,7 @@ export const ChatMessage = memo(function ChatMessage({
 
   const handleSaveEdit = useCallback(
     (content: string) => {
-      if (editSwipeIndexRef.current !== null && editSwipeIndexRef.current !== (message.activeSwipeIndex ?? null)) {
+      if (editSwipeIndexRef.current !== null && editSwipeIndexRef.current !== (message.activeSwipeIndex ?? 0)) {
         editSwipeIndexRef.current = null;
         setEditing(false);
         return;
@@ -1794,7 +1798,7 @@ export const ChatMessage = memo(function ChatMessage({
   useEffect(() => {
     if (!editing) return;
     if (editSwipeIndexRef.current === null) return;
-    if (editSwipeIndexRef.current !== (message.activeSwipeIndex ?? null)) {
+    if (editSwipeIndexRef.current !== (message.activeSwipeIndex ?? 0)) {
       editSwipeIndexRef.current = null;
       setEditing(false);
     }

@@ -345,6 +345,33 @@ function latestNewMessageByRole(
   );
 }
 
+function latestDurableSubmittedUserMessage(
+  qc: QueryClient,
+  chatId: string,
+  snapshot: MessageSnapshot,
+  submittedContent: string,
+  submittedAt: number,
+): Message | null {
+  const candidates = getCachedMessages(qc, chatId).filter(
+    (message) =>
+      message.role === "user" &&
+      !message.id.startsWith("__optimistic_") &&
+      !snapshot.fingerprints.has(message.id) &&
+      message.content === submittedContent,
+  );
+  if (snapshot.cacheWasLoaded) return latestMessage(candidates);
+
+  // An active chat normally has a loaded message cache. If it did not, use a
+  // narrow time/content match rather than mistaking an arbitrary historical
+  // user row for this submission after a transport failure.
+  return latestMessage(
+    candidates.filter((message) => {
+      const createdAt = new Date(message.createdAt).getTime();
+      return Number.isFinite(createdAt) && createdAt >= submittedAt - 5_000;
+    }),
+  );
+}
+
 function latestChangedAssistantMessage(qc: QueryClient, chatId: string, snapshot: MessageSnapshot): Message | null {
   if (!snapshot.cacheWasLoaded) return null;
   return latestAssistantMessage(
@@ -1168,6 +1195,22 @@ export function useGenerate() {
       // Create an AbortController so the stop button can cancel this generation.
       const abortController = new AbortController();
       const submittedUserTurn = params.userMessage !== undefined;
+      const submittedUserTurnStartedAt = Date.now();
+      const userMessagesBeforeGeneration = submittedUserTurn
+        ? snapshotMessagesByRole(qc, params.chatId, "user")
+        : null;
+      const confirmDurableSubmittedUserTurn = async () => {
+        if (!submittedUserTurn || !userMessagesBeforeGeneration || params.impersonate) return false;
+        const refreshed = await refreshMessagesAuthoritatively(qc, params.chatId);
+        if (!refreshed) return false;
+        return !!latestDurableSubmittedUserMessage(
+          qc,
+          params.chatId,
+          userMessagesBeforeGeneration,
+          params.userMessage ?? "",
+          submittedUserTurnStartedAt,
+        );
+      };
       try {
         useChatStore.getState().setAbortController(params.chatId, abortController);
         useChatStore.getState().setBackgroundIllustration(params.chatId, false);
@@ -2807,7 +2850,7 @@ export function useGenerate() {
         const msg = error instanceof Error ? error.message : "Generation failed";
         showError(msg);
         window.dispatchEvent(new CustomEvent("marinara:generation-error", { detail: { chatId: params.chatId } }));
-        return false;
+        return await confirmDurableSubmittedUserTurn();
       } finally {
         // Stream has terminated (done, error, abort, or unexpected throw) —
         // guarantee the Mari indicator clears even if the end SSE never arrived.
@@ -3134,7 +3177,8 @@ export function useGenerate() {
           }
         }
       }
-      return receivedContent || passiveStreamRecovered || spatialTransitionCommitted;
+      if (receivedContent || passiveStreamRecovered || spatialTransitionCommitted) return true;
+      return await confirmDurableSubmittedUserTurn();
     },
     [
       qc,

@@ -37,6 +37,9 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 - Kept Google Gemini API keys in the `x-goog-api-key` header when fetching models instead of duplicating them in the URL, preventing compatible proxies from rejecting the query token with HTTP 401 (#4448).
 - Preserved the reader's pre-keyboard scroll position in mobile Roleplay instead of snapping the transcript to the newest message when the composer receives focus (#4589).
 - Kept Characters and Personas library artwork flush with the full height of mobile cards, made Character Chat actions match the compact Copy and Delete controls on desktop and mobile, and kept folder counts clear of Delete actions across Characters, Personas, Presets, Lorebooks, Connections, and Agents.
+- Kept the first confirmed edit to a sent Roleplay message after stopping generation, including on mobile where a transient missing/default swipe index previously made the edit look stale (#4592).
+- Restored Chub NSFW search results, including cards whose current search payload exposes the canonical NSFW topic without a boolean flag; filtered result totals and pagination now follow Chub's reported count, and the page label has its missing space (#4593).
+- Kept a provider-refused prompt out of the composer when that user turn was already saved in chat history, while still restoring drafts for requests that genuinely failed before persistence (#4594).
 
 ## [2.4.0]
 

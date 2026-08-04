@@ -461,9 +461,16 @@ const chubProvider: ProviderConfig = {
     const raw = await res.json();
     const data = raw?.data ?? raw;
     const nodes = data?.nodes ?? [];
-    // Chub API "count" = items on this page, not total. Use cursor to detect more pages.
+    // Chub now reports the filtered result total in `count`. Older deployments
+    // exposed only a page count, so keep the cursor-based estimate as a fallback.
     const hasMore = !!data?.cursor;
-    const chubTotal = hasMore ? (p.page + 1) * 48 : (p.page - 1) * 48 + nodes.length;
+    const reportedCount = data?.count === null || data?.count === undefined ? Number.NaN : Number(data.count);
+    const chubTotal =
+      Number.isFinite(reportedCount) && reportedCount >= 0
+        ? reportedCount
+        : hasMore
+          ? (p.page + 1) * 48
+          : (p.page - 1) * 48 + nodes.length;
 
     return {
       cards: nodes.map((n: any) => ({
@@ -482,7 +489,11 @@ const chubProvider: ProviderConfig = {
         stat3: n.nTokens || 0,
         stat3Label: "Tokens",
         stat3Icon: "hash" as const,
-        nsfw: !!n.nsfw,
+        // Current Chub search rows can omit the boolean while still returning
+        // the canonical NSFW topic (including Kathrin Vaughan).
+        nsfw:
+          n.nsfw === true ||
+          (Array.isArray(n.topics) && n.topics.some((topic: unknown) => String(topic).trim().toLowerCase() === "nsfw")),
         externalUrl: `https://chub.ai/characters/${n.fullPath}`,
         _raw: n,
       })),
@@ -2526,7 +2537,9 @@ export function BotBrowserView() {
                         className="mari-chrome-control mari-chrome-control--small px-3 py-1.5 text-xs"
                       >{localizeUi("ui.botBrowser.botbrowserview.previous")}</button>
                       <span className="text-xs text-[var(--muted-foreground)]">{localizeUi("ui.botBrowser.botbrowserview.page")} {page}
-                        {totalPages > 1 && totalPages < 9000 ?localizeUi("ui.botBrowser.botbrowserview.ofValue1", { value1: totalPages }) : ""}
+                        {totalPages > 1 && totalPages < 9000 ? (
+                          <> {localizeUi("ui.botBrowser.botbrowserview.ofValue1", { value1: totalPages })}</>
+                        ) : ""}
                       </span>
                       <button
                         disabled={page >= totalPages && totalPages > 1}
