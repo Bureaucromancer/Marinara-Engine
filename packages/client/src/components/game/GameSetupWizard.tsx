@@ -641,13 +641,16 @@ export function GameSetupWizard({
   );
   const personas = useMemo(
     () =>
-      (personasList as Array<{
+      ((personasList as Array<{
         id: string;
         name: string;
         avatarPath?: string | null;
         avatarCrop?: AvatarCrop | string | null;
         comment?: string;
-      }>) ?? [],
+      }>) ?? []).map((persona) => ({
+        ...persona,
+        avatarCrop: normalizeAvatarCrop(persona.avatarCrop),
+      })),
     [personasList],
   );
   const characterFolders = useMemo(
@@ -1860,7 +1863,7 @@ export function GameSetupWizard({
                         character={{
                           name: p.name,
                           avatarUrl: p.avatarPath ?? null,
-                          avatarCrop: normalizeAvatarCrop(p.avatarCrop),
+                          avatarCrop: p.avatarCrop,
                         }}
                       />
                       <div className="min-w-0 flex-1">
@@ -1905,7 +1908,7 @@ export function GameSetupWizard({
                           character={{
                             name: p.name,
                             avatarUrl: p.avatarPath ?? null,
-                            avatarCrop: normalizeAvatarCrop(p.avatarCrop),
+                            avatarCrop: p.avatarCrop,
                           }}
                         />
                         <div className="min-w-0 flex-1">
