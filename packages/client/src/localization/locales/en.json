@@ -4650,6 +4650,7 @@
   "ui.game.gamesurfacecomponent.startGame": "Start Game",
   "ui.game.gamesurfacecomponent.storyboard": "Storyboard",
   "ui.game.gamesurfacecomponent.storyboardBackgroundDisplayIsActiveSoSceneBackgroundGeneration": "Storyboard background display is active, so scene background generation is disabled",
+  "ui.game.gamesurfacecomponent.storyboardDegradedResult": "Storyboard degraded result",
   "ui.game.gamesurfacecomponent.storyboardGenerationFailed": "Storyboard generation failed.",
   "ui.game.gamesurfacecomponent.storyboardPlannedWithValue1KeyframesImagesAreRendering": "Storyboard planned with {{value1}} keyframes; images are rendering.",
   "ui.game.gamesurfacecomponent.storyboardPromptPreviewTimedOutContinuingWithTheDefault": "Storyboard prompt preview timed out. Continuing with the default prompts.",

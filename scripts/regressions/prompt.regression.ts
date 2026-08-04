@@ -283,6 +283,28 @@ import {
   applyStoryboardAgentSettings,
   shouldSuppressIllustratorForegroundForStoryboard,
 } from "../../packages/server/src/services/game/storyboard-agent-settings.js";
+import {
+  STORYBOARD_FALLBACK_BEAT_MAX_CHARS,
+  compactStoryboardFallbackBeat,
+  createStoryboardReviewPlanEnvelope,
+  resolveStoryboardReviewPlanEnvelope,
+} from "../../packages/server/src/services/game/storyboard-planner-fallback.js";
+
+const fallbackBeatWords = Array.from({ length: 400 }, (_, index) => `storyboard-beat-${index}`);
+const compactedFallbackBeat = compactStoryboardFallbackBeat(fallbackBeatWords.join(" "));
+assert.ok(compactedFallbackBeat.length <= STORYBOARD_FALLBACK_BEAT_MAX_CHARS);
+assert.ok(compactedFallbackBeat.endsWith("..."));
+assert.ok(fallbackBeatWords.includes(compactedFallbackBeat.slice(0, -3).split(" ").at(-1) ?? ""));
+const fallbackReviewEnvelope = createStoryboardReviewPlanEnvelope({
+  plan: { keyframes: [{ narrationBeat: compactedFallbackBeat }] },
+  plannerError: "Planner response was malformed; used fallback storyboard planner and skipped video generation.",
+  usedFallbackPlanner: true,
+});
+assert.deepEqual(resolveStoryboardReviewPlanEnvelope(fallbackReviewEnvelope), {
+  plan: fallbackReviewEnvelope.plan,
+  plannerError: fallbackReviewEnvelope.plannerError,
+  usedFallbackPlanner: true,
+});
 
 const assistantCadenceMessages = [
   { id: "illustrator-anchor", role: "assistant" },
@@ -3494,7 +3516,9 @@ const cases: RegressionCase[] = [
       );
       assert.match(storyboardHookSource, /previewOnly: true/);
       assert.match(gameRouteSource, /if \(input\.previewOnly\)/);
-      assert.match(gameRouteSource, /return \{ items, plannedStoryboard: plan \}/);
+      assert.match(gameRouteSource, /createStoryboardReviewPlanEnvelope\(\{/);
+      assert.match(gameRouteSource, /plannerWarning: illustratorErrorMessage/);
+      assert.match(gameSurfaceSource, /preview\.plannerWarning/);
       assert.match(gameRouteSource, /storyboardPromptOverrideById\.get\(`storyboard:\$\{frame\.index\}`\)/);
       assert.match(gameRouteSource, /\[debug\/game\/storyboard-image-preview\]/);
     },
@@ -3848,7 +3872,7 @@ const cases: RegressionCase[] = [
     },
   },
   {
-    name: "Game planner always receives card appearance while final attachment stays optional",
+    name: "Storyboard appearance is gated and injected once across planner and fallback paths",
     async run() {
       const appearance = "auburn hair, green eyes, leather jacket";
       const description = "A verbose roleplay card description that must not be sent as visual appearance.";
@@ -4171,8 +4195,19 @@ const cases: RegressionCase[] = [
       assert.doesNotMatch(gameSurfaceSource, /useGamePromptTemplate/u);
       assert.match(gameRouteSource, /characterAppearanceContextBlock:\s*storyboardAppearanceContextBlock/u);
       assert.equal(gameRouteSource.match(/^\s+characterAppearanceContextBlock,\s*$/gmu)?.length, 2);
-      assert.equal(gameRouteSource.match(/includeCharacterDescriptions:\s*true,/gu)?.length, 1);
+      assert.equal(gameRouteSource.match(/includeCharacterDescriptions:\s*true,/gu)?.length ?? 0, 0);
       assert.equal(gameRouteSource.match(/includeCharacterDescriptions:\s*includeCharacterAppearance,/gu)?.length, 5);
+      assert.equal(
+        gameRouteSource.match(
+          /includeCharacterDescriptions:\s*includeCharacterAppearanceAtRender && characterPrompts\.length === 0,/gu,
+        )?.length,
+        1,
+      );
+      assert.match(
+        gameRouteSource,
+        /const includeCharacterAppearanceAtRender = includeCharacterAppearance && usedFallbackStoryboardPlanner/u,
+      );
+      assert.match(gameRouteSource, /Marinara used narration-based fallback keyframes and skipped video generation/u);
       assert.equal(gameRouteSource.match(/meta\.storyboardAgentIncludeCharacterAppearance !== false/gu)?.length, 1);
       assert.equal(gameRouteSource.match(/meta\.storyboardAgentUseAvatarReferences !== false/gu)?.length, 1);
       assert.equal(gameRouteSource.match(/meta\.gameImageIncludeCharacterAppearance !== false/gu)?.length, 2);
