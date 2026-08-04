@@ -96,6 +96,7 @@ import { useTranslation, useTranslation as useUiTranslation } from "react-i18nex
 
 const MARI_AVATAR_URL = "/sprites/mari/Mari_profile.png";
 const MARI_CHIBI_URL = "/sprites/mari/chibi-professor-mari.png";
+const PROFESSOR_MARI_WELCOME_MESSAGE_ID = "__professor_mari_home_welcome__";
 const MARI_CONNECTION_STORAGE_KEY = "marinara:home-professor-mari-connection-id";
 const PROFESSOR_MARI_ERROR_TOAST_DURATION_MS = 120_000;
 const WORKSPACE_SETTLE_POLL_MS = 1_500;
@@ -355,7 +356,7 @@ function isProfessorMariChatActive(chat: ProfessorMariChatSummary) {
 
 function createWelcomeMessage(chatId: string | null): Message {
   return {
-    id: "__professor_mari_home_welcome__",
+    id: PROFESSOR_MARI_WELCOME_MESSAGE_ID,
     chatId: chatId ?? "__professor_mari_home__",
     role: "assistant",
     characterId: PROFESSOR_MARI_ID,
@@ -1159,55 +1160,73 @@ function CompactMarkdown({ content, streaming }: { content: string; streaming?: 
 }
 
 function ProfessorMariAttachedFiles({ attachments, onRemove }: { attachments: ProfessorMariAttachment[]; onRemove?: (index: number) => void }) {
+  const { t: localizeUi } = useUiTranslation();
   if (attachments.length === 0) return null;
   return (
     <div className="mt-2 flex flex-wrap gap-2">
       {attachments.map((attachment, index) =>
         isProfessorMariImageAttachment(attachment) ? (
-          <a
+          <div
             key={`${attachment.name}-${index}`}
-            href={attachment.data}
-            target="_blank"
-            rel="noreferrer"
-            className="relative block overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--background)]/70"
-            title={attachment.name}
+            className="relative"
           >
-            <img
-              src={attachment.data}
-              alt={attachment.name || "Attached image"}
-              className="h-24 w-24 object-cover sm:h-28 sm:w-28"
-              draggable={false}
-            />
+            <a
+              href={attachment.data}
+              target="_blank"
+              rel="noreferrer"
+              className="block overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--background)]/70"
+              title={attachment.name}
+            >
+              <img
+                src={attachment.data}
+                alt={attachment.name || "Attached image"}
+                className="h-24 w-24 object-cover sm:h-28 sm:w-28"
+                draggable={false}
+              />
+            </a>
             {onRemove && (
               <button
-                onClick={(e) => { e.preventDefault(); onRemove(index); }}
-                className="absolute right-1 top-1 rounded bg-[var(--background)]/80 p-0.5 text-[var(--foreground)] hover:bg-[var(--destructive)] hover:text-white"
+                type="button"
+                onClick={() => onRemove(index)}
+                className="absolute right-1 top-1 rounded bg-[var(--background)]/80 p-0.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--primary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] focus-visible:text-[var(--primary)]"
+                aria-label={localizeUi("ui.chat.homeprofessormarichat.removeAttachment")}
+                title={localizeUi("ui.chat.homeprofessormarichat.removeAttachment")}
               >
                 <X size="0.75rem" />
               </button>
             )}
-          </a>
+          </div>
         ) : (
-          <a
+          <div
             key={`${attachment.name}-${index}`}
-            href={attachment.data}
-            target="_blank"
-            rel="noreferrer"
-            download={attachment.name}
-            className="relative flex max-w-[14rem] items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--background)]/70 px-2.5 py-2 text-xs text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
-            title={attachment.name}
+            className="relative max-w-[14rem]"
           >
-            <FileText size="0.875rem" className="shrink-0 text-[var(--primary)]" />
-            <span className="min-w-0 truncate">{attachment.name}</span>
+            <a
+              href={attachment.data}
+              target="_blank"
+              rel="noreferrer"
+              download={attachment.name}
+              className={cn(
+                "flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--background)]/70 px-2.5 py-2 text-xs text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+                onRemove && "pr-8",
+              )}
+              title={attachment.name}
+            >
+              <FileText size="0.875rem" className="shrink-0 text-[var(--primary)]" />
+              <span className="min-w-0 truncate">{attachment.name}</span>
+            </a>
             {onRemove && (
               <button
-                onClick={(e) => { e.preventDefault(); onRemove(index); }}
-                className="ml-auto rounded p-0.5 text-[var(--muted-foreground)] hover:bg-[var(--destructive)] hover:text-white"
+                type="button"
+                onClick={() => onRemove(index)}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--primary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] focus-visible:text-[var(--primary)]"
+                aria-label={localizeUi("ui.chat.homeprofessormarichat.removeAttachment")}
+                title={localizeUi("ui.chat.homeprofessormarichat.removeAttachment")}
               >
                 <X size="0.75rem" />
               </button>
             )}
-          </a>
+          </div>
         ),
       )}
     </div>
@@ -1467,6 +1486,11 @@ function WorkspaceTimelineList({
   );
 }
 
+const MARI_MESSAGE_ACTIONS_CLASS =
+  "mt-1 flex gap-1.5 opacity-100 transition-opacity [@media(pointer:fine)]:opacity-0 [@media(pointer:fine)]:group-focus-within:opacity-100 [@media(pointer:fine)]:group-hover:opacity-100";
+const MARI_MESSAGE_ACTION_BUTTON_CLASS =
+  "rounded p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--primary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] focus-visible:text-[var(--primary)]";
+
 function CompactMariMessage({
   message,
   thinking,
@@ -1488,7 +1512,7 @@ function CompactMariMessage({
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
 
- if (message.role === "user") {
+  if (message.role === "user") {
     return (
       <TranscriptRow
         className="group border-y border-[var(--border)]/60 py-2.5"
@@ -1501,6 +1525,7 @@ function CompactMariMessage({
               onChange={setEditContent}
               rows={8}
               title={localizeUi("ui.chat.homeprofessormarichat.editMessage")}
+              ariaLabel={localizeUi("ui.chat.homeprofessormarichat.editMessage")}
               showMacroReference={false}
               showMarkdownPreview={false}
               className="w-full"
@@ -1524,11 +1549,13 @@ function CompactMariMessage({
           onRemove={onRemoveAttachment ? (index) => onRemoveAttachment(message.id, index) : undefined}
         />
         {(onDelete || onEdit) && (
-          <div className="mt-1 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+          <div className={MARI_MESSAGE_ACTIONS_CLASS}>
             {onEdit && (
               <button
+                type="button"
                 onClick={() => { setEditContent(content); setIsEditing(true); }}
-                className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                className={MARI_MESSAGE_ACTION_BUTTON_CLASS}
+                aria-label={localizeUi("ui.chat.homeprofessormarichat.editMessage")}
                 title={localizeUi("ui.chat.homeprofessormarichat.editMessage")}
               >
                 <Pencil size="0.8rem" />
@@ -1536,8 +1563,10 @@ function CompactMariMessage({
             )}
             {onDelete && (
               <button
+                type="button"
                 onClick={() => onDelete(message.id)}
-                className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--destructive)]"
+                className={MARI_MESSAGE_ACTION_BUTTON_CLASS}
+                aria-label={localizeUi("ui.chat.homeprofessormarichat.deleteMessage")}
                 title={localizeUi("ui.chat.homeprofessormarichat.deleteMessage")}
               >
                 <Trash2 size="0.8rem" />
@@ -1555,14 +1584,26 @@ function CompactMariMessage({
       <div className="group">
         <WorkspaceTimelineList items={timelineItemsFromTrace(workspaceTrace, message)} active={false} openReasoning />
         {(onDelete || onRegenerate) && (
-          <div className="mt-1 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+          <div className={MARI_MESSAGE_ACTIONS_CLASS}>
             {onRegenerate && (
-              <button onClick={() => onRegenerate(message.id)} className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]" title={localizeUi("ui.chat.chatmessage.regenerate")}>
+              <button
+                type="button"
+                onClick={() => onRegenerate(message.id)}
+                className={MARI_MESSAGE_ACTION_BUTTON_CLASS}
+                aria-label={localizeUi("ui.chat.chatmessage.regenerate")}
+                title={localizeUi("ui.chat.chatmessage.regenerate")}
+              >
                 <RefreshCw size="0.8rem" />
               </button>
             )}
             {onDelete && (
-              <button onClick={() => onDelete(message.id)} className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--destructive)]" title={localizeUi("lorebook.editor.batch.delete")}>
+              <button
+                type="button"
+                onClick={() => onDelete(message.id)}
+                className={MARI_MESSAGE_ACTION_BUTTON_CLASS}
+                aria-label={localizeUi("lorebook.editor.batch.delete")}
+                title={localizeUi("lorebook.editor.batch.delete")}
+              >
                 <Trash2 size="0.8rem" />
               </button>
             )}
@@ -1580,11 +1621,13 @@ function CompactMariMessage({
       >
         <CompactMarkdown content={content} />
         {(onDelete || onRegenerate) && (
-          <div className="mt-1 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+          <div className={MARI_MESSAGE_ACTIONS_CLASS}>
             {onRegenerate && (
               <button
+                type="button"
                 onClick={() => onRegenerate(message.id)}
-                className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                className={MARI_MESSAGE_ACTION_BUTTON_CLASS}
+                aria-label={localizeUi("ui.chat.chatmessage.regenerate")}
                 title={localizeUi("ui.chat.chatmessage.regenerate")}
               >
                 <RefreshCw size="0.8rem" />
@@ -1592,8 +1635,10 @@ function CompactMariMessage({
             )}
             {onDelete && (
               <button
+                type="button"
                 onClick={() => onDelete(message.id)}
-                className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--destructive)]"
+                className={MARI_MESSAGE_ACTION_BUTTON_CLASS}
+                aria-label={localizeUi("lorebook.editor.batch.delete")}
                 title={localizeUi("lorebook.editor.batch.delete")}
               >
                 <Trash2 size="0.8rem" />
@@ -2248,6 +2293,7 @@ export function HomeProfessorMariChat({
   const latestConnectionSelectionRef = useRef<string | null>(selectedConnectionId);
   const pendingConnectionPersistRef = useRef<string | null>(null);
   const connectionPersistInFlightRef = useRef(false);
+  const attachmentRemovalInFlightRef = useRef<Set<string>>(new Set());
 
   const setActiveChatId = useCallback((id: string) => {
     activeChatIdRef.current = id;
@@ -3406,6 +3452,7 @@ export function HomeProfessorMariChat({
     [clearMariPlan, effectiveConnectionId, setMariChips, setMariPlan],
   );
   const handleDeleteMessage = useCallback(async (messageId: string) => {
+    if (!chatId) return;
     const confirmed = await showConfirmDialog({
       title: localizeUi("ui.chat.homeprofessormarichat.deleteMessage"),
       message: localizeUi("ui.chat.homeprofessormarichat.deleteMessageConfirmation"),
@@ -3418,22 +3465,31 @@ export function HomeProfessorMariChat({
     try {
       await api.delete(`/chats/${chatId}/messages/${messageId}`);
     } catch {
-      // Revert on failure — reload messages
+      await loadMessages(chatId).catch(() => undefined);
+      toast.error(localizeUi("ui.chat.homeprofessormarichat.professorMariCouldNotDeleteThatMessage"));
     }
-  }, [chatId]);
+  }, [chatId, loadMessages, localizeUi]);
 
   const handleEditMessage = useCallback(async (messageId: string, content: string) => {
+    if (!chatId) return;
     setMessages((current) =>
       current.map((m) => m.id === messageId ? { ...m, content } : m)
     );
     try {
       await api.patch(`/chats/${chatId}/messages/${messageId}`, { content });
     } catch {
-      // revert
+      await loadMessages(chatId).catch(() => undefined);
+      toast.error(localizeUi("ui.chat.homeprofessormarichat.professorMariCouldNotSaveThatEdit"));
     }
-  }, [chatId]);
+  }, [chatId, loadMessages, localizeUi]);
 
   const handleRegenerateMessage = useCallback(async (messageId: string) => {
+    if (isBusy || !chatId) return;
+    const index = messages.findIndex((message) => message.id === messageId);
+    if (index <= 0 || index !== messages.length - 1 || messages[index]?.role !== "assistant") return;
+    const userMessage = messages[index - 1];
+    if (userMessage.role !== "user") return;
+
     const confirmed = await showConfirmDialog({
       title: localizeUi("ui.chat.homeprofessormarichat.regenerateResponse"),
       message: localizeUi("ui.chat.homeprofessormarichat.regenerateResponseConfirmation"),
@@ -3441,41 +3497,54 @@ export function HomeProfessorMariChat({
       tone: "destructive",
     });
     if (!confirmed) return;
-    const index = messages.findIndex((m) => m.id === messageId);
-    if (index <= 0) return;
-    // Find the preceding user message
-    const userMessage = messages[index - 1];
-    if (userMessage.role !== "user") return;
-    // Delete the old assistant response
+
     setMessages((current) => current.filter((m) => m.id !== messageId));
-    await api.delete(`/chats/${chatId}/messages/${messageId}`);
-    // Re-send the user message (re-runs the workspace prompt)
-    await sendWorkspaceMessage({ id: chatId! } as Chat, userMessage.content, getProfessorMariAttachments(userMessage));
-  }, [chatId, messages, sendWorkspaceMessage]);
+    try {
+      await api.delete(`/chats/${chatId}/messages/${messageId}`);
+      const received = await sendWorkspaceMessage(
+        { id: chatId } as Chat,
+        userMessage.content,
+        getProfessorMariAttachments(userMessage),
+      );
+      if (!received) throw new Error("Professor Mari did not return a regenerated response");
+      await loadMessages(chatId);
+    } catch {
+      await loadMessages(chatId).catch(() => undefined);
+      toast.error(localizeUi("ui.chat.homeprofessormarichat.professorMariCouldNotRegenerateThatResponse"));
+    }
+  }, [chatId, isBusy, loadMessages, localizeUi, messages, sendWorkspaceMessage]);
 
   const handleRemoveAttachment = useCallback(async (messageId: string, attachmentIndex: number) => {
-    const confirmed = await showConfirmDialog({
-      title: localizeUi("ui.chat.homeprofessormarichat.removeAttachment"),
-      message: localizeUi("ui.chat.homeprofessormarichat.removeAttachmentConfirmation"),
-      confirmLabel: localizeUi("ui.panels.agentspanel.remove"),
-      tone: "destructive",
-    });
-    if (!confirmed) return;
-    const message = messages.find((m) => m.id === messageId);
-    if (!message) return;
-    const currentAttachments = getProfessorMariAttachments(message);
-    const updated = currentAttachments.filter((_, i) => i !== attachmentIndex);
-    // Optimistic update
-    setMessages((current) =>
-      current.map((m) => {
-        if (m.id !== messageId) return m;
-        const extra = toMessageExtra(m);
-        return { ...m, extra: { ...extra, attachments: updated } };
-      })
-    );
-    // Persist
-    await api.patch(`/chats/${chatId}/messages/${messageId}/extra`, { attachments: updated });
-  }, [chatId, messages]);
+    if (!chatId || attachmentRemovalInFlightRef.current.has(messageId)) return;
+    attachmentRemovalInFlightRef.current.add(messageId);
+    try {
+      const confirmed = await showConfirmDialog({
+        title: localizeUi("ui.chat.homeprofessormarichat.removeAttachment"),
+        message: localizeUi("ui.chat.homeprofessormarichat.removeAttachmentConfirmation"),
+        confirmLabel: localizeUi("ui.panels.agentspanel.remove"),
+        tone: "destructive",
+      });
+      if (!confirmed) return;
+      const message = messages.find((item) => item.id === messageId);
+      if (!message) return;
+      const currentAttachments = getProfessorMariAttachments(message);
+      const updated = currentAttachments.filter((_, index) => index !== attachmentIndex);
+      if (updated.length === currentAttachments.length) return;
+      setMessages((current) =>
+        current.map((item) => {
+          if (item.id !== messageId) return item;
+          const extra = toMessageExtra(item);
+          return { ...item, extra: { ...extra, attachments: updated } };
+        })
+      );
+      await api.patch(`/chats/${chatId}/messages/${messageId}/extra`, { attachments: updated });
+    } catch {
+      await loadMessages(chatId).catch(() => undefined);
+      toast.error(localizeUi("ui.chat.homeprofessormarichat.professorMariCouldNotRemoveThatAttachment"));
+    } finally {
+      attachmentRemovalInFlightRef.current.delete(messageId);
+    }
+  }, [chatId, loadMessages, localizeUi, messages]);
 
   const handleSubmit = async (overrideText?: string) => {
     const text = (overrideText ?? draft).trim();
@@ -3546,10 +3615,10 @@ export function HomeProfessorMariChat({
                 key={message.id}
                 message={message}
                 thinking={message.role === "assistant" ? getMessageThinking(message) : null}
-                onDelete={handleDeleteMessage}
-                onEdit={handleEditMessage}
-                onRegenerate={handleRegenerateMessage}
-                onRemoveAttachment={handleRemoveAttachment}
+                onDelete={message.id === PROFESSOR_MARI_WELCOME_MESSAGE_ID ? undefined : handleDeleteMessage}
+                onEdit={message.id === PROFESSOR_MARI_WELCOME_MESSAGE_ID ? undefined : handleEditMessage}
+                onRegenerate={message.id === PROFESSOR_MARI_WELCOME_MESSAGE_ID ? undefined : handleRegenerateMessage}
+                onRemoveAttachment={message.id === PROFESSOR_MARI_WELCOME_MESSAGE_ID ? undefined : handleRemoveAttachment}
               />
             ))}
             {workspaceTimeline.length === 0 && workspaceTimelineActive && !showDottoreSupport && (
@@ -4198,10 +4267,10 @@ export function HomeProfessorMariChat({
                                 key={message.id}
                                 message={message}
                                 thinking={message.role === "assistant" ? getMessageThinking(message) : null}
-                                onDelete={handleDeleteMessage}
-                                onEdit={handleEditMessage}
-                                onRegenerate={handleRegenerateMessage}
-                                onRemoveAttachment={handleRemoveAttachment}
+                                onDelete={message.id === PROFESSOR_MARI_WELCOME_MESSAGE_ID ? undefined : handleDeleteMessage}
+                                onEdit={message.id === PROFESSOR_MARI_WELCOME_MESSAGE_ID ? undefined : handleEditMessage}
+                                onRegenerate={message.id === PROFESSOR_MARI_WELCOME_MESSAGE_ID ? undefined : handleRegenerateMessage}
+                                onRemoveAttachment={message.id === PROFESSOR_MARI_WELCOME_MESSAGE_ID ? undefined : handleRemoveAttachment}
                               />
                             ))}
                             {workspaceTimeline.length === 0 && workspaceTimelineActive && !showDottoreSupport && (
