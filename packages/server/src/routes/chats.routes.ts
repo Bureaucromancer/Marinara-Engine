@@ -62,7 +62,10 @@ import { createSpatialContextStorage } from "../services/storage/spatial-context
 import { createRegexScriptsStorage } from "../services/storage/regex-scripts.storage.js";
 import { processLorebooks } from "../services/lorebook/index.js";
 import { injectAtDepth } from "../services/lorebook/prompt-injector.js";
-import { resolveChatSummaryConnection } from "../services/chat-summary/connection-resolution.js";
+import {
+  resolveChatSummaryConnection,
+  resolveChatSummaryTemperatureOptions,
+} from "../services/chat-summary/connection-resolution.js";
 import { generateMissingConversationSummaries } from "../services/conversation/auto-summary.service.js";
 import { clearChatActivity, recordUserReaction } from "../services/conversation/autonomous.service.js";
 import { rebuildMemoryChunks } from "../services/memory-recall.js";
@@ -3912,15 +3915,7 @@ export async function chatsRoutes(app: FastifyInstance) {
       );
     }
     const { provider, model } = resolvedSummaryConnection;
-    const summaryTemperatureOptions =
-      typeof resolvedSummaryConnection.temperature === "number"
-        ? {
-            temperature: resolvedSummaryConnection.temperature,
-            enabledParameters: { temperature: true },
-          }
-        : {
-            enabledParameters: { temperature: false },
-          };
+    const summaryTemperatureOptions = resolveChatSummaryTemperatureOptions(resolvedSummaryConnection);
 
     if (requestedSummaryEntryIds.length >= 2) {
       const currentEntries = normalizeChatSummaryEntries(chatMeta.summaryEntries, {
