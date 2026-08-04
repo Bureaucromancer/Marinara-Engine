@@ -573,6 +573,10 @@ async function expandAgentData(config: MarkerConfig, ctx: MarkerContext): Promis
     isExternallyImportedAgent(agentConfig.type, agentConfig.settings) &&
     !(await getCustomAgentImportPolicy(ctx.db)).enabled
   ) {
+    logger.debug(
+      "[prompt] Skipping externally imported Agent data for %s because custom imports are disabled",
+      agentType,
+    );
     return { content: "" };
   }
 
