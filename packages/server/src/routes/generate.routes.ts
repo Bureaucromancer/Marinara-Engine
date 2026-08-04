@@ -6280,7 +6280,7 @@ export async function generateRoutes(app: FastifyInstance) {
           if (hierarchicalMapsEnabledForChat && (requestChatMode === "roleplay" || requestChatMode === "game")) {
             const parsedSpatial = extractAssistantSpatialDirective(fullResponse);
             assistantSpatialDirective = input.impersonate ? null : parsedSpatial.directive;
-            if (parsedSpatial.cleanContent !== fullResponse) {
+            if (parsedSpatial.matched) {
               fullResponse = parsedSpatial.cleanContent;
               contentReplaced = true;
             }

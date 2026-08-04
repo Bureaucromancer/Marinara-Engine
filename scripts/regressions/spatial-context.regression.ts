@@ -299,6 +299,7 @@ assert.deepEqual(
   {
     cleanContent: "The lift opens onto Level 1.",
     directive: { type: "move", destinationId: "tower_level_1" },
+    matched: true,
   },
 );
 assert.deepEqual(
@@ -313,7 +314,18 @@ assert.deepEqual(
       relation: "enter",
       description: "A concealed observatory above the tower.",
     },
+    matched: true,
   },
+);
+const ordinaryImpersonatedContent = "\n[Stage direction]\n\n\nContinue through the door.\n";
+assert.deepEqual(
+  extractAssistantSpatialDirective(ordinaryImpersonatedContent),
+  {
+    cleanContent: ordinaryImpersonatedContent,
+    directive: null,
+    matched: false,
+  },
+  "Ordinary bracketed impersonated prose must retain all surrounding whitespace",
 );
 const streamedSpatialDirective = createAssistantSpatialDirectiveStreamFilter();
 assert.equal(streamedSpatialDirective.push("We arrive at the infirmary.\n[spa"), "We arrive at the infirmary.\n");
@@ -323,6 +335,11 @@ assert.equal(streamedSpatialDirective.flush(), "");
 const streamedOrdinaryBracket = createAssistantSpatialDirectiveStreamFilter();
 assert.equal(streamedOrdinaryBracket.push("[Stage direction] Continue."), "[Stage direction] Continue.");
 assert.equal(streamedOrdinaryBracket.flush(), "");
+const streamedDirectiveSplitAfterPrefix = createAssistantSpatialDirectiveStreamFilter();
+assert.equal(streamedDirectiveSplitAfterPrefix.push("[spatial_move:\n"), "");
+assert.equal(streamedDirectiveSplitAfterPrefix.push(' destination_id="moonwell"'), "");
+assert.equal(streamedDirectiveSplitAfterPrefix.push("]Arrival text."), "Arrival text.");
+assert.equal(streamedDirectiveSplitAfterPrefix.flush(), "");
 
 const validDefinition = definition(
   [
