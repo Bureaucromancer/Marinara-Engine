@@ -357,6 +357,16 @@ try {
     /gameAgentPool\.map\(\(agent\)[\s\S]{0,7000}agent\.id === "long-term-memory" && ltmPackage[\s\S]{0,2500}<CapabilityElement/u,
     "Game chat settings must render the Long-Term Memory package controls",
   );
+  assert.match(
+    chatSettingsSource,
+    /modeSettingsSurfaces\.agentSettingsSurface === "conversation"[\s\S]{0,1800}ltmPackage &&[\s\S]{0,900}setLtmEnabledForChat/u,
+    "Conversation chat settings must expose the installed Long-Term Memory toggle",
+  );
+  assert.match(
+    chatSettingsSource,
+    /const setLtmEnabledForChat = useCallback\([\s\S]{0,900}activeAgentIds: enabled[\s\S]{0,300}filter\(\(id\) => id !== ltmPackageId\)/u,
+    "Long-Term Memory activation must preserve other active agents while toggling its own ID",
+  );
   const serverlessTurnGameManifest = capabilityPackageManifestSchema.parse({
     ...legacyManifest,
     id: "serverless-turn-game",

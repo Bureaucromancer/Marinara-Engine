@@ -1184,6 +1184,7 @@ export function ChatSettingsDrawer({
   const ltmPackage = installedCapabilities.find(
     (item) => item.status === "active" && item.id === "long-term-memory" && item.manifest.entrypoints.client,
   );
+  const ltmPackageId = ltmPackage?.id;
   const callsPackage = installedCapabilities.find(
     (item) =>
       item.status === "active" && item.manifest.kind.includes("conversation-calls") && item.manifest.entrypoints.client,
@@ -1201,6 +1202,20 @@ export function ChatSettingsDrawer({
     const ids = latestChat ? getChatActiveAgentIds(latestChat) : [...activeAgentIds];
     return ids.filter((id) => !deletedBuiltInAgentTypes.has(id));
   }, [activeAgentIds, chat.id, deletedBuiltInAgentTypes, qc]);
+  const setLtmEnabledForChat = useCallback(
+    async (enabled: boolean) => {
+      if (!ltmPackageId) return;
+      const current = readLatestActiveAgentIds();
+      await updateMeta.mutateAsync({
+        id: chat.id,
+        ...(enabled ? { enableAgents: true } : {}),
+        activeAgentIds: enabled
+          ? Array.from(new Set([...current, ltmPackageId]))
+          : current.filter((id) => id !== ltmPackageId),
+      });
+    },
+    [chat.id, ltmPackageId, readLatestActiveAgentIds, updateMeta],
+  );
   const activeToolIds: string[] = metadata.activeToolIds ?? [];
   const spotifyActive = activeAgentIds.includes("spotify");
   const gameLorebookKeeperLorebook = gameLorebookKeeperLorebookId
@@ -5782,6 +5797,22 @@ export function ChatSettingsDrawer({
               )}
             >
               <div className="space-y-3">
+                {ltmPackage && (
+                  <SettingsSwitch
+                    label={localizeUi("ui.chat.chatsettingsdrawer.longTermMemory")}
+                    description={localizeUi("ui.chat.chatsettingsdrawer.enableLongTermMemoryForThisConversation")}
+                    checked={metadata.enableAgents === true && activeAgentIds.includes(ltmPackage.id)}
+                    onChange={(enabled) => void setLtmEnabledForChat(enabled)}
+                    labelPosition="start"
+                    className={cn(
+                      "justify-between rounded-lg px-3 py-2.5 text-left",
+                      metadata.enableAgents === true && activeAgentIds.includes(ltmPackage.id)
+                        ? "bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30"
+                        : "bg-[var(--secondary)] hover:bg-[var(--accent)]",
+                    )}
+                    labelClassName="text-xs font-medium"
+                  />
+                )}
                 {hasConversationCommands && (
                   <div className="space-y-3">
                     <SettingsSwitch
@@ -8090,16 +8121,7 @@ export function ChatSettingsDrawer({
                                               longTermMemoryBudgetTokens: metadata.longTermMemoryBudgetTokens,
                                               longTermMemoryMaxChunks: metadata.longTermMemoryMaxChunks,
                                             },
-                                            onEnabledForChatChange: async (enabled: boolean) => {
-                                              const current = readLatestActiveAgentIds();
-                                              await updateMeta.mutateAsync({
-                                                id: chat.id,
-                                                ...(enabled ? { enableAgents: true } : {}),
-                                                activeAgentIds: enabled
-                                                  ? Array.from(new Set([...current, ltmPackage.id]))
-                                                  : current.filter((id) => id !== ltmPackage.id),
-                                              });
-                                            },
+                                            onEnabledForChatChange: setLtmEnabledForChat,
                                             onChatSettingsChange: async (patch: Record<string, unknown>) => {
                                               await updateMeta.mutateAsync({ id: chat.id, ...patch });
                                             },
@@ -8405,16 +8427,7 @@ export function ChatSettingsDrawer({
                                                   longTermMemoryBudgetTokens: metadata.longTermMemoryBudgetTokens,
                                                   longTermMemoryMaxChunks: metadata.longTermMemoryMaxChunks,
                                                 },
-                                                onEnabledForChatChange: async (enabled: boolean) => {
-                                                  const current = readLatestActiveAgentIds();
-                                                  await updateMeta.mutateAsync({
-                                                    id: chat.id,
-                                                    ...(enabled ? { enableAgents: true } : {}),
-                                                    activeAgentIds: enabled
-                                                      ? Array.from(new Set([...current, ltmPackage.id]))
-                                                      : current.filter((id) => id !== ltmPackage.id),
-                                                  });
-                                                },
+                                                onEnabledForChatChange: setLtmEnabledForChat,
                                                 onChatSettingsChange: async (patch: Record<string, unknown>) => {
                                                   await updateMeta.mutateAsync({ id: chat.id, ...patch });
                                                 },
