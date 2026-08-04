@@ -1,9 +1,14 @@
 import type {
   CapabilityCharacterRecord,
+  CapabilityLorebookCreateInput,
+  CapabilityLorebookEntryInput,
   CapabilityLorebookEntryRecord,
   CapabilityLorebookEntrySelection,
   CapabilityLorebookRecord,
+  CapabilityLorebookUpdateInput,
+  CapabilityPersonaCreateInput,
   CapabilityPersonaRecord,
+  CapabilityPersonaUpdateInput,
   CapabilityResourceHost,
 } from "@marinara-engine/shared";
 import type { DB } from "../../db/connection.js";
@@ -92,6 +97,42 @@ export function createCapabilityResourceHost(db: DB): CapabilityResourceHost {
         content: entry.content,
         description: entry.description,
       }));
+    },
+
+    // Write surface — thin passthroughs to storage. The capability input types are declared narrowly
+    // enough to hand straight to it, so nothing here needs a cast.
+    async createPersona(input: CapabilityPersonaCreateInput): Promise<CapabilityPersonaRecord> {
+      const record = await characters.createPersona(input.name, input.description, input.avatarPath, {
+        comment: input.comment,
+        appearance: input.appearance,
+        tags: input.tags,
+      });
+      if (!record) throw new Error("[capability] createPersona failed");
+      return { id: record.id, data: record };
+    },
+
+    async updatePersona(personaId: string, updates: CapabilityPersonaUpdateInput): Promise<void> {
+      await characters.updatePersona(personaId, updates);
+    },
+
+    async createLorebook(input: CapabilityLorebookCreateInput): Promise<CapabilityLorebookRecord> {
+      const record = (await lorebooks.create(
+        input,
+      )) as ({ id: string } & Record<string, unknown>) | null;
+      if (!record) throw new Error("[capability] createLorebook failed");
+      return { id: record.id, data: record, entries: [] };
+    },
+
+    async updateLorebook(lorebookId: string, updates: CapabilityLorebookUpdateInput): Promise<void> {
+      await lorebooks.update(lorebookId, updates);
+    },
+
+    async bulkCreateLorebookEntries(lorebookId: string, entries: CapabilityLorebookEntryInput[]): Promise<void> {
+      await lorebooks.bulkCreateEntries(lorebookId, entries);
+    },
+
+    async removeLorebookEntry(entryId: string): Promise<void> {
+      await lorebooks.removeEntry(entryId);
     },
   };
 }
