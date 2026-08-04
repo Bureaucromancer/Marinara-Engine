@@ -12,6 +12,61 @@ export interface ParsedAssistantSpatialDirective {
 }
 
 const ASSISTANT_SPATIAL_COMMAND_RE = /\[spatial_(move|discover):\s*([^\]\r\n]*)\]/giu;
+const ASSISTANT_SPATIAL_COMMAND_PREFIXES = ["[spatial_move:", "[spatial_discover:"] as const;
+
+export interface AssistantSpatialDirectiveStreamFilter {
+  push(content: string): string;
+  flush(): string;
+}
+
+/** Hide package-owned commands while they stream, before final response cleanup can replace the visible text. */
+export function createAssistantSpatialDirectiveStreamFilter(): AssistantSpatialDirectiveStreamFilter {
+  let candidate = "";
+  let commandOpen = false;
+
+  return {
+    push(content) {
+      let visible = "";
+      for (const character of content) {
+        if (!candidate) {
+          if (character === "[") candidate = character;
+          else visible += character;
+          continue;
+        }
+
+        candidate += character;
+        if (commandOpen) {
+          if (character === "]") {
+            candidate = "";
+            commandOpen = false;
+          } else if (character === "\n" || character === "\r" || candidate.length > 8_192) {
+            visible += candidate;
+            candidate = "";
+            commandOpen = false;
+          }
+          continue;
+        }
+
+        const normalized = candidate.toLowerCase();
+        if (ASSISTANT_SPATIAL_COMMAND_PREFIXES.some((prefix) => prefix === normalized)) {
+          commandOpen = true;
+          continue;
+        }
+        if (ASSISTANT_SPATIAL_COMMAND_PREFIXES.some((prefix) => prefix.startsWith(normalized))) continue;
+
+        visible += candidate;
+        candidate = "";
+      }
+      return visible;
+    },
+    flush() {
+      const remaining = candidate;
+      candidate = "";
+      commandOpen = false;
+      return remaining;
+    },
+  };
+}
 
 function parseCommandAttributes(body: string): Map<string, string> {
   const values = new Map<string, string>();

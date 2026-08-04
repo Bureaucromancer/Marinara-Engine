@@ -33,6 +33,7 @@ import {
   updateGameMapBinding,
 } from "../../packages/server/src/services/spatial-context/game-map-binding.js";
 import {
+  createAssistantSpatialDirectiveStreamFilter,
   extractAssistantSpatialDirective,
   materializeAssistantSpatialState,
   resolveEffectiveSpatialState,
@@ -314,6 +315,14 @@ assert.deepEqual(
     },
   },
 );
+const streamedSpatialDirective = createAssistantSpatialDirectiveStreamFilter();
+assert.equal(streamedSpatialDirective.push("We arrive at the infirmary.\n[spa"), "We arrive at the infirmary.\n");
+assert.equal(streamedSpatialDirective.push('tial_move: destination_id="moonwell"'), "");
+assert.equal(streamedSpatialDirective.push("]"), "");
+assert.equal(streamedSpatialDirective.flush(), "");
+const streamedOrdinaryBracket = createAssistantSpatialDirectiveStreamFilter();
+assert.equal(streamedOrdinaryBracket.push("[Stage direction] Continue."), "[Stage direction] Continue.");
+assert.equal(streamedOrdinaryBracket.flush(), "");
 
 const validDefinition = definition(
   [

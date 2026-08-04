@@ -75,6 +75,7 @@ import {
 } from "../services/spatial-context/projection.js";
 import { isHierarchicalMapsEnabledForChat } from "../services/spatial-context/activation.js";
 import {
+  createAssistantSpatialDirectiveStreamFilter,
   extractAssistantSpatialDirective,
   materializeAssistantSpatialState,
 } from "../services/spatial-context/state-resolution.js";
@@ -4824,7 +4825,11 @@ export async function generateRoutes(app: FastifyInstance) {
         const TOKEN_CHUNK_SIZE = 6;
         const TOKEN_CHUNK_YIELD_EVERY = 64;
         let tokenChunksSinceYield = 0;
-        const sendTokenTextChunked = async (text: string) => {
+        const spatialDirectiveStreamFilter =
+          hierarchicalMapsEnabledForChat && (requestChatMode === "roleplay" || requestChatMode === "game")
+            ? createAssistantSpatialDirectiveStreamFilter()
+            : null;
+        const emitTokenTextChunked = async (text: string) => {
           for (let i = 0; i < text.length; i += TOKEN_CHUNK_SIZE) {
             const chunk = text.slice(i, i + TOKEN_CHUNK_SIZE);
             trySendSseEvent(reply, { type: "token", data: chunk });
@@ -4834,18 +4839,13 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           }
         };
+        const sendTokenTextChunked = async (text: string) => {
+          const visibleText = spatialDirectiveStreamFilter?.push(text) ?? text;
+          if (visibleText) await emitTokenTextChunked(visibleText);
+        };
         const writeContentChunked = async (text: string) => {
-          for (let i = 0; i < text.length; i += TOKEN_CHUNK_SIZE) {
-            const chunk = text.slice(i, i + TOKEN_CHUNK_SIZE);
-            fullResponse += chunk;
-            tokenChunksSinceYield += 1;
-            if (!holdForTextRewrite) {
-              trySendSseEvent(reply, { type: "token", data: chunk });
-            }
-            if (tokenChunksSinceYield % TOKEN_CHUNK_YIELD_EVERY === 0) {
-              await yieldToEventLoop();
-            }
-          }
+          fullResponse += text;
+          if (!holdForTextRewrite) await sendTokenTextChunked(text);
         };
 
         const resolveMessageSpeakerName = (message: any): string => {
@@ -5914,6 +5914,11 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           }
 
+          if (!holdForTextRewrite) {
+            const pendingSpatialText = spatialDirectiveStreamFilter?.flush() ?? "";
+            if (pendingSpatialText) await emitTokenTextChunked(pendingSpatialText);
+          }
+
           const durationMs = Date.now() - genStartTime;
 
           if (input.debugMode && chatMode === "game") {
@@ -6272,13 +6277,9 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           }
 
-          if (
-            !input.impersonate &&
-            hierarchicalMapsEnabledForChat &&
-            (requestChatMode === "roleplay" || requestChatMode === "game")
-          ) {
+          if (hierarchicalMapsEnabledForChat && (requestChatMode === "roleplay" || requestChatMode === "game")) {
             const parsedSpatial = extractAssistantSpatialDirective(fullResponse);
-            assistantSpatialDirective = parsedSpatial.directive;
+            assistantSpatialDirective = input.impersonate ? null : parsedSpatial.directive;
             if (parsedSpatial.cleanContent !== fullResponse) {
               fullResponse = parsedSpatial.cleanContent;
               contentReplaced = true;
@@ -6287,6 +6288,12 @@ export async function generateRoutes(app: FastifyInstance) {
               logger.debug(
                 "[generate/spatial] Parsed assistant %s directive for chat %s",
                 assistantSpatialDirective.type,
+                input.chatId,
+              );
+            } else if (input.impersonate && parsedSpatial.directive) {
+              logger.debug(
+                "[generate/spatial] Stripped impersonated %s directive for chat %s",
+                parsedSpatial.directive.type,
                 input.chatId,
               );
             }
