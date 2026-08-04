@@ -1,14 +1,8 @@
 // ──────────────────────────────────────────────
 // Chat: Message — mode-aware rendering
 // ──────────────────────────────────────────────
-import {
-  cn,
-  copyToClipboard,
-  getAvatarCropStyle,
-  isLegacyAvatarCrop,
-  parseAvatarCropJson,
-  type AvatarCropValue,
-} from "../../lib/utils";
+import { cn, copyToClipboard, getAvatarCropStyle, isLegacyAvatarCrop } from "../../lib/utils";
+import { normalizeAvatarCrop, type AvatarCrop } from "@marinara-engine/shared";
 import { applyInlineMarkdown, renderMarkdownBlocks, applyInlineMarkdownHTML } from "../../lib/markdown";
 import { normalizeCardAssetImageSyntax, resolveCardAssetUrl, resolveSelfCardAssets, type ChatGalleryIndex } from "../../lib/card-asset-links";
 import { useChatGalleryFilenameIndex } from "../../hooks/use-characters";
@@ -62,6 +56,7 @@ import { useTTSConfig } from "../../hooks/use-tts";
 import { buildTTSVoiceRequests, normalizeTTSCharacterName, withTTSVoiceRequestCacheKeys } from "../../lib/tts-dialogue";
 import { DIALOGUE_QUOTE_PATTERN_SOURCE, HTML_SAFE_DIALOGUE_QUOTE_PATTERN_SOURCE } from "../../lib/dialogue-quotes";
 import { resolveMessageRewriteVersions } from "../../lib/message-rewrite-versions";
+import { convertChatHtmlNewlines } from "../../lib/chat-html-newlines";
 import DOMPurify from "dompurify";
 import type { CharacterMap, ExpressionAvatarResolver, MessageSelectionToggle, PersonaInfo } from "./chat-area.types";
 import {
@@ -209,7 +204,7 @@ type AIVisibilityCharacter = {
   id: string;
   name: string;
   avatarUrl: string | null;
-  avatarCrop: AvatarCropValue | null | undefined;
+  avatarCrop: AvatarCrop | null | undefined;
 };
 
 type ToggleHiddenFromAI = (messageId: string, hiddenFromAll: boolean, hiddenFromAICharacterIds?: string[]) => void;
@@ -1065,22 +1060,7 @@ function renderContent(
 
   const { html: strippedWithoutStyleBlocks, css: rawStyleBlocks } = extractChatStyleBlocks(stripped);
 
-  // Convert newlines to <br> with compact spacing for HTML content,
-  // but preserve newlines inside <svg> blocks — injecting <br> into SVG
-  // foreign content breaks the HTML parser's namespace handling.
-  // Also skip newlines that sit between HTML tags (source formatting only).
-  // First, protect newlines inside attribute values (e.g. multi-line style="")
-  // by temporarily replacing them with a placeholder.
-  const ATTR_NL_PLACEHOLDER = "\x00ATTRNL\x00";
-  const attrProtected = strippedWithoutStyleBlocks.replace(
-    /(<[^>]*?)("[^"]*"|'[^']*')([^>]*>)/g,
-    (_m, before: string, attr: string, after: string) => before + attr.replace(/\n/g, ATTR_NL_PLACEHOLDER) + after,
-  );
-  const withBreaks = attrProtected
-    .replace(/(<svg[\s\S]*?<\/svg>)|(>\s*)\n(\s*<)|\n/gi, (_m, svgBlock, pre, post) =>
-      svgBlock ? svgBlock : pre ? `${pre}${post}` : '<br style="display:block;margin:0.2em 0">',
-    )
-    .replace(new RegExp(ATTR_NL_PLACEHOLDER, "g"), "\n");
+  const withBreaks = convertChatHtmlNewlines(strippedWithoutStyleBlocks);
 
   // Convert markdown images to <img> before sanitization so DOMPurify validates them.
   // Keep tags minimal (no class, only loading/decoding attrs) — styling is via .mari-message-content img in CSS
@@ -1963,7 +1943,7 @@ export const ChatMessage = memo(function ChatMessage({
         : null;
   const displayAvatarUrl = expressionAvatarUrl ?? avatarUrl;
   const personaAvatarCrop = isUser
-    ? (parseAvatarCropJson(msgPersona?.avatarCrop) ?? personaInfo?.avatarCrop ?? null)
+    ? (normalizeAvatarCrop(msgPersona?.avatarCrop) ?? personaInfo?.avatarCrop ?? null)
     : null;
   const avatarCropStyle = expressionAvatarUrl
     ? {}
@@ -2037,7 +2017,7 @@ export const ChatMessage = memo(function ChatMessage({
       .filter(Boolean) as {
         id: string;
         url: string;
-        crop?: AvatarCropValue | null;
+        crop?: AvatarCrop | null;
         nameColor: string;
       }[];
   }, [isMergedGroup, characterMap, mergedCharacterIds, expressionAvatarResolver, message]);
@@ -2167,14 +2147,14 @@ export const ChatMessage = memo(function ChatMessage({
   // Legacy {zoom, offsetX, offsetY} crops compose fine with object-cover
   // (they're a CSS transform) so they pass through unchanged.
   const rectangleSafeCropStyle = (
-    crop: AvatarCropValue | null | undefined,
+    crop: AvatarCrop | null | undefined,
     fallback: React.CSSProperties,
   ): React.CSSProperties => {
     if (!crop) return fallback;
     if (isLegacyAvatarCrop(crop)) return fallback;
     return {};
   };
-  const compactAvatarCrop: AvatarCropValue | null = isUser
+  const compactAvatarCrop: AvatarCrop | null = isUser
     ? (personaAvatarCrop ?? null)
     : expressionAvatarUrl
       ? null
@@ -2182,12 +2162,12 @@ export const ChatMessage = memo(function ChatMessage({
   const compactAvatarCropStyle: React.CSSProperties = useCompactRectangleAvatar
     ? rectangleSafeCropStyle(compactAvatarCrop, avatarCropStyle)
     : avatarCropStyle;
-  const compactMergedAvatarCropStyle = (avatar: { crop?: AvatarCropValue | null }): React.CSSProperties =>
+  const compactMergedAvatarCropStyle = (avatar: { crop?: AvatarCrop | null }): React.CSSProperties =>
     useCompactRectangleAvatar || !cycleMergedNarratorAvatars
       ? rectangleSafeCropStyle(avatar.crop, getAvatarCropStyle(avatar.crop))
       : getAvatarCropStyle(avatar.crop);
   const panelAvatarCropStyle: React.CSSProperties = rectangleSafeCropStyle(compactAvatarCrop, avatarCropStyle);
-  const panelMergedAvatarCropStyle = (avatar: { crop?: AvatarCropValue | null }): React.CSSProperties =>
+  const panelMergedAvatarCropStyle = (avatar: { crop?: AvatarCrop | null }): React.CSSProperties =>
     rectangleSafeCropStyle(avatar.crop, getAvatarCropStyle(avatar.crop));
   const compactAvatarSpacerClass = useCompactRectangleAvatar
     ? "w-[calc(2.75rem*var(--roleplay-avatar-scale))]"

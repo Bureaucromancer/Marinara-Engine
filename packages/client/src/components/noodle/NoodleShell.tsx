@@ -7,7 +7,8 @@ import { AtSign, Bell, Home, MoreHorizontal, Pencil, Search, Settings2, User, Us
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { createContext, type CSSProperties, type ReactNode, type RefObject, useContext, useRef } from "react";
 import type { NoodleAccount } from "@marinara-engine/shared";
-import { cn, getAvatarCropStyle, type AvatarCropValue } from "../../lib/utils";
+import type { AvatarCrop } from "@marinara-engine/shared";
+import { cn, getAvatarCropStyle } from "../../lib/utils";
 import { useDialogFocusScope } from "../../hooks/use-dialog-focus-scope";
 import { useTranslation as useUiTranslation } from "react-i18next";
 
@@ -55,16 +56,35 @@ export function NoodleLogo({ className, src = NOODLE_LOGO_SRC }: { className?: s
   return <img src={src} alt="" className={cn("object-contain", className)} />;
 }
 
+// The count is the reason to come back, so it carries its own label rather than leaving a
+// bare number for screen readers to read out of context.
+function UnseenBadge({ count }: { count: number }) {
+  const { t: localizeUi } = useUiTranslation();
+  if (count <= 0) return null;
+  return (
+    <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--noodle-accent)] px-1.5 text-[0.65rem] font-bold tabular-nums text-zinc-950">
+      <span aria-hidden="true">{count > 99 ? "99+" : count}</span>
+      <span className="sr-only">{localizeUi("ui.noodle.noodlemodetoggle.newSinceLastVisitCount", { count })}</span>
+    </span>
+  );
+}
+
 // Two-way switch between the Noodle and NoodleR apps — reads as picking one of two
 // exclusive modes, not another item in the vertical nav list.
 function NoodleModeToggle({
   activeMode,
   onOpenHome,
   onOpenNoodler,
+  noodlerUnseenCount = 0,
+  noodleUnseenCount = 0,
 }: {
   activeMode: NoodleShellMode;
   onOpenHome: () => void;
   onOpenNoodler: () => void;
+  /** Posts published since this viewer persona last had the NoodleR feed shown to it. */
+  noodlerUnseenCount?: number;
+  /** The same for the public Noodle timeline. */
+  noodleUnseenCount?: number;
 }) {
   const { t: localizeUi } = useUiTranslation();
   const noodler = activeMode === "noodler";
@@ -83,10 +103,26 @@ function NoodleModeToggle({
     >
       <button type="button" role="tab" aria-selected={!noodler} onClick={onOpenHome} className={segment(!noodler)}>
         {localizeUi("navigation.topbar.noodle")}
+        <UnseenBadge count={noodleUnseenCount} />
       </button>
       <button type="button" role="tab" aria-selected={noodler} onClick={onOpenNoodler} className={segment(noodler)}>
         {localizeUi("ui.noodle.noodlemodetoggle.noodler")}
+        <UnseenBadge count={noodlerUnseenCount} />
       </button>
+    </div>
+  );
+}
+
+/** Boundary marker between posts arrived since the last visit and everything already read. */
+export function NewSinceLastVisitDivider() {
+  const { t: localizeUi } = useUiTranslation();
+  return (
+    <div className="flex items-center gap-3 border-b border-[var(--noodle-divider)] px-4 py-2">
+      <span className="h-px flex-1 bg-[var(--noodle-accent)]/30" />
+      <span className="text-[0.68rem] font-bold uppercase tracking-wide text-[var(--noodle-accent)]">
+        {localizeUi("ui.noodle.viewerhub.newSinceYourLastVisit")}
+      </span>
+      <span className="h-px flex-1 bg-[var(--noodle-accent)]/30" />
     </div>
   );
 }
@@ -96,7 +132,7 @@ export function Avatar({
   size = "md",
   solid = false,
 }: {
-  account: Pick<NoodleAccount, "displayName" | "avatarUrl"> & { avatarCrop?: AvatarCropValue | null };
+  account: Pick<NoodleAccount, "displayName" | "avatarUrl"> & { avatarCrop?: AvatarCrop | null };
   size?: "sm" | "md" | "lg";
   solid?: boolean;
 }) {
@@ -136,7 +172,7 @@ export function ProfileInitial({
   profile,
   large = false,
 }: {
-  profile: { displayName: string; avatarUrl?: string | null; avatarCrop?: AvatarCropValue | null };
+  profile: { displayName: string; avatarUrl?: string | null; avatarCrop?: AvatarCrop | null };
   large?: boolean;
 }) {
   if (profile.avatarUrl)
@@ -167,6 +203,10 @@ export interface NoodleShellProps {
   appMode?: NoodleShellMode;
   /** Overrides whether the Home/Hub destination is selected when app mode and subview are separate. */
   homeActive?: boolean;
+  /** Posts published since this viewer persona last had the NoodleR feed shown to it. */
+  noodlerUnseenCount?: number;
+  /** The same for the public Noodle timeline. */
+  noodleUnseenCount?: number;
   personaAccount: NoodleAccount | null;
   sortedPersonaAccounts: NoodleAccount[];
   visiblePersonaAccounts: NoodleAccount[];
@@ -210,6 +250,8 @@ export function NoodleShell({
   activeView,
   appMode,
   homeActive: homeActiveOverride,
+  noodlerUnseenCount = 0,
+  noodleUnseenCount = 0,
   personaAccount,
   sortedPersonaAccounts,
   visiblePersonaAccounts,
@@ -318,6 +360,8 @@ export function NoodleShell({
                       activeMode={resolvedAppMode}
                       onOpenHome={onOpenHome}
                       onOpenNoodler={onOpenNoodler}
+                      noodlerUnseenCount={noodlerUnseenCount}
+                      noodleUnseenCount={noodleUnseenCount}
                     />
                   </div>
                 )}
@@ -457,6 +501,8 @@ export function NoodleShell({
                       activeMode={resolvedAppMode}
                       onOpenHome={onOpenHome}
                       onOpenNoodler={onOpenNoodler}
+                      noodlerUnseenCount={noodlerUnseenCount}
+                      noodleUnseenCount={noodleUnseenCount}
                     />
                   </div>
                 )}
