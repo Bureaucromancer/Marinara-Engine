@@ -328,6 +328,17 @@ assert.deepEqual(
   },
   "Ordinary bracketed impersonated prose must retain all surrounding whitespace",
 );
+assert.deepEqual(
+  extractAssistantSpatialDirective(
+    'The rewrite keeps this sentence.\n[spatial_move: destination_id="rewrite-must-not-apply"]',
+  ),
+  {
+    cleanContent: "The rewrite keeps this sentence.",
+    directive: { type: "move", destinationId: "rewrite-must-not-apply" },
+    matched: true,
+  },
+  "Text-rewrite output must expose clean content while its directive is discarded by the route",
+);
 const streamedSpatialDirective = createAssistantSpatialDirectiveStreamFilter();
 assert.equal(streamedSpatialDirective.push("We arrive at the infirmary.\n[spa"), "We arrive at the infirmary.\n");
 assert.equal(streamedSpatialDirective.push('tial_move: destination_id="moonwell"'), "");
@@ -367,6 +378,28 @@ assert.doesNotMatch(
 assert.ok(
   spatialSanitizationStart > inlineThinkingEnd && consolidatedReplacementStart > spatialSanitizationStart,
   "The consolidated content replacement must run after spatial sanitization",
+);
+const textRewriteStart = generateRouteSource.indexOf("// ── Text rewrite/editing agents:");
+const textRewriteEnd = generateRouteSource.indexOf(
+  "if (holdForTextRewrite && !textRewriteApplied",
+  textRewriteStart,
+);
+assert.ok(textRewriteStart >= 0 && textRewriteEnd > textRewriteStart, "Text-rewrite route block is present");
+const textRewriteSource = generateRouteSource.slice(textRewriteStart, textRewriteEnd);
+assert.match(
+  textRewriteSource,
+  /const parsedRewriteSpatial = extractAssistantSpatialDirective\(editedText\);/u,
+  "Text-rewrite output must run through spatial sanitization",
+);
+assert.match(
+  textRewriteSource,
+  /updateMessageContent\(messageId, sanitizedEditedText\)/u,
+  "Text-rewrite persistence must use sanitized content",
+);
+assert.match(
+  textRewriteSource,
+  /type: "text_rewrite",[\s\S]*?editedText: sanitizedEditedText/u,
+  "Text-rewrite events must emit sanitized content",
 );
 
 const validDefinition = definition(
