@@ -1,8 +1,9 @@
 # World Maps: Setup, Authoring, and Travel
 
-> **Current compatibility:** This guide matches World Maps **1.2.5** on
-> Marinara Engine **2.3.5 or later**. The package supports Roleplay and Game
-> chats.
+> **Current compatibility:** This guide matches World Maps **1.3.1**. The
+> package supports Marinara Engine **2.3.5 through 3.x** and works in Roleplay
+> and Game chats. Use a current Engine build for the paired movement-stream
+> cleanup and immediate host Lorebooks refresh after portable imports.
 
 World Maps adds persistent world state to Roleplay and Game. Instead of
 keeping one free-text location, it represents the world as nested places:
@@ -29,7 +30,7 @@ current location, travel history, snapshots, and Game bindings.
 
 ## Feature overview
 
-World Maps 1.2.5 provides:
+World Maps 1.3.1 provides:
 
 - nested regions, settlements, places, buildings, floors, and rooms;
 - breadcrumbs and an authoritative current story location;
@@ -41,11 +42,16 @@ World Maps 1.2.5 provides:
 - account-wide map templates created manually, with AI, or by import;
 - AI-assisted map drafts and expansions grounded in setup or selected lore;
 - public location descriptions, private model memory, and exact-location lore;
+- portable exports with optional linked entries or complete lorebooks;
+- reviewed lore import with exact matching, explicit ambiguity choices, and
+  collision-safe separate copies;
 - one optional chat or Global Gallery reference image for each location;
 - a separate chat or Global Gallery background for each positioned child map;
 - reviewed batch generation for missing location artwork;
 - a global, variable-based Maps artwork prompt override;
 - location-reference support for Roleplay illustrations and Game Storyboards;
+- one controlled formatting repair for malformed AI map JSON, with separate
+  guidance for token-truncated output;
 - import, export, archiving, history-aware editing, and Game map bindings; and
 - global prompt libraries for AI map building and the runtime location insert.
 
@@ -57,7 +63,7 @@ the next options. The exact choices remain model-generated.
 
 The library contains two reusable account-owned resources, while every chat
 keeps its own runtime location and history. A resource's friendly name is not
-its identity; World Maps 1.2.5 adds **(copy)** or a number when a newly saved
+its identity; World Maps 1.3.1 adds **(copy)** or a number when a newly saved
 resource would otherwise have the same name.
 
 | Resource or state             | Owned by                        | Choose it when                                                                    | What later edits affect                       |
@@ -196,6 +202,11 @@ keep copy** to stop sharing while keeping the chat's current version. If the
 canonical world changes while a draft is pending, Maps reports a conflict and
 requires a detach or discard instead of silently overwriting either version.
 
+When you publish, clean linked-chat editors cached in the same browser window
+refresh to the new canonical revision. Editors with unsaved work keep their
+draft and show a conflict instead of being overwritten. Reopen linked chats in
+other browser tabs or windows to load the new revision there.
+
 Editing a shared world from the library updates the canonical definition
 directly. The shared-world editor does not offer permanent location deletion;
 archive locations so their stable IDs remain available. A linked chat also
@@ -306,6 +317,13 @@ preview, select locations, and review their paths, descriptions, private model
 memory, and lore provenance. Use **Edit prompt**, **Regenerate**, or **Discard
 draft** before continuing.
 
+If the model returns malformed but complete JSON, World Maps makes one
+formatting-only repair attempt. The repair request instructs the model to
+preserve every generated location and value while correcting only JSON syntax.
+An incomplete response is not sent to repair. Instead, Maps asks you to raise
+the connection's **Max Output Tokens** or choose a smaller map size before
+trying again.
+
 Click **Continue to editor** for a new map or **Add to working map** for an
 expansion. After campaign history refers to location IDs, Maps protects those
 references by allowing expansion instead of unrelated wholesale replacement.
@@ -374,6 +392,12 @@ Only one hierarchical step can be committed with a turn. Use the X on the
 pending destination to cancel it. If the map revision or current location
 changes before sending, the pending move becomes **Needs review**.
 
+Guided generation, regeneration, and continuation do not create a new user
+turn, so they do not consume a queued destination or route step. **Impersonate**
+does create a user message. A successful impersonated turn therefore commits
+its queued movement once; a provider failure commits nothing, and a stale move
+returns to review instead of changing the location.
+
 ### Plan a multi-turn route
 
 Select a distant active location on the world map. If the parent/child and
@@ -410,6 +434,13 @@ The model still has to interpret the user's phrasing and emit a hidden Maps
 directive, which the application validates. Different language models may vary
 on ambiguous prose. Use **Set destination** for a deterministic next-turn move,
 or **Set current story location** to correct already-saved state.
+
+With the paired current Engine update, complete Maps movement and discovery
+directives are removed from streaming text and saved messages. Ordinary
+bracketed prose and its spacing remain unchanged. If a raw Maps directive
+appears in a message, update both Marinara Engine and World Maps, restart when
+prompted, and regenerate or remove the affected message so it is not replayed
+in later context.
 
 A validated user-led arrival can bypass one-step reachability: Maps records an
 available direct link from the current location when necessary. If a destination
@@ -511,6 +542,11 @@ For a parent using Map presentation, open **Child map background** separately.
 Choose a Gallery image, then position it behind the child markers. This image is
 never sent to a provider merely because it is displayed on the map.
 
+When one Gallery image fills both roles, **Remove reference only** keeps it as
+the child-map background. Use **Reject both and create replacement** when the
+image is wrong for both roles. After generation, **Use for both** assigns the
+new image as the location reference and child-map background in one step.
+
 ### Generate missing location artwork in a batch
 
 The editor's **Location artwork** section finds locations missing references or
@@ -529,6 +565,12 @@ slow or expensive, so the review stays scrollable and keeps the request count
 visible. Existing artwork is reused without another request when possible. A
 new image becomes the location reference and also the child-map background when
 that map needs one.
+
+Missing includes a saved Gallery link whose image no longer exists. If you edit
+the location while generation is running, Maps applies the result only to the
+artwork roles that are still missing. A newly selected replacement, reference
+toggle, background position, archive state, and unrelated draft edits are not
+overwritten by the completed request.
 
 The exact edited positive and negative prompts shown in review are sent to the
 provider. Positive prompt material is not copied into the negative prompt.
@@ -585,10 +627,10 @@ World Maps uses lore in two ways:
 To attach runtime lore, select the location, open **Linked lore**, search the
 available entries, attach the desired entries, and save.
 
-Opening a linked lorebook entry leaves the map editor. Save the map first when
-you want to keep other pending edits, or intentionally confirm that they can be
-discarded. World Maps 1.2.5 warns before that action can discard unsaved map
-changes.
+Choose **Open** on a linked entry to leave the map workspace and open its
+lorebook. A clean workspace closes directly. If the map has unsaved changes,
+save first or explicitly confirm that the draft can be discarded; World Maps
+never opens the lorebook behind the still-visible map editor.
 
 Linked entries do not pass from parent to child. Lore attached to Brinewatch
 does not activate at the Tideglass Inn unless it is attached there too.
@@ -622,23 +664,68 @@ variables and use the resolved previews before saving.
 
 ## Import, export, and archive safely
 
+### Export a portable map
+
 Use **Export** from a chat, template, or shared-world editor to download the
-working hierarchy as a `.world-map.json` file.
+working hierarchy as a `.world-map.json` file. Before downloading, choose how
+much linked lore should travel with it:
+
+| Lore option                  | What the file contains                                                                                                |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| **Map only**                 | The hierarchy and readable location-to-lore provenance, but no lorebook content. Missing entries cannot be recreated. |
+| **Map + linked entries**     | Only entries linked by the map and the folder paths needed to organize them. This is the recommended portable option. |
+| **Map + complete lorebooks** | Every entry and folder from each linked lorebook, including material unrelated to the map.                            |
+
+Review the listed lorebooks, entry count, estimated size, and expandable
+location-to-lore mapping before sharing the file. Complete lorebooks may
+contain private or unrelated notes.
+
 Leave **Include map artwork** enabled to bundle referenced location images and
-child-map backgrounds in the same file. Disable it when you want a smaller,
-definition-only backup. Older `.hierarchical-map.json` files remain importable.
+child-map backgrounds in the same file. Disable it when you want a smaller
+backup. Older `.hierarchical-map.json` files remain importable.
+
+### Import a map and restore portable lore
 
 Use **Import** to load a hierarchy into a chat working copy, independent
-template, or shared world. Bundled artwork is
-restored and its image links are remapped. Chat-owned artwork returns to the
-destination chat's Gallery. Shared artwork is reused from the Global Gallery
-when the same image already exists, or added there once when a template or
-shared reference needs it. Review the result and click **Save** to make it
-authoritative. Import does not save immediately.
+template, or shared world. When the file contains lorebook content, **Restore
+portable map lore** previews four groups: **Exact IDs**, **Unique content**,
+**Need a choice**, and **New entries**.
+
+Exact entry IDs are authoritative. Otherwise, World Maps reuses an entry only
+when its complete portable content and settings have one unique match. A name
+alone is never enough. When multiple entries have identical content, choose a
+specific `Lorebook → Entry (ID)` row or **Import a new copy** for that row.
+
+Choose the overall import strategy after reviewing the expected outcome:
+
+- **Import separate copies** reuses no entries. It creates independent
+  provenance-labelled lorebooks such as
+  `Original Lorebook - Map Name (World Map)`, adding **(copy)** or
+  **(copy N)** to avoid a library name collision.
+- **Reuse matches & import the rest** keeps exact and unique matches, applies
+  your choices for ambiguous rows, and creates new lorebooks only for entries
+  that still need importing.
+
+After import, Maps lists the concrete lorebooks it reused and created. Created
+copies remain in the Lorebooks library if the map is later deleted. On current
+Engine builds, the main Lorebooks view refreshes immediately; on an older
+compatible build, refresh Marinara once if the restored book is not yet listed.
+
+Bundled artwork is also restored and its image links are remapped. Chat-owned
+artwork returns to the destination chat's Gallery. Shared artwork is reused
+from the Global Gallery when the same image already exists, or added there once
+when a template or shared reference needs it.
+
+Review the imported map and click **Save** to make it authoritative. Import
+does not save immediately. A **Map only** export can preserve readable lore
+provenance and existing exact-ID links, but it cannot recreate deleted
+lorebooks or entries because their content is not in the file.
 
 Once campaign history refers to a map, imported changes must retain existing
 location IDs. Add or update locations instead of replacing the hierarchy with
 unrelated IDs.
+
+### Archive or permanently delete locations
 
 Archiving preserves old references. Before archiving a location:
 
@@ -646,7 +733,7 @@ Archiving preserves old references. Before archiving a location:
 - choose another active starting location if needed; and
 - choose an active replacement if it is the current runtime location.
 
-Archived locations can be restored from the Details pane. World Maps 1.2.5
+Archived locations can be restored from the Details pane. World Maps 1.3.1
 also offers **Delete permanently** for an archived location or fully archived
 branch when it is safe to remove. The editor disables that action when the
 location is the saved starting or current story location, appears in message
@@ -692,6 +779,13 @@ copy or **Use shared world** for a canonical link before completing Game setup.
 Review and save the Game map. A template remains unchanged; a linked Game keeps
 changes unpublished until you choose **Publish**.
 
+### A linked chat still shows an older shared world
+
+Clean linked-chat editors cached in the window where you publish refresh
+automatically. A chat with unsaved or unpublished changes keeps its draft and
+shows a conflict instead. Reopen chats in other tabs or windows to fetch the
+new canonical revision.
+
 ### The map cannot be enabled
 
 Create at least one active location and set an active starting location. Resolve
@@ -703,6 +797,18 @@ Make sure the chat or Maps **Connection Override** has a working language-model
 connection. Save or discard existing editor changes before reopening the AI
 builder. For an expansion, choose an active target. For lore-grounded
 generation, select at least one enabled, non-excluded lorebook.
+
+### AI map generation reports incomplete or malformed JSON
+
+If Maps says the response ended before complete JSON was available, raise the
+connection's **Max Output Tokens** or choose a smaller map size, then generate
+again. World Maps does not spend another request trying to repair an incomplete
+response.
+
+If Maps reports malformed JSON, it already attempted one syntax-only repair.
+Try generation again. If the same model repeatedly returns malformed output,
+use another connection or model; changing **Max Output Tokens** is intended for
+the incomplete-output case.
 
 ### The current location did not follow a message
 
@@ -789,7 +895,14 @@ advanced diagnosis.
 
 Confirm that the entry is attached to the exact current location. Check that
 the entry and lorebook are enabled and the lorebook is not excluded from the
-chat.
+chat. Parent-linked lore is not inherited by child locations.
+
+For an imported map, check the import summary. **Map only** carries readable
+provenance but no lorebook content, so it cannot restore a missing book. Import
+a file exported with **Map + linked entries** or **Map + complete lorebooks**,
+then choose the intended exact match, ambiguous destination, or separate copy.
+If a created lorebook does not appear in the main Lorebooks view on an older
+compatible Engine build, refresh Marinara once.
 
 ## Related guides
 
