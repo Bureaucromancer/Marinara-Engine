@@ -36,15 +36,16 @@ if !NODE_MAJOR! LSS 24 (
     exit /b 1
 )
 
-set "PNPM_VERSION=10.33.2"
-for /f "usebackq delims=" %%i in (`node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).packageManager?.split('@')[1] || '10.33.2'"`) do set "PNPM_VERSION=%%i"
+set "PNPM_DESCRIPTOR=10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e"
+for /f "usebackq delims=" %%i in (`node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).packageManager?.replace(/^pnpm@/, '') || '10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e'"`) do set "PNPM_DESCRIPTOR=%%i"
+for /f "tokens=1 delims=+" %%i in ("!PNPM_DESCRIPTOR!") do set "PNPM_VERSION=%%i"
 set "PNPM_RUNNER=pnpm"
 set "CURRENT_PNPM_VERSION="
 
 where corepack >nul 2>&1
 if not errorlevel 1 (
     echo  [..] Aligning pnpm to %PNPM_VERSION% via Corepack...
-    for /f "usebackq delims=" %%i in (`corepack pnpm@%PNPM_VERSION% --version 2^>nul`) do set "CURRENT_PNPM_VERSION=%%i"
+    for /f "usebackq delims=" %%i in (`corepack pnpm@%PNPM_DESCRIPTOR% --version 2^>nul`) do set "CURRENT_PNPM_VERSION=%%i"
     if /I "!CURRENT_PNPM_VERSION!"=="%PNPM_VERSION%" (
         set "PNPM_RUNNER=corepack"
     ) else (
@@ -182,7 +183,7 @@ goto :eof
 
 :run_pnpm
 if /I "%PNPM_RUNNER%"=="corepack" (
-    call corepack pnpm@%PNPM_VERSION% --config.trustPolicy=off --config.confirmModulesPurge=false %*
+    call corepack pnpm@%PNPM_DESCRIPTOR% --config.trustPolicy=off --config.confirmModulesPurge=false %*
 ) else (
     if /I "%PNPM_RUNNER%"=="npx" (
         call npx --yes pnpm@%PNPM_VERSION% --config.trustPolicy=off --config.confirmModulesPurge=false %*

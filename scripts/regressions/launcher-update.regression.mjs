@@ -18,6 +18,52 @@ import { workspaceLockfileMatches } from "../check-workspace-install.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const releaseUrl = "https://github.com/Pasta-Devs/Marinara-Engine/releases/tag/v2.3.4";
+const packageManifest = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
+const pinnedPnpmDescriptor = packageManifest.packageManager?.split("@")[1];
+const pinnedPnpmVersion = pinnedPnpmDescriptor?.split("+")[0];
+
+assert.equal(pinnedPnpmVersion, "10.34.5", "The workspace must pin the patched pnpm release");
+assert.equal(packageManifest.engines?.pnpm, ">=10.34.5", "Affected pnpm releases must fail before installation");
+assert.equal(
+  pinnedPnpmDescriptor,
+  "10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
+  "Corepack must verify the exact pnpm 10.34.5 release tarball",
+);
+
+const workspaceSource = readFileSync(join(repositoryRoot, "pnpm-workspace.yaml"), "utf8");
+assert.match(
+  workspaceSource,
+  /^managePackageManagerVersions: true$/mu,
+  "Plain pnpm fallbacks must delegate project commands to the packageManager pin",
+);
+
+for (const pinBearingPath of [
+  ".github/workflows/prealpha-platform-builds.yml",
+  "Dockerfile.lite",
+  "packages/server/src/routes/updates.routes.ts",
+  "start-local.bat",
+  "win/installer/install.bat",
+  "win/installer/installer.nsi",
+]) {
+  const pinBearingSource = readFileSync(join(repositoryRoot, pinBearingPath), "utf8");
+  assert.match(pinBearingSource, /10\.34\.5/u, `${pinBearingPath} must use the patched pnpm pin`);
+  assert.doesNotMatch(pinBearingSource, /10\.33\.2/u, `${pinBearingPath} must not retain the affected pnpm pin`);
+}
+
+const windowsInstallerSource = readFileSync(join(repositoryRoot, "win/installer/installer.nsi"), "utf8");
+assert.match(
+  windowsInstallerSource,
+  /pnpm --version \| %SystemRoot%\\System32\\findstr\.exe \/x \/l \/c:\$\{PNPM_VERSION\}/u,
+  "The Windows installer must reject a global pnpm version that differs from the repository pin",
+);
+
+const troubleshootingSource = readFileSync(join(repositoryRoot, "docs/TROUBLESHOOTING.md"), "utf8");
+assert.match(troubleshootingSource, /npm install -g pnpm@10\.34\.5/u);
+assert.match(
+  troubleshootingSource,
+  /Expected version: >=10\.34\.5[\s\S]*Got: 10\.33\.2/u,
+  "Troubleshooting must explain the intentional one-time fail-closed handoff",
+);
 
 assert.equal(getVersionFromReleaseUrl(releaseUrl), "2.3.4");
 assert.equal(getVersionFromReleaseUrl(LATEST_RELEASE_URL), null);
@@ -93,6 +139,38 @@ for (const launcherName of ["start.sh", "start-termux.sh", "start.bat"]) {
   assert.match(launcherSource, /install --frozen-lockfile --prefer-offline/u);
   assert.match(launcherSource, /protect-launcher-data\.mjs snapshot/u);
   assert.match(launcherSource, /protect-launcher-data\.mjs restore-if-missing/u);
+  assert.match(launcherSource, /does not match required/u, `${launcherName} must reject a mismatched global pnpm`);
+  assert.doesNotMatch(launcherSource, /10\.33\.2/u, `${launcherName} must not retain the affected pnpm pin`);
+}
+
+for (const launcherName of ["start.sh", "start-termux.sh"]) {
+  const launcherSource = readFileSync(join(repositoryRoot, launcherName), "utf8");
+  const updateSuccess = launcherSource.indexOf('echo "  [OK] Updated to');
+  const refreshedRunner = launcherSource.indexOf("resolve_pnpm_runner || exit 1", updateSuccess);
+  const refreshedInstall = launcherSource.indexOf("install_workspace_dependencies", refreshedRunner);
+
+  assert.ok(updateSuccess >= 0, `${launcherName} must identify a successful checkout update`);
+  assert.ok(refreshedRunner > updateSuccess, `${launcherName} must reload the pnpm pin after updating the checkout`);
+  assert.ok(
+    refreshedInstall > refreshedRunner,
+    `${launcherName} must refresh the pnpm runner before its first post-update dependency install`,
+  );
+}
+
+{
+  const updateSuccess = windowsLauncherSource.indexOf("echo  [OK] Updated to latest version");
+  const refreshedRunner = windowsLauncherSource.indexOf("call :resolve_pnpm_runner", updateSuccess);
+  const refreshedInstall = windowsLauncherSource.indexOf(
+    "call :run_pnpm install --frozen-lockfile --prefer-offline",
+    refreshedRunner,
+  );
+
+  assert.ok(updateSuccess >= 0, "start.bat must identify a successful checkout update");
+  assert.ok(refreshedRunner > updateSuccess, "start.bat must reload the pnpm pin after updating the checkout");
+  assert.ok(
+    refreshedInstall > refreshedRunner,
+    "start.bat must refresh the pnpm runner before its first post-update dependency install",
+  );
 }
 
 const devSource = readFileSync(join(repositoryRoot, "scripts/dev.mjs"), "utf8");

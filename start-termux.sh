@@ -131,12 +131,14 @@ case "$AUTO_UPDATE_ENABLED_NORMALIZED" in
 esac
 
 # ── Check pnpm ──
-PNPM_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).packageManager?.split('@')[1] || '10.33.2'")
+PNPM_VERSION=""
+PNPM_DESCRIPTOR=""
 PNPM_RUNNER="pnpm"
+CURRENT_PNPM_VERSION=""
 
 run_pnpm() {
     if [ "$PNPM_RUNNER" = "corepack" ]; then
-        corepack "pnpm@${PNPM_VERSION}" --config.trustPolicy=off --config.confirmModulesPurge=false "$@"
+        corepack "pnpm@${PNPM_DESCRIPTOR}" --config.trustPolicy=off --config.confirmModulesPurge=false "$@"
     elif [ "$PNPM_RUNNER" = "npx" ]; then
         npx --yes "pnpm@${PNPM_VERSION}" --config.trustPolicy=off --config.confirmModulesPurge=false "$@"
     else
@@ -162,34 +164,52 @@ install_workspace_dependencies() {
     SHARP_IGNORE_GLOBAL_LIBVIPS=1 run_pnpm install --frozen-lockfile --prefer-offline
 }
 
-if command -v corepack &> /dev/null; then
-    echo "  [..] Aligning pnpm to ${PNPM_VERSION} via Corepack..."
-    CURRENT_PNPM_VERSION=$(corepack "pnpm@${PNPM_VERSION}" --version 2>/dev/null || true)
-    if [ "$CURRENT_PNPM_VERSION" = "$PNPM_VERSION" ]; then
-        PNPM_RUNNER="corepack"
-    fi
-fi
+resolve_pnpm_runner() {
+    PNPM_DESCRIPTOR=$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).packageManager?.replace(/^pnpm@/, '') || '10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e'")
+    PNPM_VERSION=${PNPM_DESCRIPTOR%%+*}
+    PNPM_RUNNER="pnpm"
+    CURRENT_PNPM_VERSION=""
 
-if [ "$PNPM_RUNNER" = "pnpm" ]; then
-    CURRENT_PNPM_VERSION=$(pnpm --version 2>/dev/null || true)
-    if [ -n "$CURRENT_PNPM_VERSION" ]; then
-        echo "  [..] Using installed pnpm ${CURRENT_PNPM_VERSION}"
+    if command -v corepack &> /dev/null; then
+        echo "  [..] Aligning pnpm to ${PNPM_VERSION} via Corepack..."
+        CURRENT_PNPM_VERSION=$(corepack "pnpm@${PNPM_DESCRIPTOR}" --version 2>/dev/null || true)
+        if [ "$CURRENT_PNPM_VERSION" = "$PNPM_VERSION" ]; then
+            PNPM_RUNNER="corepack"
+        else
+            CURRENT_PNPM_VERSION=""
+        fi
     fi
-fi
 
-if [ -z "$CURRENT_PNPM_VERSION" ]; then
-    echo "  [..] Using temporary pnpm ${PNPM_VERSION} via npx..."
-    CURRENT_PNPM_VERSION=$(npx --yes "pnpm@${PNPM_VERSION}" --version 2>/dev/null || true)
-    if [ "$CURRENT_PNPM_VERSION" = "$PNPM_VERSION" ]; then
-        PNPM_RUNNER="npx"
+    if [ -z "$CURRENT_PNPM_VERSION" ] && command -v pnpm &> /dev/null; then
+        CURRENT_PNPM_VERSION=$(pnpm --version 2>/dev/null || true)
+        if [ "$CURRENT_PNPM_VERSION" = "$PNPM_VERSION" ]; then
+            echo "  [..] Using installed pnpm ${CURRENT_PNPM_VERSION}"
+        else
+            if [ -n "$CURRENT_PNPM_VERSION" ]; then
+                echo "  [..] Installed pnpm ${CURRENT_PNPM_VERSION} does not match required ${PNPM_VERSION}; trying a pinned temporary runner..."
+            fi
+            CURRENT_PNPM_VERSION=""
+        fi
     fi
-fi
 
-if [ -z "$CURRENT_PNPM_VERSION" ]; then
-    echo "  [ERROR] Failed to make pnpm ${PNPM_VERSION} available."
-    exit 1
-fi
-echo "  [OK] pnpm ${CURRENT_PNPM_VERSION} ready"
+    if [ -z "$CURRENT_PNPM_VERSION" ]; then
+        echo "  [..] Using temporary pnpm ${PNPM_VERSION} via npx..."
+        CURRENT_PNPM_VERSION=$(npx --yes "pnpm@${PNPM_VERSION}" --version 2>/dev/null || true)
+        if [ "$CURRENT_PNPM_VERSION" = "$PNPM_VERSION" ]; then
+            PNPM_RUNNER="npx"
+        else
+            CURRENT_PNPM_VERSION=""
+        fi
+    fi
+
+    if [ -z "$CURRENT_PNPM_VERSION" ]; then
+        echo "  [ERROR] Failed to make pnpm ${PNPM_VERSION} available."
+        return 1
+    fi
+    echo "  [OK] pnpm ${CURRENT_PNPM_VERSION} ready"
+}
+
+resolve_pnpm_runner || exit 1
 
 restore_stashed_changes() {
     if [ "$STASHED" != "1" ] || [ -z "$STASH_REF" ]; then
@@ -311,6 +331,7 @@ elif [ -d ".git" ]; then
                 echo "  [WARN] Update did not land on ${TARGET_REF}. Continuing with current version."
             else
                 echo "  [OK] Updated to $(git log -1 --format='%h %s' 2>/dev/null)"
+                resolve_pnpm_runner || exit 1
                 prune_pnpm_store
                 echo "  [..] Refreshing dependencies..."
                 install_workspace_dependencies
