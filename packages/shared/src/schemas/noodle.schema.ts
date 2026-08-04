@@ -160,6 +160,7 @@ export const noodleAccountSocialSettingsSchema = z
     followingAccountIds: z.array(z.string().min(1)).optional(),
     followingAccountTimestamps: z.record(z.string(), z.string().datetime()).optional(),
     notificationsReadAt: z.string().datetime().optional(),
+    noodlerFeedSeenAt: z.string().datetime().optional(),
   })
   .strict();
 
@@ -207,7 +208,10 @@ export const noodleAccountPrivacyPatchSchema = noodleAccountPrivacySettingsSchem
   .extend({ access: noodleAccountAccessSettingsSchema.partial().optional() })
   .strict();
 
-export const noodleAccountSocialPatchSchema = noodleAccountSocialSettingsSchema.pick({ notificationsReadAt: true });
+export const noodleAccountSocialPatchSchema = noodleAccountSocialSettingsSchema.pick({
+  notificationsReadAt: true,
+  noodlerFeedSeenAt: true,
+});
 
 export const noodleAccountSettingsPatchSchema = z.discriminatedUnion("subtree", [
   z.object({ subtree: z.literal("social"), patch: noodleAccountSocialPatchSchema }).strict(),

@@ -85,12 +85,12 @@ The product experience therefore needs both agency and life:
 | 1 | Slice 7 — roleplay authoring and creator-profile parity | Merged through #3969 | 4, 5, 6, 6b |
 | 2 | Slices 8, 8b, 8c, 8d, 10 | Merged; see the table above | — |
 | 3 | Slice 8e — `private` → `noodler` rename across code, data, and UI | Merged through #4129 (2026-07-27), with `noodle-platform-migration.ts` and its regression | none beyond merged staging |
-| 4 | Slice 8f-1 — identity-redaction fix (rename-then-redraft) | Implemented on `big-chungus-1`, unmerged; `buildNoodlerPublicIdentity()` widens the identity union, covered by `noodle-prompt.regression.ts` | none |
-| 5 | Slice 8f-2 — access collapse to `public \| locked` + migration | Implemented on `big-chungus-1`, unmerged; see [detail document](./noodler-access-and-onboarding.md) | 8e (same files) |
-| 6 | Slice 8g — creators reply to the viewer | Implemented on `big-chungus-1`, unmerged; `noodle-noodler-creator-reply.operation.ts` + `noodle-noodler-reply-generation.service.ts`, covered by `noodle-creator-reply.regression.ts` | 8f-2 access model only |
-| 7 | Slice 8f-3 — front-loaded scheduled-post reserve | Implemented on `big-chungus-1`, unmerged; `noodle-noodler-reserve.operation.ts`, `noodle-autopost-cadence.ts` deleted | 8f-2 |
-| 8 | Slice 8f-4 — setup wizard with an emulated Professor Mari teaching post | Implemented on `big-chungus-1`, unmerged; `noodler-onboarding.ts` + wizard screens | 8f-2, 8f-3, 8c bulk creation |
-| 9 | Slice 8f-5 — watching surface: new-since-last-visit divider and entry-point counter | Planning; cheapest win in the design, split out so a scope cut cannot eat it | 8f-2 |
+| 4 | Slice 8f-1 — identity-redaction fix (rename-then-redraft) | Merged through #4515 (2026-08-03); `buildNoodlerPublicIdentity()` widens the identity union, covered by `noodle-prompt.regression.ts` | none |
+| 5 | Slice 8f-2 — access collapse to `public \| locked` + migration | Merged through #4515 (2026-08-03); see [detail document](./noodler-access-and-onboarding.md) | 8e (same files) |
+| 6 | Slice 8g — creators reply to the viewer | Merged through #4515 (2026-08-03); `noodle-noodler-creator-reply.operation.ts` + `noodle-noodler-reply-generation.service.ts`, covered by `noodle-creator-reply.regression.ts` | 8f-2 access model only |
+| 7 | Slice 8f-3 — front-loaded scheduled-post reserve | Merged through #4515 (2026-08-03); `noodle-noodler-reserve.operation.ts`, `noodle-autopost-cadence.ts` deleted | 8f-2 |
+| 8 | Slice 8f-4 — setup wizard with an emulated Professor Mari teaching post | Merged through #4515 (2026-08-03); `noodler-onboarding.ts` + wizard screens | 8f-2, 8f-3, 8c bulk creation |
+| 9 | Slice 8f-5 — watching surface: new-since-last-visit divider and entry-point counter | Implemented on `fix/noodler-locked-blurred-teaser`, unmerged; `noodlerFeedSeenAt` per viewer persona + `countNoodlerPostsSince()`, covered by `noodle-feed-seen.regression.ts` | 8f-2 |
 | 9+ | Slice 8f-6 — creator-page operator area, including source-changed and source-missing notices | Planning; independent of the access and scheduling work, so it may land any time after 8f-1 | 8f-1 |
 | 10 | Slice 9a — quiet synthetic fan engagement | Later, and **optional** rather than the road ahead — see the note below | 6, 6b, 8, 8f-2, 8g |
 | 11 | Slice 9c — persona-first named superfans and non-economic visible moments | Roleplay-first, compute-bounded follow-up | 9a |
@@ -695,17 +695,29 @@ is what gets cut when the slice runs long. Each unit below is independently ship
 scheduling rewrite to ship. 8g needs only 8f-2's settled access model, so it sequences
 ahead of 8f-3/4/5/6 rather than behind all of 8f.
 
-### Implementation status — 8f-5 and 8f-6 remain
+### Implementation status — 8f-6 remains
 
-**As of 2026-07-31, four of the six units plus 8g are implemented on branch
-`big-chungus-1` and unmerged: 8f-1, 8f-2, 8f-3, 8f-4, 8g.** `pnpm check`,
-`pnpm regression:noodle`, `pnpm regression:localization`, and `pnpm version:check` pass on
-that branch. Browser proof has not been run.
+**As of 2026-08-03, four of the six units plus 8g are merged through #4515: 8f-1, 8f-2,
+8f-3, 8f-4, 8g.** They landed as one PR rather than the planned stack; see "Splitting
+`big-chungus-1` for review" below for why, recorded rather than reversed.
 
-**Remaining: 8f-5** (new-since-last-visit divider and entry-point counter) and **8f-6**
-(creator-page operator area, including source-changed / source-missing notices). Neither has
-any code on the branch — no `lastVisit`-style field exists in
-`packages/shared/src/types/noodle.ts`, and no source-snapshot compare exists.
+**8f-5** (new-since-last-visit divider and entry-point counter) is implemented and unmerged
+on `fix/noodler-locked-blurred-teaser`: `noodlerFeedSeenAt` on
+`NoodleAccountSocialSettings` (per viewer persona, advanced only once the feed is actually
+shown), `countNoodlerPostsSince()` in `packages/shared/src/utils/noodler-unseen.ts`, a
+divider at the boundary in the ViewerHub feed, and a badge on the NoodleR mode toggle so the
+count is visible from the Noodle side. Covered by `noodle-feed-seen.regression.ts`.
+
+**Remaining: 8f-6** (creator-page operator area, including source-changed / source-missing
+notices). No code exists for it — no source-snapshot compare exists anywhere in the tree.
+
+**Post-8f defect, fixed on the same branch:** 8f-2 stopped serving locked post media
+entirely, correctly noting that a browser-side blur still discloses the original bytes. That
+also removed the blurred teaser the onboarding wizard teaches users to recognise, leaving a
+grey frame. Locked media is now blurred server-side (downscale-then-blur, so the original is
+unrecoverable) and served from the same access-checked route. This was never a plan
+requirement — the plan's "teaser" language means public teaser *posts* — but it is shipped
+behaviour worth recording so it is not rediscovered.
 
 The six units were specified to ship independently; in practice five landed on one branch.
 That is recorded rather than reversed, but it makes the branch a large review unit — see

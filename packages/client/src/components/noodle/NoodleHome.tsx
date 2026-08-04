@@ -100,6 +100,7 @@ import {
   useInviteNoodleCharacters,
   useNoodle,
   useNoodlerAccounts,
+  useNoodlerUnseenCount,
   usePatchNoodleAccountSettings,
   useRefreshNoodle,
   useRemoveNoodleCharacter,
@@ -574,6 +575,12 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
   const setSelectedPersonaId = useUIStore((state) => state.setNoodleSelectedPersonaId);
   const { data, isLoading, isError } = useNoodle();
   const noodlerAccountsQuery = useNoodlerAccounts(data?.settings.enableNoodler === true);
+  // The counter is the reason to come back, so it has to be visible from the Noodle side —
+  // where the user is when they are not already watching NoodleR.
+  const noodlerUnseenCount = useNoodlerUnseenCount(
+    selectedPersonaId || null,
+    data?.settings.enableNoodler === true,
+  );
   const noodlerCreators = noodlerAccountsQuery.data ?? [];
   const noodlerCreatorCount = noodlerCreators.length;
   const noodlerAutomatingCount = noodlerCreators.filter((profile) => profile.autoPosting.enabled).length;
@@ -4170,6 +4177,7 @@ export function NoodleHome({ navigation, onNavigate }: NoodleHomeProps) {
           ? activeNoodleView
           : null
       }
+      noodlerUnseenCount={noodlerUnseenCount}
       personaAccount={personaAccount}
       sortedPersonaAccounts={sortedPersonaAccounts}
       visiblePersonaAccounts={visiblePersonaAccounts}

@@ -61,10 +61,13 @@ function NoodleModeToggle({
   activeMode,
   onOpenHome,
   onOpenNoodler,
+  noodlerUnseenCount = 0,
 }: {
   activeMode: NoodleShellMode;
   onOpenHome: () => void;
   onOpenNoodler: () => void;
+  /** Posts published since this viewer persona last had the NoodleR feed shown to it. */
+  noodlerUnseenCount?: number;
 }) {
   const { t: localizeUi } = useUiTranslation();
   const noodler = activeMode === "noodler";
@@ -86,6 +89,16 @@ function NoodleModeToggle({
       </button>
       <button type="button" role="tab" aria-selected={noodler} onClick={onOpenNoodler} className={segment(noodler)}>
         {localizeUi("ui.noodle.noodlemodetoggle.noodler")}
+        {/* The count is the reason to come back, so it carries its own label rather than
+            leaving a bare number for screen readers to read out of context. */}
+        {noodlerUnseenCount > 0 && (
+          <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--noodle-accent)] px-1.5 text-[0.65rem] font-bold tabular-nums text-zinc-950">
+            {noodlerUnseenCount > 99 ? "99+" : noodlerUnseenCount}
+            <span className="sr-only">
+              {localizeUi("ui.noodle.noodlemodetoggle.newSinceLastVisitCount", { count: noodlerUnseenCount })}
+            </span>
+          </span>
+        )}
       </button>
     </div>
   );
@@ -167,6 +180,8 @@ export interface NoodleShellProps {
   appMode?: NoodleShellMode;
   /** Overrides whether the Home/Hub destination is selected when app mode and subview are separate. */
   homeActive?: boolean;
+  /** Posts published since this viewer persona last had the NoodleR feed shown to it. */
+  noodlerUnseenCount?: number;
   personaAccount: NoodleAccount | null;
   sortedPersonaAccounts: NoodleAccount[];
   visiblePersonaAccounts: NoodleAccount[];
@@ -210,6 +225,7 @@ export function NoodleShell({
   activeView,
   appMode,
   homeActive: homeActiveOverride,
+  noodlerUnseenCount = 0,
   personaAccount,
   sortedPersonaAccounts,
   visiblePersonaAccounts,
@@ -318,6 +334,7 @@ export function NoodleShell({
                       activeMode={resolvedAppMode}
                       onOpenHome={onOpenHome}
                       onOpenNoodler={onOpenNoodler}
+                      noodlerUnseenCount={noodlerUnseenCount}
                     />
                   </div>
                 )}
@@ -457,6 +474,7 @@ export function NoodleShell({
                       activeMode={resolvedAppMode}
                       onOpenHome={onOpenHome}
                       onOpenNoodler={onOpenNoodler}
+                      noodlerUnseenCount={noodlerUnseenCount}
                     />
                   </div>
                 )}

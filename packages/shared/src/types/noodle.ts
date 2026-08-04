@@ -43,6 +43,13 @@ export interface NoodleAccountSocialSettings {
   followingAccountIds?: string[];
   followingAccountTimestamps?: Record<string, string>;
   notificationsReadAt?: string;
+  /**
+   * When this viewer persona last had the NoodleR feed shown to it, for the
+   * "new since your last visit" divider and entry-point counter. Per viewer persona rather
+   * than per user: NoodleR follows and locked-post access are persona-scoped, so an
+   * account-wide timestamp would let one persona silently clear another's.
+   */
+  noodlerFeedSeenAt?: string;
 }
 
 export interface NoodleAutoPostingSettings {

@@ -140,4 +140,5 @@ export * from "./utils/noodle-polls.js";
 export * from "./utils/noodle-post-images.js";
 export * from "./utils/noodler-onboarding.js";
 export * from "./utils/noodle-interactions.js";
+export * from "./utils/noodler-unseen.js";
 export * from "./utils/spatial-context.js";

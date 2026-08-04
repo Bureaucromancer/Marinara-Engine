@@ -42,7 +42,7 @@ import type {
   NoodlerReserveStatus,
   NoodlerRemoveInteractionInput,
 } from "@marinara-engine/shared";
-import { mergeNoodlePollVoteInteractions } from "@marinara-engine/shared";
+import { countNoodlerPostsSince, mergeNoodlePollVoteInteractions } from "@marinara-engine/shared";
 import type { ImagePromptOverride, ImagePromptReviewItem } from "../components/ui/ImagePromptReviewModal";
 
 export type NoodleRefreshResult = {
@@ -342,6 +342,12 @@ export function useNoodlerViewer(personaId: string | null, enabled = true) {
     refetchInterval: enabled && personaId ? 30_000 : false,
     refetchIntervalInBackground: false,
   });
+}
+
+/** Unseen-post count for the NoodleR entry point; reuses the viewer-scope query already cached. */
+export function useNoodlerUnseenCount(personaId: string | null, enabled = true) {
+  const { data } = useNoodlerViewer(personaId, enabled);
+  return countNoodlerPostsSince(data, data?.viewer.settings.social.noodlerFeedSeenAt);
 }
 
 export function useToggleNoodlerSubscription() {
