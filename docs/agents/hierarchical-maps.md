@@ -2,8 +2,10 @@
 
 > **Current compatibility:** This guide matches World Maps **1.3.1**. The
 > package supports Marinara Engine **2.3.5 through 3.x** and works in Roleplay
-> and Game chats. Use a current Engine build for the paired movement-stream
-> cleanup and immediate host Lorebooks refresh after portable imports.
+> and Game chats. Marinara Engine **2.4.1** adds the paired movement-stream
+> cleanup and immediate host Lorebooks refresh after portable imports. Engine
+> **2.3.5 through 2.4.0** remains compatible, but requires a manual Lorebooks
+> refresh after an import and does not include that movement-stream cleanup.
 
 World Maps adds persistent world state to Roleplay and Game. Instead of
 keeping one free-text location, it represents the world as nested places:
@@ -202,10 +204,10 @@ keep copy** to stop sharing while keeping the chat's current version. If the
 canonical world changes while a draft is pending, Maps reports a conflict and
 requires a detach or discard instead of silently overwriting either version.
 
-When you publish, clean linked-chat editors cached in the same browser window
-refresh to the new canonical revision. Editors with unsaved work keep their
-draft and show a conflict instead of being overwritten. Reopen linked chats in
-other browser tabs or windows to load the new revision there.
+When you publish, clean linked-chat editors cached in this browser tab refresh
+to the new canonical revision. Editors with unsaved work keep their draft and
+show a conflict instead of being overwritten. Reopen linked chats in other
+browser tabs or windows to load the new revision there.
 
 Editing a shared world from the library updates the canonical definition
 directly. The shared-world editor does not offer permanent location deletion;
@@ -435,7 +437,7 @@ directive, which the application validates. Different language models may vary
 on ambiguous prose. Use **Set destination** for a deterministic next-turn move,
 or **Set current story location** to correct already-saved state.
 
-With the paired current Engine update, complete Maps movement and discovery
+With Marinara Engine **2.4.1** or later, complete Maps movement and discovery
 directives are removed from streaming text and saved messages. Ordinary
 bracketed prose and its spacing remain unchanged. If a raw Maps directive
 appears in a message, update both Marinara Engine and World Maps, restart when
@@ -691,10 +693,11 @@ template, or shared world. When the file contains lorebook content, **Restore
 portable map lore** previews four groups: **Exact IDs**, **Unique content**,
 **Need a choice**, and **New entries**.
 
-Exact entry IDs are authoritative. Otherwise, World Maps reuses an entry only
-when its complete portable content and settings have one unique match. A name
-alone is never enough. When multiple entries have identical content, choose a
-specific `Lorebook → Entry (ID)` row or **Import a new copy** for that row.
+An exact entry ID is authoritative only when it belongs to the destination
+lorebook. An ID from another source is ambiguous rather than an automatic match;
+choose the exact destination `Lorebook → Entry (ID)` row or **Import a new
+copy**. Otherwise, World Maps reuses an entry only when its complete portable
+content and settings have one unique match. A name alone is never enough.
 
 Choose the overall import strategy after reviewing the expected outcome:
 
@@ -707,9 +710,9 @@ Choose the overall import strategy after reviewing the expected outcome:
   that still need importing.
 
 After import, Maps lists the concrete lorebooks it reused and created. Created
-copies remain in the Lorebooks library if the map is later deleted. On current
-Engine builds, the main Lorebooks view refreshes immediately; on an older
-compatible build, refresh Marinara once if the restored book is not yet listed.
+copies remain in the Lorebooks library if the map is later deleted. On Engine
+**2.4.1** or later, the main Lorebooks view refreshes immediately. On Engine
+**2.3.5 through 2.4.0**, refresh Marinara once after restoring portable lore.
 
 Bundled artwork is also restored and its image links are remapped. Chat-owned
 artwork returns to the destination chat's Gallery. Shared artwork is reused
@@ -781,10 +784,10 @@ changes unpublished until you choose **Publish**.
 
 ### A linked chat still shows an older shared world
 
-Clean linked-chat editors cached in the window where you publish refresh
+Clean linked-chat editors cached in the browser tab where you publish refresh
 automatically. A chat with unsaved or unpublished changes keeps its draft and
-shows a conflict instead. Reopen chats in other tabs or windows to fetch the
-new canonical revision.
+shows a conflict instead. Reopen chats in other tabs or windows to fetch the new
+canonical revision.
 
 ### The map cannot be enabled
 
@@ -901,8 +904,9 @@ For an imported map, check the import summary. **Map only** carries readable
 provenance but no lorebook content, so it cannot restore a missing book. Import
 a file exported with **Map + linked entries** or **Map + complete lorebooks**,
 then choose the intended exact match, ambiguous destination, or separate copy.
-If a created lorebook does not appear in the main Lorebooks view on an older
-compatible Engine build, refresh Marinara once.
+On Engine **2.3.5 through 2.4.0**, refresh Marinara once after restoring portable
+lore so the created lorebook appears in the main Lorebooks view. Engine
+**2.4.1** or later refreshes it immediately.
 
 ## Related guides
 
