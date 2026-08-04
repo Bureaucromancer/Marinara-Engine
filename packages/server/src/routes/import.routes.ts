@@ -21,6 +21,7 @@ import {
 import { importSTPreset } from "../services/import/st-prompt.importer.js";
 import { importSTLorebook } from "../services/import/st-lorebook.importer.js";
 import { importMarinara } from "../services/import/marinara.importer.js";
+import { importCompatibleScenario } from "../services/import/scenario-compat.importer.js";
 import { scanSTFolder, runSTBulkImport, type STBulkImportOptions } from "../services/import/st-bulk.importer.js";
 import { characters as charactersTable } from "../db/schema/index.js";
 import { createChatsStorage } from "../services/storage/chats.storage.js";
@@ -955,6 +956,20 @@ export async function importRoutes(app: FastifyInstance) {
     const fallbackName = typeof body.__filename === "string" ? body.__filename : undefined;
     return importSTLorebook(body, app.db, {
       ...(fallbackName ? { fallbackName } : {}),
+      timestampOverrides: readTimestampOverridesFromBody(body),
+    });
+  });
+
+  /**
+   * Import a compatible (Aventuras-shaped) scenario. A bare object with no
+   * envelope, so the client sniffs it structurally and posts it here; native
+   * scenario envelopes go through /marinara like every other native export.
+   */
+  app.post("/compatible-scenario", async (req) => {
+    const body = req.body as Record<string, unknown>;
+    const fallbackName = typeof body.__filename === "string" ? body.__filename : null;
+    return importCompatibleScenario(body, app.db, {
+      originalFilename: fallbackName,
       timestampOverrides: readTimestampOverridesFromBody(body),
     });
   });

@@ -22,6 +22,12 @@ const CreateLorebookModal = lazy(() =>
 const ImportLorebookModal = lazy(() =>
   import("../modals/ImportLorebookModal").then((module) => ({ default: module.ImportLorebookModal })),
 );
+const CreateScenarioModal = lazy(() =>
+  import("../modals/CreateScenarioModal").then((module) => ({ default: module.CreateScenarioModal })),
+);
+const ImportScenarioModal = lazy(() =>
+  import("../modals/ImportScenarioModal").then((module) => ({ default: module.ImportScenarioModal })),
+);
 const CreatePresetModal = lazy(() =>
   import("../modals/CreatePresetModal").then((module) => ({ default: module.CreatePresetModal })),
 );
@@ -95,6 +101,12 @@ export function ModalRenderer() {
       break;
     case "import-lorebook":
       content = <ImportLorebookModal open onClose={closeModal} />;
+      break;
+    case "create-scenario":
+      content = <CreateScenarioModal open onClose={closeModal} />;
+      break;
+    case "import-scenario":
+      content = <ImportScenarioModal open onClose={closeModal} />;
       break;
     case "create-preset":
       content = <CreatePresetModal open onClose={closeModal} />;

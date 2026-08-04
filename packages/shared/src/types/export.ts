@@ -9,6 +9,7 @@ export type ExportType =
   | "marinara_character"
   | "marinara_persona"
   | "marinara_lorebook"
+  | "marinara_scenario"
   | "marinara_preset"
   | "marinara_chat_preset"
   | "marinara_chat_settings_profile"
