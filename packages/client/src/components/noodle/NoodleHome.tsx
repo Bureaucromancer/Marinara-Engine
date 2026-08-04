@@ -66,7 +66,8 @@ import {
 } from "@marinara-engine/shared";
 import { ApiError } from "../../lib/api-client";
 import { showConfirmDialog } from "../../lib/app-dialogs";
-import { cn, parseAvatarCropJson, type AvatarCropValue } from "../../lib/utils";
+import { normalizeAvatarCrop, type AvatarCrop } from "@marinara-engine/shared";
+import { cn } from "../../lib/utils";
 import { useActivePersona, useCharacterGroups, useCharacters, usePersonas } from "../../hooks/use-characters";
 import { useConnections } from "../../hooks/use-connections";
 import { useNoodleCustomEmojiMap } from "../../hooks/use-noodle-custom-emojis";
@@ -388,14 +389,9 @@ function characterName(character: RawCharacter) {
   return readString(data.name).trim() || "Character";
 }
 
-function rawCharacterAvatarCrop(character: RawCharacter): AvatarCropValue | null {
+function rawCharacterAvatarCrop(character: RawCharacter): AvatarCrop | null {
   const raw = parseRecord(parseRecord(character.data).extensions).avatarCrop;
-  if (typeof raw === "string") return parseAvatarCropJson(raw);
-  try {
-    return raw ? parseAvatarCropJson(JSON.stringify(raw)) : null;
-  } catch {
-    return null;
-  }
+  return normalizeAvatarCrop(raw);
 }
 
 function characterGroupName(group: RawCharacterGroup) {
