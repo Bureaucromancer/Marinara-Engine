@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import type {
   ResolvedOwnerSpatialProjection,
   SpatialContextDefinition,
@@ -340,6 +341,33 @@ assert.equal(streamedDirectiveSplitAfterPrefix.push("[spatial_move:\n"), "");
 assert.equal(streamedDirectiveSplitAfterPrefix.push(' destination_id="moonwell"'), "");
 assert.equal(streamedDirectiveSplitAfterPrefix.push("]Arrival text."), "Arrival text.");
 assert.equal(streamedDirectiveSplitAfterPrefix.flush(), "");
+
+const generateRouteSource = readFileSync(
+  new URL("../../packages/server/src/routes/generate.routes.ts", import.meta.url),
+  "utf8",
+);
+const inlineThinkingStart = generateRouteSource.indexOf(
+  "const inlineThinking = extractLeadingThinkingBlocks(fullResponse, customThinkingTags);",
+);
+const inlineThinkingEnd = generateRouteSource.indexOf("// ── LOG_LEVEL=debug", inlineThinkingStart);
+const spatialSanitizationStart = generateRouteSource.indexOf(
+  "const parsedSpatial = extractAssistantSpatialDirective(fullResponse);",
+  inlineThinkingEnd,
+);
+const consolidatedReplacementStart = generateRouteSource.indexOf(
+  "if (contentReplaced) {",
+  spatialSanitizationStart,
+);
+assert.ok(inlineThinkingStart >= 0 && inlineThinkingEnd > inlineThinkingStart, "Inline-thinking route block is present");
+assert.doesNotMatch(
+  generateRouteSource.slice(inlineThinkingStart, inlineThinkingEnd),
+  /type:\s*"content_replace"/u,
+  "Inline-thinking cleanup must not emit content before spatial sanitization",
+);
+assert.ok(
+  spatialSanitizationStart > inlineThinkingEnd && consolidatedReplacementStart > spatialSanitizationStart,
+  "The consolidated content replacement must run after spatial sanitization",
+);
 
 const validDefinition = definition(
   [

@@ -5932,6 +5932,8 @@ export async function generateRoutes(app: FastifyInstance) {
             debugLog("[generate/game/raw] chatId=%s characterId=%s END", input.chatId, targetCharId ?? "gm");
           }
 
+          let contentReplaced = false;
+
           // Some models inline reasoning blocks instead of using provider-native
           // thinking channels. Lift those blocks into message.extra.thinking.
           const inlineThinking = extractLeadingThinkingBlocks(fullResponse, customThinkingTags);
@@ -5940,9 +5942,7 @@ export async function generateRoutes(app: FastifyInstance) {
               fullThinking = fullThinking ? fullThinking + "\n\n" + inlineThinking.thinking : inlineThinking.thinking;
             }
             fullResponse = inlineThinking.content;
-            if (!holdForTextRewrite) {
-              reply.raw.write(`data: ${JSON.stringify({ type: "content_replace", data: fullResponse })}\n\n`);
-            }
+            contentReplaced = true;
           }
 
           // ── LOG_LEVEL=debug or Settings -> Advanced -> Debug mode: log full response + usage to server console ──
@@ -5991,7 +5991,6 @@ export async function generateRoutes(app: FastifyInstance) {
           let parsedRawCommandCount = 0;
           let assistantSpatialDirective: ReturnType<typeof extractAssistantSpatialDirective>["directive"] = null;
           let conversationCommandContent: string | null = null;
-          let contentReplaced = false;
           if (tailMessages.assistantPrefillInjected && assistantPrefill && fullResponse.startsWith(assistantPrefill)) {
             const responseAfterPrefill = fullResponse.slice(assistantPrefill.length);
             if (responseAfterPrefill.startsWith(assistantPrefill)) {
