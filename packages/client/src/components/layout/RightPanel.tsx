@@ -2,7 +2,19 @@
 // Layout: Right Panel (polished with panel transitions)
 // ──────────────────────────────────────────────
 import { lazy, Suspense, type ComponentType, type LazyExoticComponent, type ReactNode } from "react";
-import { X, Users, BookOpen, FileText, Link, Sparkles, Settings, VenetianMask, Bot, Puzzle } from "lucide-react";
+import {
+  X,
+  Users,
+  BookOpen,
+  Clapperboard,
+  FileText,
+  Link,
+  Sparkles,
+  Settings,
+  VenetianMask,
+  Bot,
+  Puzzle,
+} from "lucide-react";
 import { useUIStore } from "../../stores/ui.store";
 import { cn } from "../../lib/utils";
 import { usePersonalExtensionContributions } from "../../lib/personal-extension-contributions";
@@ -16,6 +28,9 @@ const CharactersPanel = lazy(() =>
 );
 const LorebooksPanel = lazy(() =>
   import("../panels/LorebooksPanel").then((module) => ({ default: module.LorebooksPanel })),
+);
+const ScenariosPanel = lazy(() =>
+  import("../panels/ScenariosPanel").then((module) => ({ default: module.ScenariosPanel })),
 );
 const PresetsPanel = lazy(() => import("../panels/PresetsPanel").then((module) => ({ default: module.PresetsPanel })));
 const ConnectionsPanel = lazy(() =>
@@ -47,6 +62,11 @@ const PANEL_CONFIG: Record<string, { title: string; icon: ReactNode; gradient?: 
     gradientClass: "mari-panel-gradient-surface mari-panel-gradient--characters",
   },
   lorebooks: { title: "Lorebooks", icon: <BookOpen size="0.875rem" />, gradient: "from-amber-400 to-orange-500" },
+  scenarios: {
+    title: "Scenarios",
+    icon: <Clapperboard size="0.875rem" />,
+    gradientClass: "mari-panel-gradient-surface mari-panel-gradient--scenarios",
+  },
   presets: {
     title: "Presets",
     icon: <FileText size="0.875rem" />,
@@ -67,6 +87,7 @@ const PANELS: Record<string, LazyExoticComponent<ComponentType>> = {
   "bot-browser": BotBrowserPanel,
   characters: CharactersPanel,
   lorebooks: LorebooksPanel,
+  scenarios: ScenariosPanel,
   presets: PresetsPanel,
   connections: ConnectionsPanel,
   agents: AgentsPanel,

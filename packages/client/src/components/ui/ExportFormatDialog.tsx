@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { FileJson, ImageDown, Layers, X } from "lucide-react";
 import { Modal } from "./Modal";
 import { cn } from "../../lib/utils";
@@ -13,6 +14,12 @@ interface ExportFormatDialogProps {
   compatibleDescription?: string;
   pngDescription?: string;
   showPngOption?: boolean;
+  /**
+   * Optional warning rendered under the description — used where an export
+   * loses something the user should know about before choosing a format.
+   * Optional so existing callers are unaffected.
+   */
+  notice?: ReactNode;
   onClose: () => void;
   onSelect: (format: ExportFormatChoice) => void;
 }
@@ -25,6 +32,7 @@ export function ExportFormatDialog({
   compatibleDescription = "Uses folderless, platform-friendly JSON where possible for tools like SillyTavern and Chub.",
   pngDescription = "Chara Card V2 PNG with the avatar baked in — works in SillyTavern, Chub, and Risu.",
   showPngOption = false,
+  notice,
   onClose,
   onSelect,
 }: ExportFormatDialogProps) {
@@ -47,6 +55,11 @@ export function ExportFormatDialog({
     <Modal open={open} onClose={onClose} title={title} width="max-w-lg">
       <div className="space-y-4">
         <p className="text-xs leading-relaxed text-[var(--muted-foreground)]">{description}</p>
+        {notice && (
+          <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-[0.6875rem] leading-relaxed text-amber-500">
+            {notice}
+          </p>
+        )}
         <div className={cn("grid gap-2", gridColumns)}>
           {options.map((option) => {
             const Icon = option.icon;

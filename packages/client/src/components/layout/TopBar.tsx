@@ -7,6 +7,7 @@ import {
   Settings,
   Link,
   BookOpen,
+  Clapperboard,
   Users,
   Sparkles,
   FileText,
@@ -30,7 +31,7 @@ import {
   PersonalExtensionTopbarButtons,
 } from "./PersonalExtensionContributionsMenu";
 
-type RightPanelButtonPanel = "lorebooks" | "presets" | "connections" | "agents" | "personas";
+type RightPanelButtonPanel = "lorebooks" | "scenarios" | "presets" | "connections" | "agents" | "personas";
 
 type RightPanelButtonConfig = {
   panel: RightPanelButtonPanel;
@@ -52,6 +53,12 @@ const RIGHT_PANEL_BUTTONS: readonly RightPanelButtonConfig[] = [
     icon: BookOpen,
     label: "Lorebooks",
     gradientClass: "mari-panel-gradient--lorebooks",
+  },
+  {
+    panel: "scenarios" as const,
+    icon: Clapperboard,
+    label: "Scenarios",
+    gradientClass: "mari-panel-gradient--scenarios",
   },
   {
     panel: "presets" as const,
@@ -103,6 +110,7 @@ export function TopBar() {
   const openNoodle = useUIStore((s) => s.openNoodle);
   const characterDetailId = useUIStore((s) => s.characterDetailId);
   const lorebookDetailId = useUIStore((s) => s.lorebookDetailId);
+  const scenarioDetailId = useUIStore((s) => s.scenarioDetailId);
   const presetDetailId = useUIStore((s) => s.presetDetailId);
   const connectionDetailId = useUIStore((s) => s.connectionDetailId);
   const agentDetailId = useUIStore((s) => s.agentDetailId);
@@ -136,6 +144,7 @@ export function TopBar() {
     (characterLibraryOpen && cardLibraryKind === "characters");
   const panelContextActive: Record<RightPanelButtonPanel, boolean> = {
     lorebooks: (rightPanelOpen && rightPanel === "lorebooks") || Boolean(lorebookDetailId),
+    scenarios: (rightPanelOpen && rightPanel === "scenarios") || Boolean(scenarioDetailId),
     presets:
       (rightPanelOpen && rightPanel === "presets") ||
       Boolean(presetDetailId) ||
@@ -152,6 +161,7 @@ export function TopBar() {
     !activeChatId &&
     !characterDetailId &&
     !lorebookDetailId &&
+    !scenarioDetailId &&
     !presetDetailId &&
     !connectionDetailId &&
     !agentDetailId &&

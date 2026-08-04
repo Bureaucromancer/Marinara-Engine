@@ -41,7 +41,7 @@ function readLegacyFolders(): LegacyLibraryFolder[] {
     return parsed.flatMap((folder): LegacyLibraryFolder[] => {
       if (!folder || typeof folder !== "object" || !("scope" in folder)) return [];
       const { scope } = folder;
-      if (scope !== "lorebooks" && scope !== "presets" && scope !== "agents") return [];
+      if (scope !== "lorebooks" && scope !== "scenarios" && scope !== "presets" && scope !== "agents") return [];
       const result = migrateLibraryFolderSchema.safeParse(folder);
       return result.success ? [{ ...result.data, scope }] : [];
     });

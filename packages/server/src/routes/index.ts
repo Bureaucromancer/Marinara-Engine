@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { chatsRoutes } from "./chats.routes.js";
 import { charactersRoutes } from "./characters.routes.js";
 import { lorebooksRoutes } from "./lorebooks.routes.js";
+import { scenariosRoutes } from "./scenarios.routes.js";
 import { promptsRoutes } from "./prompts.routes.js";
 import { connectionsRoutes } from "./connections.routes.js";
 import { agentsRoutes } from "./agents.routes.js";
@@ -66,6 +67,7 @@ export async function registerRoutes(app: FastifyInstance) {
   await app.register(chatPresetsRoutes, { prefix: "/api/chat-presets" });
   await app.register(charactersRoutes, { prefix: "/api/characters" });
   await app.register(lorebooksRoutes, { prefix: "/api/lorebooks" });
+  await app.register(scenariosRoutes, { prefix: "/api/scenarios" });
   await app.register(promptsRoutes, { prefix: "/api/prompts" });
   await app.register(connectionsRoutes, { prefix: "/api/connections" });
   await app.register(connectionFoldersRoutes, { prefix: "/api/connection-folders" });

@@ -74,6 +74,9 @@ const AgentCatalogView = lazy(() =>
 const LorebookEditor = lazy(() =>
   import("../lorebooks/LorebookEditor").then((module) => ({ default: module.LorebookEditor })),
 );
+const ScenarioEditor = lazy(() =>
+  import("../scenarios/ScenarioEditor").then((module) => ({ default: module.ScenarioEditor })),
+);
 const PresetEditor = lazy(() => import("../presets/PresetEditor").then((module) => ({ default: module.PresetEditor })));
 const ConnectionEditor = lazy(() =>
   import("../connections/ConnectionEditor").then((module) => ({ default: module.ConnectionEditor })),
@@ -531,6 +534,7 @@ export function AppShell() {
   const cardLibraryKind = useUIStore((s) => s.cardLibraryKind);
   const agentCatalogOpen = useUIStore((s) => s.agentCatalogOpen);
   const lorebookDetailId = useUIStore((s) => s.lorebookDetailId);
+  const scenarioDetailId = useUIStore((s) => s.scenarioDetailId);
   const presetDetailId = useUIStore((s) => s.presetDetailId);
   const connectionDetailId = useUIStore((s) => s.connectionDetailId);
   const agentDetailId = useUIStore((s) => s.agentDetailId);
@@ -784,6 +788,8 @@ export function AppShell() {
     <CharacterLibraryView key={cardLibraryKind} />
   ) : agentCatalogOpen ? (
     <AgentCatalogView />
+  ) : scenarioDetailId ? (
+    <ScenarioEditor />
   ) : lorebookDetailId ? (
     <LorebookEditor />
   ) : null;

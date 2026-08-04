@@ -869,6 +869,12 @@
   --mari-panel-gradient-text: #fff7ed;
 }
 
+.mari-panel-gradient--scenarios {
+  --mari-panel-gradient-start: #818cf8;
+  --mari-panel-gradient-end: #6366f1;
+  --mari-panel-gradient-text: #eef2ff;
+}
+
 .mari-panel-gradient--presets {
   --mari-panel-gradient-start: #c084fc;
   --mari-panel-gradient-end: #8b5cf6;

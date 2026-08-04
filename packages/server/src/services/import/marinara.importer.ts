@@ -2,6 +2,7 @@
 // Import: Marinara Engine native format (.marinara.json)
 // ──────────────────────────────────────────────
 import type { DB } from "../../db/connection.js";
+import { logger } from "../../lib/logger.js";
 import {
   canReparentFolder,
   getFolderImportEntries,
@@ -9,6 +10,8 @@ import {
   isJsonRecord,
   characterDataSchema,
   lorebookFilterModeSchema,
+  createScenarioSchema,
+  stripDerivedScenarioMetadata,
 } from "@marinara-engine/shared";
 import type {
   CharacterData,
@@ -21,6 +24,8 @@ import { createCharactersStorage } from "../storage/characters.storage.js";
 import { createCharacterGalleryStorage } from "../storage/character-gallery.storage.js";
 import { createLorebooksStorage } from "../storage/lorebooks.storage.js";
 import { createPromptsStorage } from "../storage/prompts.storage.js";
+import { createScenariosStorage } from "../storage/scenarios.storage.js";
+import { resolveScenarioLinks, type DroppedScenarioLink } from "./scenario-links.js";
 import { normalizeTimestampOverrides, type TimestampOverrides } from "./import-timestamps.js";
 import { resolveLorebookEntryRole } from "./lorebook-role.js";
 import { access, mkdir, writeFile } from "fs/promises";
@@ -270,7 +275,19 @@ function readFilterMode(value: unknown): LorebookFilterMode {
 export async function importMarinara(
   envelope: ExportEnvelope,
   db: DB,
-): Promise<{ success: boolean; type: ExportType; id?: string; name?: string; error?: string }> {
+): Promise<{
+  success: boolean;
+  type: ExportType;
+  id?: string;
+  name?: string;
+  error?: string;
+  /**
+   * Links that could not be resolved against the local library and were
+   * dropped. Only scenarios produce these today. Present so callers can report
+   * a partial result; an unresolvable link is never itself a failure.
+   */
+  droppedLinks?: DroppedScenarioLink[];
+}> {
   const normalizedEnvelope = unwrapFolderManifestEnvelope(envelope) ?? envelope;
   if (
     !normalizedEnvelope ||
@@ -288,6 +305,8 @@ export async function importMarinara(
       return importPersona(normalizedEnvelope.data, db);
     case "marinara_lorebook":
       return importLorebook(normalizedEnvelope.data, db);
+    case "marinara_scenario":
+      return importScenario(normalizedEnvelope.data, db);
     case "marinara_preset":
       return importPreset(normalizedEnvelope.data, db);
     default:
@@ -297,6 +316,97 @@ export async function importMarinara(
         error: `Unknown export type: ${normalizedEnvelope.type}`,
       };
   }
+}
+
+/**
+ * Import a native scenario payload.
+ *
+ * Three things worth knowing:
+ *  - `formatVersion` is a wire-only field. It is stripped here and never
+ *    reaches storage, which has no column for it.
+ *  - `generated` (AI provenance) passes through verbatim. It may have been
+ *    written on someone else's install; silently normalising or dropping it
+ *    would destroy attribution the author may care about.
+ *  - Links to lorebooks and characters are resolved best-effort against the
+ *    local library and dropped when they cannot be. An unresolvable link never
+ *    fails the import.
+ */
+async function importScenario(data: unknown, db: DB) {
+  if (!isJsonRecord(data) || !isJsonRecord(data.scenario)) {
+    return { success: false, type: "marinara_scenario" as const, error: "Invalid scenario data" };
+  }
+
+  // Wire-only; storage has no column for it.
+  const { formatVersion: _formatVersion, id: _id, ...scenarioRecord } = data.scenario as Record<string, unknown>;
+
+  const npcs = Array.isArray(scenarioRecord.npcs) ? scenarioRecord.npcs.filter(isJsonRecord) : [];
+  const protagonist = isJsonRecord(scenarioRecord.protagonist) ? scenarioRecord.protagonist : null;
+  const exportedLorebookIds = Array.isArray(scenarioRecord.lorebookIds)
+    ? scenarioRecord.lorebookIds.filter((value): value is string => typeof value === "string")
+    : [];
+  const exportedCharacterIds = [
+    ...(typeof protagonist?.characterId === "string" ? [protagonist.characterId] : []),
+    ...npcs
+      .map((npc) => npc.characterId)
+      .filter((value): value is string => typeof value === "string" && value.length > 0),
+  ];
+
+  const characterNames: Record<string, string> = {};
+  if (typeof protagonist?.characterId === "string" && typeof protagonist.name === "string") {
+    characterNames[protagonist.characterId] = protagonist.name;
+  }
+  for (const npc of npcs) {
+    if (typeof npc.characterId === "string" && typeof npc.name === "string") {
+      characterNames[npc.characterId] = npc.name;
+    }
+  }
+
+  const links = await resolveScenarioLinks(db, {
+    lorebookIds: exportedLorebookIds,
+    characterIds: exportedCharacterIds,
+    characterNames,
+  });
+
+  const remapCharacterId = (value: unknown) =>
+    typeof value === "string" ? (links.characterIds.get(value) ?? null) : null;
+
+  const parsed = createScenarioSchema.safeParse({
+    ...scenarioRecord,
+    // Import provenance always wins over whatever the file claims.
+    source: "import",
+    lorebookIds: exportedLorebookIds
+      .map((id) => links.lorebookIds.get(id))
+      .filter((id): id is string => typeof id === "string"),
+    protagonist: protagonist ? { ...protagonist, characterId: remapCharacterId(protagonist.characterId) } : null,
+    npcs: npcs.map((npc) => ({ ...npc, characterId: remapCharacterId(npc.characterId) })),
+    metadata: stripDerivedScenarioMetadata(scenarioRecord.metadata),
+  });
+
+  if (!parsed.success) {
+    return {
+      success: false,
+      type: "marinara_scenario" as const,
+      error: parsed.error.issues[0]?.message ?? "Invalid scenario data",
+    };
+  }
+
+  const storage = createScenariosStorage(db);
+  const created = await storage.create(parsed.data, readTimestampOverrides(scenarioRecord));
+  if (!created) {
+    return { success: false, type: "marinara_scenario" as const, error: "Failed to create scenario" };
+  }
+
+  if (links.dropped.length > 0) {
+    logger.warn("Dropped %d unresolvable scenario link(s) importing %s", links.dropped.length, created.name);
+  }
+
+  return {
+    success: true,
+    type: "marinara_scenario" as const,
+    id: created.id,
+    name: created.name,
+    ...(links.dropped.length > 0 ? { droppedLinks: links.dropped } : {}),
+  };
 }
 
 function unwrapFolderManifestEnvelope(value: unknown): ExportEnvelope | null {

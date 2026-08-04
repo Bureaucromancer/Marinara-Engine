@@ -25,6 +25,7 @@ export type Panel =
   | "chat"
   | "characters"
   | "lorebooks"
+  | "scenarios"
   | "presets"
   | "connections"
   | "agents"
@@ -50,6 +51,8 @@ export const LOREBOOK_PANEL_CATEGORY_OPTIONS = [
 export type LorebookPanelCategory = (typeof LOREBOOK_PANEL_CATEGORY_OPTIONS)[number];
 export const LOREBOOK_PANEL_SORT_OPTIONS = ["name-asc", "name-desc", "newest", "oldest", "tokens"] as const;
 export type LorebookPanelSort = (typeof LOREBOOK_PANEL_SORT_OPTIONS)[number];
+export const SCENARIO_PANEL_SORT_OPTIONS = ["name-asc", "name-desc", "newest", "oldest", "favorites"] as const;
+export type ScenarioPanelSort = (typeof SCENARIO_PANEL_SORT_OPTIONS)[number];
 export type ResourcePanelSort = BasicPanelSort;
 export const CONNECTION_PANEL_SORT_OPTIONS = [...BASIC_PANEL_SORT_OPTIONS, "custom"] as const;
 export type ConnectionPanelSort = (typeof CONNECTION_PANEL_SORT_OPTIONS)[number];
@@ -292,6 +295,10 @@ function normalizeLorebookPanelCategory(value: unknown): LorebookPanelCategory {
 
 function normalizeLorebookPanelSort(value: unknown): LorebookPanelSort {
   return LOREBOOK_PANEL_SORT_OPTIONS.includes(value as LorebookPanelSort) ? (value as LorebookPanelSort) : "name-asc";
+}
+
+function normalizeScenarioPanelSort(value: unknown): ScenarioPanelSort {
+  return SCENARIO_PANEL_SORT_OPTIONS.includes(value as ScenarioPanelSort) ? (value as ScenarioPanelSort) : "name-asc";
 }
 
 function normalizePanelText(value: unknown) {
@@ -545,6 +552,8 @@ interface UIState {
   characterDetailId: string | null;
   /** When set, the main area shows the full-page lorebook editor instead of chat */
   lorebookDetailId: string | null;
+  /** When set, the main area shows the full-page scenario editor instead of chat */
+  scenarioDetailId: string | null;
   /** When set, the main area shows the full-page preset editor instead of chat */
   presetDetailId: string | null;
   /** When set, the main area shows the full-page connection editor instead of chat */
@@ -621,6 +630,16 @@ interface UIState {
   lorebookPanelActiveTag: string | null;
   /** Whether the compact Lorebooks panel tag/category shelf is expanded */
   lorebookPanelTagsExpanded: boolean;
+  /** Search text for the compact Scenarios panel */
+  scenarioPanelSearch: string;
+  /** Sort order for the compact Scenarios panel */
+  scenarioPanelSort: ScenarioPanelSort;
+  /** Selected tag filter for the compact Scenarios panel */
+  scenarioPanelActiveTag: string | null;
+  /** Whether the compact Scenarios panel tag shelf is expanded */
+  scenarioPanelTagsExpanded: boolean;
+  /** Favourite filter for the compact Scenarios panel */
+  scenarioPanelFavoriteFilter: CharacterPanelFavoriteFilter;
   /** Sort order for imported characters in the Browser panel */
   botBrowserPanelSort: ResourcePanelSort;
   /** Sort order for the compact Presets panel */
@@ -927,6 +946,11 @@ interface UIState {
   setLorebookPanelSort: (sort: LorebookPanelSort) => void;
   setLorebookPanelActiveTag: (tag: string | null) => void;
   setLorebookPanelTagsExpanded: (expanded: boolean) => void;
+  setScenarioPanelSearch: (search: string) => void;
+  setScenarioPanelSort: (sort: ScenarioPanelSort) => void;
+  setScenarioPanelActiveTag: (tag: string | null) => void;
+  setScenarioPanelTagsExpanded: (expanded: boolean) => void;
+  setScenarioPanelFavoriteFilter: (filter: CharacterPanelFavoriteFilter) => void;
   setBotBrowserPanelSort: (sort: ResourcePanelSort) => void;
   setPresetPanelSort: (sort: ResourcePanelSort) => void;
   setConnectionPanelSort: (sort: ConnectionPanelSort) => void;
@@ -935,6 +959,8 @@ interface UIState {
   closeCharacterDetail: () => void;
   openLorebookDetail: (id: string, options?: { initialTab?: string }) => void;
   closeLorebookDetail: () => void;
+  openScenarioDetail: (id: string) => void;
+  closeScenarioDetail: () => void;
   openPresetDetail: (id: string) => void;
   closePresetDetail: () => void;
   openConnectionDetail: (id: string) => void;
@@ -1129,6 +1155,7 @@ function normalizePersistedMainSurface(persisted: Record<string, unknown>) {
     "presetDetailId",
     "characterDetailId",
     "lorebookDetailId",
+    "scenarioDetailId",
     "characterLibraryOpen",
     "agentCatalogOpen",
     "botBrowserOpen",
@@ -1329,6 +1356,7 @@ export const useUIStore = create<UIState>()(
       chatBackgroundBlur: 0,
       characterDetailId: null,
       lorebookDetailId: null,
+      scenarioDetailId: null,
       presetDetailId: null,
       connectionDetailId: null,
       agentDetailId: null,
@@ -1367,6 +1395,11 @@ export const useUIStore = create<UIState>()(
       lorebookPanelSort: "name-asc" as LorebookPanelSort,
       lorebookPanelActiveTag: null,
       lorebookPanelTagsExpanded: false,
+      scenarioPanelSearch: "",
+      scenarioPanelSort: "name-asc" as ScenarioPanelSort,
+      scenarioPanelActiveTag: null,
+      scenarioPanelTagsExpanded: false,
+      scenarioPanelFavoriteFilter: "all" as CharacterPanelFavoriteFilter,
       botBrowserPanelSort: "name-asc" as ResourcePanelSort,
       presetPanelSort: "name-asc" as ResourcePanelSort,
       connectionPanelSort: "name-asc" as ConnectionPanelSort,
@@ -1642,6 +1675,12 @@ export const useUIStore = create<UIState>()(
       setLorebookPanelSort: (sort) => set({ lorebookPanelSort: normalizeLorebookPanelSort(sort) }),
       setLorebookPanelActiveTag: (tag) => set({ lorebookPanelActiveTag: tag ? tag.trim() || null : null }),
       setLorebookPanelTagsExpanded: (expanded) => set({ lorebookPanelTagsExpanded: expanded }),
+      setScenarioPanelSearch: (search) => set({ scenarioPanelSearch: normalizePanelText(search) }),
+      setScenarioPanelSort: (sort) => set({ scenarioPanelSort: normalizeScenarioPanelSort(sort) }),
+      setScenarioPanelActiveTag: (tag) => set({ scenarioPanelActiveTag: tag ? tag.trim() || null : null }),
+      setScenarioPanelTagsExpanded: (expanded) => set({ scenarioPanelTagsExpanded: expanded }),
+      setScenarioPanelFavoriteFilter: (filter) =>
+        set({ scenarioPanelFavoriteFilter: normalizeCharacterPanelFavoriteFilter(filter) }),
       setBotBrowserPanelSort: (sort) => set({ botBrowserPanelSort: normalizeBasicPanelSort(sort) }),
       setPresetPanelSort: (sort) => set({ presetPanelSort: normalizeBasicPanelSort(sort) }),
       setConnectionPanelSort: (sort) => set({ connectionPanelSort: normalizeConnectionPanelSort(sort) }),
@@ -1654,6 +1693,7 @@ export const useUIStore = create<UIState>()(
             characterDetailId: id,
             characterDetailInitialTab: options?.initialTab ?? null,
             lorebookDetailId: null,
+            scenarioDetailId: null,
             presetDetailId: null,
             connectionDetailId: null,
             agentDetailId: null,
@@ -1686,6 +1726,7 @@ export const useUIStore = create<UIState>()(
           gameAssetsBrowserOpen: false,
           noodleOpen: false,
           characterDetailId: null,
+          scenarioDetailId: null,
           presetDetailId: null,
           connectionDetailId: null,
           agentDetailId: null,
@@ -1694,6 +1735,31 @@ export const useUIStore = create<UIState>()(
           regexDetailId: null,
           spatialMapDetailChatId: null,
           ...getMobileDetailReturnState(s),
+        })),
+      openScenarioDetail: (id) =>
+        set((s) => ({
+          scenarioDetailId: id,
+          characterLibraryOpen: false,
+          agentCatalogOpen: false,
+          botBrowserOpen: false,
+          gameAssetsBrowserOpen: false,
+          noodleOpen: false,
+          characterDetailId: null,
+          lorebookDetailId: null,
+          presetDetailId: null,
+          connectionDetailId: null,
+          agentDetailId: null,
+          toolDetailId: null,
+          personaDetailId: null,
+          regexDetailId: null,
+          spatialMapDetailChatId: null,
+          ...getMobileDetailReturnState(s),
+        })),
+      closeScenarioDetail: () =>
+        set((s) => ({
+          scenarioDetailId: null,
+          editorDirty: false,
+          ...restoreMobileDetailReturnPanel(s.detailReturnRightPanel),
         })),
       closeLorebookDetail: () =>
         set((s) => ({
@@ -1711,6 +1777,7 @@ export const useUIStore = create<UIState>()(
           noodleOpen: false,
           characterDetailId: null,
           lorebookDetailId: null,
+          scenarioDetailId: null,
           connectionDetailId: null,
           agentDetailId: null,
           toolDetailId: null,
@@ -1735,6 +1802,7 @@ export const useUIStore = create<UIState>()(
           noodleOpen: false,
           characterDetailId: null,
           lorebookDetailId: null,
+          scenarioDetailId: null,
           presetDetailId: null,
           agentDetailId: null,
           toolDetailId: null,
@@ -1759,6 +1827,7 @@ export const useUIStore = create<UIState>()(
           noodleOpen: false,
           characterDetailId: null,
           lorebookDetailId: null,
+          scenarioDetailId: null,
           presetDetailId: null,
           connectionDetailId: null,
           toolDetailId: null,
@@ -1784,6 +1853,7 @@ export const useUIStore = create<UIState>()(
           noodleOpen: false,
           characterDetailId: null,
           lorebookDetailId: null,
+          scenarioDetailId: null,
           presetDetailId: null,
           connectionDetailId: null,
           personaDetailId: null,
@@ -1812,6 +1882,7 @@ export const useUIStore = create<UIState>()(
             noodleOpen: false,
             characterDetailId: null,
             lorebookDetailId: null,
+            scenarioDetailId: null,
             presetDetailId: null,
             connectionDetailId: null,
             agentDetailId: null,
@@ -1840,6 +1911,7 @@ export const useUIStore = create<UIState>()(
           noodleOpen: false,
           characterDetailId: null,
           lorebookDetailId: null,
+          scenarioDetailId: null,
           presetDetailId: null,
           connectionDetailId: null,
           agentDetailId: null,
@@ -1873,6 +1945,7 @@ export const useUIStore = create<UIState>()(
           spatialMapDetailChatId: chatId,
           characterDetailId: null,
           lorebookDetailId: null,
+          scenarioDetailId: null,
           presetDetailId: null,
           connectionDetailId: null,
           agentDetailId: null,
@@ -1892,6 +1965,7 @@ export const useUIStore = create<UIState>()(
           spatialMapDetailChatId: review.chatId,
           characterDetailId: null,
           lorebookDetailId: null,
+          scenarioDetailId: null,
           presetDetailId: null,
           connectionDetailId: null,
           agentDetailId: null,
@@ -1920,6 +1994,7 @@ export const useUIStore = create<UIState>()(
           agentCatalogOpen: false,
           characterDetailId: null,
           lorebookDetailId: null,
+          scenarioDetailId: null,
           presetDetailId: null,
           connectionDetailId: null,
           agentDetailId: null,
@@ -1942,6 +2017,7 @@ export const useUIStore = create<UIState>()(
           agentCatalogOpen: false,
           characterDetailId: null,
           lorebookDetailId: null,
+          scenarioDetailId: null,
           presetDetailId: null,
           connectionDetailId: null,
           agentDetailId: null,
@@ -1964,6 +2040,7 @@ export const useUIStore = create<UIState>()(
           characterLibraryOpen: false,
           characterDetailId: null,
           lorebookDetailId: null,
+          scenarioDetailId: null,
           presetDetailId: null,
           connectionDetailId: null,
           agentDetailId: null,
@@ -1993,6 +2070,7 @@ export const useUIStore = create<UIState>()(
           personaDetailId: null,
           characterDetailId: null,
           lorebookDetailId: null,
+          scenarioDetailId: null,
           presetDetailId: null,
           connectionDetailId: null,
           agentDetailId: null,
@@ -2013,6 +2091,7 @@ export const useUIStore = create<UIState>()(
           personaDetailId: null,
           characterDetailId: null,
           lorebookDetailId: null,
+          scenarioDetailId: null,
           presetDetailId: null,
           connectionDetailId: null,
           agentDetailId: null,
@@ -2033,6 +2112,7 @@ export const useUIStore = create<UIState>()(
           personaDetailId: null,
           characterDetailId: null,
           lorebookDetailId: null,
+          scenarioDetailId: null,
           presetDetailId: null,
           connectionDetailId: null,
           agentDetailId: null,
@@ -2049,6 +2129,7 @@ export const useUIStore = create<UIState>()(
         return !!(
           s.characterDetailId ||
           s.lorebookDetailId ||
+          s.scenarioDetailId ||
           s.presetDetailId ||
           s.connectionDetailId ||
           s.agentDetailId ||
@@ -2067,6 +2148,7 @@ export const useUIStore = create<UIState>()(
         set({
           characterDetailId: null,
           lorebookDetailId: null,
+          scenarioDetailId: null,
           presetDetailId: null,
           connectionDetailId: null,
           agentDetailId: null,
@@ -2089,6 +2171,7 @@ export const useUIStore = create<UIState>()(
           rightPanelOpen: window.innerWidth < 768 ? false : state.rightPanelOpen,
           characterDetailId: null,
           lorebookDetailId: null,
+          scenarioDetailId: null,
           presetDetailId: null,
           connectionDetailId: null,
           agentDetailId: null,
@@ -2892,6 +2975,14 @@ export const useUIStore = create<UIState>()(
             ? persisted.lorebookPanelActiveTag.trim()
             : null;
         persisted.lorebookPanelTagsExpanded = persisted.lorebookPanelTagsExpanded === true;
+        persisted.scenarioPanelSearch = normalizePanelText(persisted.scenarioPanelSearch);
+        persisted.scenarioPanelSort = normalizeScenarioPanelSort(persisted.scenarioPanelSort);
+        persisted.scenarioPanelActiveTag =
+          typeof persisted.scenarioPanelActiveTag === "string" ? persisted.scenarioPanelActiveTag : null;
+        persisted.scenarioPanelTagsExpanded = persisted.scenarioPanelTagsExpanded === true;
+        persisted.scenarioPanelFavoriteFilter = normalizeCharacterPanelFavoriteFilter(
+          persisted.scenarioPanelFavoriteFilter,
+        );
         persisted.botBrowserPanelSort = normalizeBasicPanelSort(persisted.botBrowserPanelSort);
         persisted.presetPanelSort = normalizeBasicPanelSort(persisted.presetPanelSort);
         persisted.connectionPanelSort = normalizeConnectionPanelSort(persisted.connectionPanelSort);
@@ -3029,6 +3120,7 @@ export const useUIStore = create<UIState>()(
         settingsTab: state.settingsTab,
         characterDetailId: state.characterDetailId,
         lorebookDetailId: state.lorebookDetailId,
+        scenarioDetailId: state.scenarioDetailId,
         presetDetailId: state.presetDetailId,
         connectionDetailId: state.connectionDetailId,
         agentDetailId: state.agentDetailId,
@@ -3055,6 +3147,11 @@ export const useUIStore = create<UIState>()(
         lorebookPanelSort: state.lorebookPanelSort,
         lorebookPanelActiveTag: state.lorebookPanelActiveTag,
         lorebookPanelTagsExpanded: state.lorebookPanelTagsExpanded,
+        scenarioPanelSearch: state.scenarioPanelSearch,
+        scenarioPanelSort: state.scenarioPanelSort,
+        scenarioPanelActiveTag: state.scenarioPanelActiveTag,
+        scenarioPanelTagsExpanded: state.scenarioPanelTagsExpanded,
+        scenarioPanelFavoriteFilter: state.scenarioPanelFavoriteFilter,
         botBrowserPanelSort: state.botBrowserPanelSort,
         presetPanelSort: state.presetPanelSort,
         connectionPanelSort: state.connectionPanelSort,
