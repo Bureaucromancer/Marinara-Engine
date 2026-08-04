@@ -437,6 +437,8 @@
   "onboarding.connections.body": "Connections are the first thing to set up before chatting. Add your provider, model, endpoint, and API key here, so you can chat with your AI.",
   "onboarding.conversation.body": "Conversation mode is like chatting via DMs or groups on Discord. Use it for general texting with your characters. Mind that they have their lives, can trade selfies with you and even message you on their own!",
   "onboarding.conversation.title": "Conversation Mode",
+  "onboarding.docsLanguage.body": "The highlighted Documentation button on Home opens Marinara's built-in guides. Pick a language below, and I'll use it whenever you open them. You can change this anytime in Settings under General. Guides that are not translated yet will show in English.",
+  "onboarding.docsLanguage.title": "One Last Thing: Guide Language",
   "onboarding.finish.body": "I'm available from the Home page whenever you need help, and my starter chips can guide you through common first steps without making you type everything. For your first real step, set up a Connection. After that, try creating a new chat. Don't worry, I will be there to guide you. Thank you for trying Marinara Engine. Have fun, and please report bugs or rough edges through our Discord or GitHub so we can keep improving it.",
   "onboarding.finish.title": "You're All Set!",
   "onboarding.game.body": "Game mode turns the chat into a cinematic RPG-style adventure with an AI Game Master. Sit back and enjoy the game, having party members, goals, maps, dice rolls, session history, journals, combat, and custom HUD widgets.",
