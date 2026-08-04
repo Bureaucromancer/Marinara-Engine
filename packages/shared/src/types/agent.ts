@@ -677,7 +677,11 @@ export function isExternallyImportedAgent(type: unknown, settings: unknown): boo
   const source = parsed[CUSTOM_AGENT_IMPORT_SOURCE_SETTING];
   if (source === "file" || source === "folder" || source === "repository") return true;
   if (parsed.customAgentRepositorySource && typeof parsed.customAgentRepositorySource === "object") return true;
-  return typeof type === "string" && (type.startsWith("custom-import-") || type.startsWith("repo-"));
+  // Repository-backed Agents predate explicit provenance and retain a stable
+  // repo-* identity. File/folder imports always persist provenance now, so a
+  // locally authored Agent whose slug happens to begin with "import" must not
+  // be disabled as an external import.
+  return typeof type === "string" && type.startsWith("repo-");
 }
 
 export function getDefaultBuiltInAgentSettings(agentType: string): Record<string, unknown> {

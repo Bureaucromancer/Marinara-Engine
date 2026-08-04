@@ -118,7 +118,7 @@ export interface SupportedMacroDefinition {
 export const CHARACTER_REFERENCE_ID_PATTERN = /\{\{([A-Za-z0-9_-]{21})\}\}/g;
 
 const CHARACTER_MACRO_PATTERN =
-  /\{\{(?:char|charName|charNamePhonetic|charPhonetic|description|personality|backstory|appearance|scenario|example|charSysInfo|charPostHistory)\}\}|\{\{\s*#if\s+[^}]*\b(?:char|charName|charNamePhonetic|charPhonetic|character|speaker|description|personality|backstory|appearance|scenario|example|charSysInfo|charPostHistory)\b/i;
+  /\{\{(?:char|charName|charNamePhonetic|charPhonetic|description|personality|backstory|appearance|scenario|example|charSysInfo|charPostHistory|convo_display|char_about|convo_behavior)\}\}|\{\{\s*#if\s+[^}]*\b(?:char|charName|charNamePhonetic|charPhonetic|character|speaker|description|personality|backstory|appearance|scenario|example|charSysInfo|charPostHistory|convo_display|char_about|convo_behavior)\b/i;
 const MAX_CHARACTER_FIELD_RESOLUTION_DEPTH = 4;
 const MAX_DICE_COUNT = 1000;
 const MAX_DICE_SIDES = 1_000_000;
@@ -155,10 +155,16 @@ const DEFERRED_CHARACTER_MACRO_TOKENS = {
   example: `${DEFERRED_CHARACTER_MACRO_TOKEN_PREFIX}EXAMPLE\x1f`,
   systemPrompt: `${DEFERRED_CHARACTER_MACRO_TOKEN_PREFIX}SYSTEM_PROMPT\x1f`,
   postHistoryInstructions: `${DEFERRED_CHARACTER_MACRO_TOKEN_PREFIX}POST_HISTORY\x1f`,
+  convoDisplay: `${DEFERRED_CHARACTER_MACRO_TOKEN_PREFIX}CONVO_DISPLAY\x1f`,
+  charAbout: `${DEFERRED_CHARACTER_MACRO_TOKEN_PREFIX}CHAR_ABOUT\x1f`,
+  convoBehavior: `${DEFERRED_CHARACTER_MACRO_TOKEN_PREFIX}CONVO_BEHAVIOR\x1f`,
 } as const;
 
 export type CharacterMacroProfile = NonNullable<MacroContext["characterProfiles"]>[number];
-type CharacterFieldMacroName = Exclude<keyof typeof DEFERRED_CHARACTER_MACRO_TOKENS, "char" | "charPhonetic" | "group">;
+type CharacterFieldMacroName = Exclude<
+  keyof typeof DEFERRED_CHARACTER_MACRO_TOKENS,
+  "char" | "charPhonetic" | "group" | "convoDisplay" | "charAbout" | "convoBehavior"
+>;
 type ConditionalBlockPayload = {
   condition: string;
   truthy: string;
@@ -498,6 +504,7 @@ function macroContextForCharacterProfile(profile: CharacterMacroProfile, base?: 
     timeZone: base?.timeZone,
     agentData: base?.agentData,
     personaFields: base?.personaFields,
+    convoFields: base?.convoFields,
     characterFields: {
       phoneticName: profile.phoneticName ?? "",
       description: profile.description ?? "",
@@ -571,6 +578,15 @@ export function resolveDeferredCharacterMacros(
   result = result
     .split(DEFERRED_CHARACTER_MACRO_TOKENS.postHistoryInstructions)
     .join(resolveCharacterFieldValue(profile, "postHistoryInstructions", 0, baseContext));
+  result = result
+    .split(DEFERRED_CHARACTER_MACRO_TOKENS.convoDisplay)
+    .join(scopedContext.convoFields?.charDisplayName ?? "");
+  result = result
+    .split(DEFERRED_CHARACTER_MACRO_TOKENS.charAbout)
+    .join(scopedContext.convoFields?.charAbout ?? "");
+  result = result
+    .split(DEFERRED_CHARACTER_MACRO_TOKENS.convoBehavior)
+    .join(scopedContext.convoFields?.convoBehavior ?? "");
   return result;
 }
 
@@ -848,7 +864,7 @@ function resolveConditionalOperand(raw: string, ctx: MacroContext, options: Reso
 
 function isCharacterConditionalOperand(raw: string): boolean {
   const normalized = normalizeConditionKey(raw);
-  return /^(char|charname|charphonetic|charnamephonetic|character|characterphonetic|speaker|speakerphonetic|group|description|personality|backstory|appearance|scenario|example|charsysinfo|charposthistory)$/.test(
+  return /^(char|charname|charphonetic|charnamephonetic|character|characterphonetic|speaker|speakerphonetic|group|description|personality|backstory|appearance|scenario|example|charsysinfo|charposthistory|convo_display|char_about|convo_behavior)$/.test(
     normalized,
   );
 }
@@ -1681,8 +1697,12 @@ export function resolveMacros(template: string, ctx: MacroContext, options: Reso
     if (field === "char") return ctx.char;
     if (field === "charPhonetic") return ctx.charPhonetic || ctx.characterFields?.phoneticName || ctx.char;
     if (field === "group") return resolveGroupCharacters(ctx);
-    return resolveNestedFieldMacros(ctx.characterFields?.[field] ?? "");
+    return resolveNestedFieldMacros(ctx.characterFields?.[field as CharacterFieldMacroName] ?? "");
   };
+  const conversationCharacterReplacement = (
+    field: "convoDisplay" | "charAbout" | "convoBehavior",
+    value: string | undefined,
+  ): string => (deferCharacterMacros === "all" ? DEFERRED_CHARACTER_MACRO_TOKENS[field] : (value ?? ""));
 
   // ── Comments — strip first so they don't interfere ──
   result = stripMacroComments(result);
@@ -1758,10 +1778,16 @@ export function resolveMacros(template: string, ctx: MacroContext, options: Reso
   result = result.replace(/\{\{charPostHistory\}\}/gi, characterReplacement("postHistoryInstructions"));
   // Conversation-mode-only macros. `convoFields` is set only by the convo prompt
   // branch, so these are "" in every other mode.
-  result = result.replace(/\{\{convo_display\}\}/gi, () => ctx.convoFields?.charDisplayName ?? "");
-  result = result.replace(/\{\{char_about\}\}/gi, () => ctx.convoFields?.charAbout ?? "");
+  result = result.replace(/\{\{convo_display\}\}/gi, () =>
+    conversationCharacterReplacement("convoDisplay", ctx.convoFields?.charDisplayName),
+  );
+  result = result.replace(/\{\{char_about\}\}/gi, () =>
+    conversationCharacterReplacement("charAbout", ctx.convoFields?.charAbout),
+  );
   result = result.replace(/\{\{persona_about\}\}/gi, () => ctx.convoFields?.personaAbout ?? "");
-  result = result.replace(/\{\{convo_behavior\}\}/gi, () => ctx.convoFields?.convoBehavior ?? "");
+  result = result.replace(/\{\{convo_behavior\}\}/gi, () =>
+    conversationCharacterReplacement("convoBehavior", ctx.convoFields?.convoBehavior),
+  );
   result = result.replace(/\{\{input\}\}/gi, ctx.lastInput ?? "");
   result = result.replace(/\{\{model\}\}/gi, ctx.model ?? "");
   result = result.replace(/\{\{chatId\}\}/gi, ctx.chatId ?? "");

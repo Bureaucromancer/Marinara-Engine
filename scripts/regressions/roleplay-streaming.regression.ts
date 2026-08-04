@@ -83,6 +83,10 @@ const chatRoleplaySurfaceSource = readFileSync(
   new URL("../../packages/client/src/components/chat/ChatRoleplaySurface.tsx", import.meta.url),
   "utf8",
 );
+const pageActivitySource = readFileSync(
+  new URL("../../packages/client/src/hooks/use-page-activity.ts", import.meta.url),
+  "utf8",
+);
 const appShellSource = readFileSync(
   new URL("../../packages/client/src/components/layout/AppShell.tsx", import.meta.url),
   "utf8",
@@ -152,6 +156,18 @@ const summaryPopoverSource = readFileSync(
   new URL("../../packages/client/src/components/chat/SummaryPopover.tsx", import.meta.url),
   "utf8",
 );
+assert.match(
+  chatRoleplaySurfaceSource,
+  /function RoleplayLiveStreamText[\s\S]*?textContent = next[\s\S]*?requestAnimationFrame\(apply\)/u,
+  "Roleplay live text should update one text node at animation-frame cadence",
+);
+assert.doesNotMatch(
+  chatRoleplaySurfaceSource,
+  /useThrottledStreamBuffer/u,
+  "Roleplay streaming should not rebuild ChatMessage from the growing buffer",
+);
+assert.doesNotMatch(pageActivitySource, /document\.hasFocus|addEventListener\(\s*["'](?:blur|focus)["']/u);
+assert.match(pageActivitySource, /document\.visibilityState === "visible"/u);
 const activeContextLinksButtonSource =
   chatRoleplaySurfaceSource.match(/function ActiveContextLinksButton[\s\S]*?\nfunction SummaryButton/u)?.[0] ?? "";
 assert.match(
