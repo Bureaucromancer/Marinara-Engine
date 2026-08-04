@@ -244,6 +244,12 @@ import {
 import { createAppSettingsStorage } from "../services/storage/app-settings.storage.js";
 import { applyStoryboardAgentSettings } from "../services/game/storyboard-agent-settings.js";
 import {
+  STORYBOARD_FALLBACK_BEAT_MAX_CHARS,
+  compactStoryboardFallbackBeat,
+  createStoryboardReviewPlanEnvelope,
+  resolveStoryboardReviewPlanEnvelope,
+} from "../services/game/storyboard-planner-fallback.js";
+import {
   selectPreviousSuccessfulStoryboard,
   selectRoleplayStoryboardEpisode,
 } from "../services/roleplay/storyboard-episode.js";
@@ -5336,7 +5342,7 @@ function fallbackStoryboardPlan(args: {
     keyframes: chunks.map((chunk, index) => {
       const firstSection = chunk.sections[0] ?? null;
       const lastSection = chunk.sections[chunk.sections.length - 1] ?? null;
-      const beat = compactStoryboardText(chunk.text, 900);
+      const beat = compactStoryboardFallbackBeat(chunk.text);
       const title = `Keyframe ${index + 1}`;
       const imagePrompt = `Manga illustration keyframe, cinematic anime panel, expressive character acting, detailed environment, dramatic lighting. ${beat}`;
       const reconciledCharacters = reconcileStoryboardCharactersForFrame({
@@ -5383,6 +5389,7 @@ function sanitizeStoryboardPlan(
     aspectRatio: GameSceneVideoAspectRatio;
     allowedCharacterNames?: string[];
     maxVisibleCharacters?: number;
+    narrationBeatMaxChars?: number;
   },
 ): PlannedStoryboard {
   const root = asStoryboardRecord(raw);
@@ -5393,7 +5400,7 @@ function sanitizeStoryboardPlan(
     .map((rawFrame, index): PlannedStoryboardKeyframe | null => {
       const frame = asStoryboardRecord(rawFrame);
       const fallbackFrame = fallback.keyframes[index] ?? fallback.keyframes[0] ?? null;
-      const narrationBeat = compactStoryboardText(frame.narrationBeat, 1200);
+      const narrationBeat = compactStoryboardText(frame.narrationBeat, args.narrationBeatMaxChars ?? 1200);
       const mangaPanelPrompt = compactStoryboardText(frame.mangaPanelPrompt, 5000);
       const imagePrompt = compactStoryboardText(frame.imagePrompt, 6500) || mangaPanelPrompt || narrationBeat;
       if (!narrationBeat && !imagePrompt) return null;
@@ -11030,7 +11037,7 @@ export async function gameRoutes(app: FastifyInstance) {
         charAvatarByName: storyboardCharacterContext.charAvatarByName,
         charDescriptionByName: storyboardCharacterContext.charDescriptionByName,
         includeReferenceImages: false,
-        includeCharacterDescriptions: true,
+        includeCharacterDescriptions: includeCharacterAppearance,
         maxReferenceImages: 0,
       });
       const storyboardAppearanceContextBlock = buildGameIllustratorAppearanceContextBlock(
@@ -11098,7 +11105,13 @@ export async function gameRoutes(app: FastifyInstance) {
       } as const;
       let usedFallbackStoryboardPlanner = false;
       if (input.plannedStoryboard !== undefined) {
-        plan = sanitizeStoryboardPlan(input.plannedStoryboard, storyboardPlanSanitizerOptions);
+        const reviewedStoryboard = resolveStoryboardReviewPlanEnvelope(input.plannedStoryboard);
+        illustratorErrorMessage = reviewedStoryboard.plannerError;
+        usedFallbackStoryboardPlanner = reviewedStoryboard.usedFallbackPlanner;
+        plan = sanitizeStoryboardPlan(reviewedStoryboard.plan, {
+          ...storyboardPlanSanitizerOptions,
+          narrationBeatMaxChars: usedFallbackStoryboardPlanner ? STORYBOARD_FALLBACK_BEAT_MAX_CHARS : undefined,
+        });
         if (debugLogsEnabled) {
           debugLog("[debug/game/storyboard-illustrator] using reviewed client storyboard plan");
         }
@@ -11145,10 +11158,11 @@ export async function gameRoutes(app: FastifyInstance) {
             throw abortReasonAsError(storyboardAbortSignal, "Game storyboard generation cancelled");
           }
           usedFallbackStoryboardPlanner = true;
-          illustratorErrorMessage =
-            err instanceof Error
-              ? `${err.message}; used fallback storyboard planner and skipped video generation.`
-              : "Used fallback storyboard planner and skipped video generation.";
+          const plannerFailureReason = compactStoryboardText(err instanceof Error ? err.message : "", 900);
+          illustratorErrorMessage = [
+            plannerFailureReason ? `Storyboard planner failed: ${plannerFailureReason}` : "Storyboard planner failed.",
+            "Marinara used narration-based fallback keyframes and skipped video generation.",
+          ].join(" ");
           logger.warn(
             err,
             "[game/storyboard] Storyboard Illustrator failed; using fallback images and skipping video generation",
@@ -11164,6 +11178,7 @@ export async function gameRoutes(app: FastifyInstance) {
           });
         }
       }
+      const includeCharacterAppearanceAtRender = includeCharacterAppearance && usedFallbackStoryboardPlanner;
 
       const imgModel = imgConn.model || "";
       const imgBaseUrl = imgConn.baseUrl || "https://image.pollinations.ai";
@@ -11217,7 +11232,7 @@ export async function gameRoutes(app: FastifyInstance) {
               prompts: plannedFrame.characterPrompts,
               characters: plannedFrame.characters,
               characterDescriptions: charDescriptionByName,
-              includeCharacterAppearance,
+              includeCharacterAppearance: includeCharacterAppearanceAtRender,
             })
           : [];
         const illustration: SceneIllustrationRequest = {
@@ -11237,7 +11252,7 @@ export async function gameRoutes(app: FastifyInstance) {
           charAvatarByName,
           charDescriptionByName,
           includeReferenceImages: useAvatarReferences,
-          includeCharacterDescriptions: includeCharacterAppearance,
+          includeCharacterDescriptions: includeCharacterAppearanceAtRender && characterPrompts.length === 0,
           maxReferenceImages: Math.max(0, storyboardReferenceImageLimit - (spatialLocationReferenceImage ? 1 : 0)),
         });
         const illustrationAssets = {
@@ -11316,7 +11331,15 @@ export async function gameRoutes(app: FastifyInstance) {
             };
           }),
         );
-        return { items, plannedStoryboard: plan };
+        return {
+          items,
+          plannedStoryboard: createStoryboardReviewPlanEnvelope({
+            plan,
+            plannerError: illustratorErrorMessage,
+            usedFallbackPlanner: usedFallbackStoryboardPlanner,
+          }),
+          plannerWarning: illustratorErrorMessage,
+        };
       }
 
       const snapshot =
