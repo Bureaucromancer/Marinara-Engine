@@ -1743,25 +1743,41 @@ export class ProfessorMariWorkspaceService {
     text: string;
     connectionId?: string | null;
     attachments?: ProfessorMariPromptAttachment[];
+    existingUserMessageId?: string;
     onEvent: PromptEventSink;
   }) {
     if (!this.enabled) throw new Error("Professor Mari workspace mode is disabled.");
     const chatStorage = createChatsStorage(this.app.db);
+    const connection = await this.resolveConnection(args.connectionId);
+    if (!connection) throw new Error("Set up a language connection before using Professor Mari workspace mode.");
+
     const attachments = normalizeProfessorMariAttachments(args.attachments);
-    const userMessage = await chatStorage.createMessage({
-      chatId: args.chatId,
-      role: "user",
-      characterId: null,
-      content: args.text,
-    });
-    if (attachments.length > 0 && userMessage) {
+    let userMessage = args.existingUserMessageId
+      ? await chatStorage.getMessage(args.existingUserMessageId)
+      : null;
+    if (args.existingUserMessageId) {
+      if (!userMessage || userMessage.chatId !== args.chatId || userMessage.role !== "user") {
+        throw new Error("Existing Professor Mari user message was not found in this chat.");
+      }
+      const chatMessages = await chatStorage.listMessages(args.chatId);
+      if (chatMessages[chatMessages.length - 1]?.id !== userMessage.id) {
+        throw new Error("Only the latest Professor Mari user message can be reused.");
+      }
+    } else {
+      userMessage = await chatStorage.createMessage({
+        chatId: args.chatId,
+        role: "user",
+        characterId: null,
+        content: args.text,
+      });
+      if (!userMessage) throw new Error("Professor Mari could not save the user message.");
+    }
+    const promptText = userMessage.content;
+    if (attachments.length > 0) {
       const extra = { attachments };
       await chatStorage.updateMessageExtra(userMessage.id, extra);
       await chatStorage.updateSwipeExtra(userMessage.id, 0, extra);
     }
-
-    const connection = await this.resolveConnection(args.connectionId);
-    if (!connection) throw new Error("Set up a language connection before using Professor Mari workspace mode.");
 
     const controller = new AbortController();
     this.abortController?.abort();
@@ -1793,7 +1809,7 @@ export class ProfessorMariWorkspaceService {
       if (thinkingText.trim()) extraUpdate.thinking = thinkingText;
       if (storedTrace.length > 0) extraUpdate.mariWorkspaceTimeline = storedTrace;
       const continuity = buildWorkspaceContinuitySnapshot({
-        userText: args.text,
+        userText: promptText,
         assistantText: persistedText,
         commandResults: commandResultsForContinuity,
       });

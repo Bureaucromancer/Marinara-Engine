@@ -2278,6 +2278,7 @@ export function HomeProfessorMariChat({
   const hasLoadedRef = useRef(false);
   const notifiedApprovalIdsRef = useRef<Set<string>>(new Set());
   const activeChatIdRef = useRef<string | null>(null);
+  const messagesRef = useRef<Message[]>(messages);
   const messageLoadAbortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const transcriptScrollFrameRef = useRef<number | null>(null);
@@ -2299,6 +2300,11 @@ export function HomeProfessorMariChat({
   const pendingConnectionPersistRef = useRef<string | null>(null);
   const connectionPersistInFlightRef = useRef(false);
   const attachmentRemovalInFlightRef = useRef<Set<string>>(new Set());
+  const regenerationInFlightRef = useRef(false);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const setActiveChatId = useCallback((id: string) => {
     activeChatIdRef.current = id;
@@ -3339,7 +3345,12 @@ export function HomeProfessorMariChat({
   }, [localizeUi]);
 
   const sendWorkspaceMessage = useCallback(
-    async (chat: Chat, text: string, attachments: ProfessorMariAttachment[] = []) => {
+    async (
+      chat: Chat,
+      text: string,
+      attachments: ProfessorMariAttachment[] = [],
+      existingUserMessageId?: string,
+    ) => {
       const controller = new AbortController();
       workspaceAbortRef.current = controller;
       setWorkspaceActive(true);
@@ -3354,7 +3365,13 @@ export function HomeProfessorMariChat({
       try {
         for await (const event of api.streamEvents(
           "/professor-mari/workspace/prompt",
-          { chatId: chat.id, message: text, connectionId: effectiveConnectionId, attachments },
+          {
+            chatId: chat.id,
+            message: text,
+            connectionId: effectiveConnectionId,
+            attachments,
+            existingUserMessageId,
+          },
           controller.signal,
           // Backgrounding leaves the socket half-open; detach on resume. The
           // server keeps the run going and persists it, so we reload the result
@@ -3489,27 +3506,46 @@ export function HomeProfessorMariChat({
   }, [chatId, loadMessages, localizeUi]);
 
   const handleRegenerateMessage = useCallback(async (messageId: string) => {
-    if (isBusy || !chatId) return;
-    const index = messages.findIndex((message) => message.id === messageId);
-    if (index <= 0 || index !== messages.length - 1 || messages[index]?.role !== "assistant") return;
-    const userMessage = messages[index - 1];
-    if (userMessage.role !== "user") return;
+    if (isBusy || regenerationInFlightRef.current || !chatId) return;
+    if (!effectiveConnectionId) {
+      toast.error(PROFESSOR_MARI_NO_CONNECTION_TOAST);
+      setConnectionMenuOpen(true);
+      useUIStore.getState().openRightPanel("connections");
+      return;
+    }
+    const initialMessages = messagesRef.current;
+    const initialIndex = initialMessages.findIndex((message) => message.id === messageId);
+    if (
+      initialIndex <= 0 ||
+      initialIndex !== initialMessages.length - 1 ||
+      initialMessages[initialIndex]?.role !== "assistant" ||
+      initialMessages[initialIndex - 1]?.role !== "user"
+    ) return;
 
-    const confirmed = await showConfirmDialog({
-      title: localizeUi("ui.chat.homeprofessormarichat.regenerateResponse"),
-      message: localizeUi("ui.chat.homeprofessormarichat.regenerateResponseConfirmation"),
-      confirmLabel: localizeUi("ui.chat.chatmessage.regenerate"),
-      tone: "destructive",
-    });
-    if (!confirmed) return;
-
-    setMessages((current) => current.filter((m) => m.id !== messageId));
+    regenerationInFlightRef.current = true;
+    setSending(true);
     try {
+      const confirmed = await showConfirmDialog({
+        title: localizeUi("ui.chat.homeprofessormarichat.regenerateResponse"),
+        message: localizeUi("ui.chat.homeprofessormarichat.regenerateResponseConfirmation"),
+        confirmLabel: localizeUi("ui.chat.chatmessage.regenerate"),
+        tone: "destructive",
+      });
+      if (!confirmed || activeChatIdRef.current !== chatId) return;
+
+      const currentMessages = messagesRef.current;
+      const index = currentMessages.findIndex((message) => message.id === messageId);
+      if (index <= 0 || index !== currentMessages.length - 1 || currentMessages[index]?.role !== "assistant") return;
+      const userMessage = currentMessages[index - 1];
+      if (userMessage.role !== "user") return;
+
+      setMessages((current) => current.filter((message) => message.id !== messageId));
       await api.delete(`/chats/${chatId}/messages/${messageId}`);
       const received = await sendWorkspaceMessage(
         { id: chatId } as Chat,
         userMessage.content,
         getProfessorMariAttachments(userMessage),
+        userMessage.id,
       );
       if (!received) throw new Error("Professor Mari did not return a regenerated response");
       await loadMessages(chatId);
@@ -3519,8 +3555,11 @@ export function HomeProfessorMariChat({
     } catch {
       await loadMessages(chatId).catch(() => undefined);
       toast.error(localizeUi("ui.chat.homeprofessormarichat.professorMariCouldNotRegenerateThatResponse"));
+    } finally {
+      regenerationInFlightRef.current = false;
+      setSending(false);
     }
-  }, [chatId, isBusy, loadMessages, localizeUi, messages, sendWorkspaceMessage]);
+  }, [chatId, effectiveConnectionId, isBusy, loadMessages, localizeUi, sendWorkspaceMessage]);
 
   const handleRemoveAttachment = useCallback(async (messageId: string, attachmentIndex: number) => {
     if (!chatId || attachmentRemovalInFlightRef.current.has(messageId)) return;
@@ -3558,7 +3597,7 @@ export function HomeProfessorMariChat({
     const text = (overrideText ?? draft).trim();
     const submittedAttachments = attachments;
     const messageText = text || (submittedAttachments.length > 0 ? "Please inspect the attached file." : "");
-    if (!messageText || isBusy || isReadingAttachments) return;
+    if (!messageText || isBusy || regenerationInFlightRef.current || isReadingAttachments) return;
 
     if (messageText === "/restart") {
       await runRestart();
