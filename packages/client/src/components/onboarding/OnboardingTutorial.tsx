@@ -8,7 +8,7 @@ import { useTrackAchievement } from "../../hooks/use-achievements";
 import { docsLanguageKeys, useDocsLanguage, type DocsLanguageStatus } from "../../hooks/use-docs-language";
 import { api } from "../../lib/api-client";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronRight } from "lucide-react";
+import { BookOpen, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { useLocalizedUiText } from "../../localization/use-localized-ui-text";
 import { useTranslation as useUiTranslation } from "react-i18next";
@@ -178,9 +178,10 @@ const STEPS: TourStep[] = [
     sprite: { src: "/sprites/mari/Mari_greet.png" },
   },
   {
-    target: null,
+    target: "home-documentation",
     title: "One Last Thing: Guide Language",
-    body: "Marinara's built-in guides can display in your language. Pick one below, and I'll use it whenever you open the documentation. You can change this anytime in Settings under General. Guides that are not translated yet will show in English.",
+    body: "The highlighted Documentation button on Home opens Marinara's built-in guides. Pick a language below, and I'll use it whenever you open them. You can change this anytime in Settings under General. Guides that are not translated yet will show in English.",
+    side: "top",
     docsLanguagePicker: true,
     sprite: { src: "/sprites/mari/Mari_explaining.png" },
   },
@@ -206,6 +207,8 @@ const TUTORIAL_SECONDARY_BUTTON_CLASS =
   "rounded-lg px-3 py-1.5 text-xs text-[var(--marinara-chat-chrome-panel-muted)] transition-colors hover:bg-[var(--marinara-chat-chrome-highlight-bg)] hover:text-[var(--marinara-chat-chrome-panel-text)]";
 const TUTORIAL_PRIMARY_BUTTON_CLASS =
   "flex items-center gap-1.5 rounded-lg border border-[var(--marinara-chat-chrome-button-border-active)] bg-[var(--marinara-chat-chrome-button-bg-active)] px-4 py-1.5 text-xs font-medium text-[var(--marinara-chat-chrome-button-text-active)] shadow-sm transition-all hover:border-[var(--marinara-chat-chrome-button-border-hover)] hover:bg-[var(--marinara-chat-chrome-button-bg-hover)] hover:text-[var(--marinara-chat-chrome-button-text-hover)] active:scale-95";
+const TUTORIAL_DOCUMENTATION_BUTTON_CLASS =
+  "flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[var(--marinara-chat-chrome-button-border-active)] bg-[var(--marinara-chat-chrome-button-bg-active)] px-4 py-2.5 text-sm font-semibold text-[var(--marinara-chat-chrome-button-text-active)] shadow-sm transition-all hover:border-[var(--marinara-chat-chrome-button-border-hover)] hover:bg-[var(--marinara-chat-chrome-button-bg-hover)] hover:text-[var(--marinara-chat-chrome-button-text-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--marinara-chat-chrome-focus-ring)] active:scale-[0.98]";
 
 function getTargetRect(target: string): Rect | null {
   const el = document.querySelector(`[data-tour="${target}"]`);
@@ -671,7 +674,16 @@ function OnboardingTutorialInner() {
   const centeredCardMaxHeight = Math.max(220, getViewportHeight() - centeredTopOffset - 16);
 
   const pickerSlot = currentStep.docsLanguagePicker ? (
-    <div className="mb-4 flex flex-col gap-1 text-left">
+    <div className="mb-4 flex flex-col gap-3 text-left">
+      <button
+        type="button"
+        onClick={() => useUIStore.getState().openModal("docs-viewer")}
+        className={TUTORIAL_DOCUMENTATION_BUTTON_CLASS}
+        title={localizeUi("home.actions.documentationHelp")}
+      >
+        <BookOpen size="1rem" />
+        {localizeUi("home.actions.documentation")}
+      </button>
       <label
         htmlFor="onboarding-docs-language"
         className="text-[0.6875rem] font-medium text-[var(--marinara-chat-chrome-panel-text)]"
