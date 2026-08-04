@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  migrateLibraryFolderSchema,
+  type LibraryFolderScope,
+  type MigrateLibraryFolderInput,
+} from "@marinara-engine/shared";
 import { api } from "../lib/api-client";
-import type { LibraryFolderScope } from "@marinara-engine/shared";
 
 export type { LibraryFolderScope } from "@marinara-engine/shared";
 
@@ -17,33 +21,35 @@ export type LibraryFolder = {
 
 const STORAGE_KEY = "marinara-library-folders-v1";
 
+type LegacyLibraryFolder = MigrateLibraryFolderInput & {
+  scope: LibraryFolderScope;
+};
+
 export const libraryFolderKeys = {
   all: ["library-folders"] as const,
   list: (scope: LibraryFolderScope) => [...libraryFolderKeys.all, scope] as const,
 };
 
-function readLegacyFolders(): LibraryFolder[] {
+function readLegacyFolders(): LegacyLibraryFolder[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (folder): folder is LibraryFolder =>
-        folder &&
-        typeof folder === "object" &&
-        (folder.scope === "lorebooks" || folder.scope === "presets" || folder.scope === "agents") &&
-        typeof folder.id === "string" &&
-        typeof folder.name === "string" &&
-        Array.isArray(folder.itemIds),
-    );
+    return parsed.flatMap((folder): LegacyLibraryFolder[] => {
+      if (!folder || typeof folder !== "object" || !("scope" in folder)) return [];
+      const { scope } = folder;
+      if (scope !== "lorebooks" && scope !== "presets" && scope !== "agents") return [];
+      const result = migrateLibraryFolderSchema.safeParse(folder);
+      return result.success ? [{ ...result.data, scope }] : [];
+    });
   } catch {
     return [];
   }
 }
 
-function writeLegacyFolders(folders: LibraryFolder[]) {
+function writeLegacyFolders(folders: LegacyLibraryFolder[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(folders));
 }
@@ -72,7 +78,8 @@ function migrateLegacyFolders(scope: LibraryFolderScope) {
         itemIds,
       })),
     });
-    writeLegacyFolders(allLegacyFolders.filter((folder) => folder.scope !== scope));
+    const remainingFolders = readLegacyFolders().filter((folder) => folder.scope !== scope);
+    writeLegacyFolders(remainingFolders);
   })().catch((error) => {
     migrationPromises.delete(scope);
     throw error;

@@ -56,12 +56,13 @@ export function createLibraryFoldersStorage(db: DB) {
       const id = newId();
       const timestamp = now();
       const existing = await listRows(scope);
+      const nextSortOrder = existing.reduce((maximum, folder) => Math.max(maximum, folder.sortOrder), -1) + 1;
       await db.insert(libraryFolders).values({
         id,
         scope,
         name: input.name,
         collapsed: "false",
-        sortOrder: existing.length,
+        sortOrder: nextSortOrder,
         itemIds: "[]",
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -99,8 +100,10 @@ export function createLibraryFoldersStorage(db: DB) {
       const timestamp = now();
       await db.transaction(async (tx) => {
         for (const folder of rows) {
-          const nextIds = parseItemIds(folder.itemIds).filter((id) => !movingIds.has(id));
+          const currentIds = parseItemIds(folder.itemIds);
+          const nextIds = currentIds.filter((id) => !movingIds.has(id));
           if (folder.id === input.folderId) nextIds.push(...input.itemIds);
+          if (folder.id !== input.folderId && nextIds.length === currentIds.length) continue;
           await tx
             .update(libraryFolders)
             .set({ itemIds: JSON.stringify(nextIds), updatedAt: timestamp })

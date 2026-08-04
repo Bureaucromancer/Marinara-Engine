@@ -1,11 +1,14 @@
 import { z } from "zod";
 
 const libraryFolderIdSchema = z.string().min(1).max(256);
-const libraryFolderItemIdsSchema = z.array(libraryFolderIdSchema).max(10_000).superRefine((ids, ctx) => {
-  if (new Set(ids).size !== ids.length) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Item IDs must be unique" });
-  }
-});
+const libraryFolderItemIdsSchema = z
+  .array(libraryFolderIdSchema)
+  .max(10_000)
+  .superRefine((ids, ctx) => {
+    if (new Set(ids).size !== ids.length) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Item IDs must be unique" });
+    }
+  });
 const nonEmptyLibraryFolderItemIdsSchema = z
   .array(libraryFolderIdSchema)
   .min(1)
@@ -42,22 +45,21 @@ export const moveLibraryItemsSchema = z.object({
   folderId: libraryFolderIdSchema.nullable(),
 });
 
+export const migrateLibraryFolderSchema = z.object({
+  id: libraryFolderIdSchema,
+  name: z.string().trim().min(1).max(200),
+  collapsed: z.boolean().optional().default(false),
+  sortOrder: z.number().int().nonnegative(),
+  itemIds: libraryFolderItemIdsSchema,
+});
+
 export const migrateLibraryFoldersSchema = z.object({
-  folders: z
-    .array(
-      z.object({
-        id: libraryFolderIdSchema,
-        name: z.string().trim().min(1).max(200),
-        collapsed: z.boolean().optional().default(false),
-        sortOrder: z.number().int().nonnegative(),
-        itemIds: libraryFolderItemIdsSchema,
-      }),
-    )
-    .max(1_000),
+  folders: z.array(migrateLibraryFolderSchema).max(1_000),
 });
 
 export type LibraryFolderScope = z.infer<typeof libraryFolderScopeSchema>;
 export type CreateLibraryFolderInput = z.infer<typeof createLibraryFolderSchema>;
 export type UpdateLibraryFolderInput = z.infer<typeof updateLibraryFolderSchema>;
 export type MoveLibraryItemsInput = z.infer<typeof moveLibraryItemsSchema>;
+export type MigrateLibraryFolderInput = z.infer<typeof migrateLibraryFolderSchema>;
 export type MigrateLibraryFoldersInput = z.infer<typeof migrateLibraryFoldersSchema>;
