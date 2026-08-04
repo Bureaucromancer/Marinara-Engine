@@ -306,6 +306,8 @@ export function normalizeNoodleAccountSettings(value: unknown): NoodleAccountSet
   const rawFollowingAccountIds = nestedOrLegacy(rawSocial, raw, "followingAccountIds");
   const rawFollowingAccountTimestamps = nestedOrLegacy(rawSocial, raw, "followingAccountTimestamps");
   const rawNotificationsReadAt = nestedOrLegacy(rawSocial, raw, "notificationsReadAt");
+  const rawNoodlerFeedSeenAt = nestedOrLegacy(rawSocial, raw, "noodlerFeedSeenAt");
+  const rawNoodleFeedSeenAt = nestedOrLegacy(rawSocial, raw, "noodleFeedSeenAt");
   const rawIdentityDisclosure = nestedOrLegacy(rawPrivacy, raw, "identityDisclosure");
   const rawStagePersonality = nestedOrLegacy(rawPrivacy, raw, "stagePersonality");
   const rawAccess = parseRecord(rawPrivacy.access);
@@ -333,6 +335,8 @@ export function normalizeNoodleAccountSettings(value: unknown): NoodleAccountSet
     ...(rawFollowingAccountTimestamps !== undefined &&
       validSocialField("followingAccountTimestamps", followingAccountTimestamps)),
     ...(rawNotificationsReadAt !== undefined && validSocialField("notificationsReadAt", rawNotificationsReadAt)),
+    ...(rawNoodlerFeedSeenAt !== undefined && validSocialField("noodlerFeedSeenAt", rawNoodlerFeedSeenAt)),
+    ...(rawNoodleFeedSeenAt !== undefined && validSocialField("noodleFeedSeenAt", rawNoodleFeedSeenAt)),
   };
   const privacy = {
     ...(rawIdentityDisclosure !== undefined && validPrivacyField("identityDisclosure", rawIdentityDisclosure)),
@@ -1532,7 +1536,17 @@ export function createNoodleStorage(db: DB) {
         const current = normalizeNoodleAccountSettings(row.settings);
         let next: NoodleAccountSettings;
         if (input.subtree === "social") {
-          next = { ...current, social: { ...current.social, ...input.patch } };
+          // Feed-visit timestamps only ever move forward. Two visits can be in flight at once
+          // (both surfaces record on mount), and the later request is not always the later
+          // timestamp — an out-of-order write would resurrect an already-cleared counter.
+          const social = { ...current.social, ...input.patch };
+          for (const field of ["noodleFeedSeenAt", "noodlerFeedSeenAt"] as const) {
+            const stored = current.social[field];
+            if (stored && social[field] && !(Date.parse(social[field]) > (Date.parse(stored) || 0))) {
+              social[field] = stored;
+            }
+          }
+          next = { ...current, social };
         } else if (input.subtree === "scheduler") {
           const currentAuto = current.scheduler.autoPosting ?? defaultAutoPostingSettings();
           const patchAuto = input.patch.autoPosting;
