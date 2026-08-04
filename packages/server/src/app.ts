@@ -203,6 +203,15 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
 
   // Trusted downloaded server capabilities register while Fastify is still mutable.
   await capabilityModuleRuntime.start(app);
+  // A package can install its own art during activate(), which runs AFTER the boot-time scan above, so
+  // without this its assets stay invisible to everything reading the manifest until the NEXT restart.
+  // Idempotent — the same scan the upload routes already re-run. Guarded because it walks files a package
+  // just wrote: a stale manifest costs that package its art, failing to boot costs the user everything.
+  try {
+    buildAssetManifest();
+  } catch (error) {
+    app.log.warn({ err: error }, "[capability] post-activation asset rescan failed; manifest may be stale");
+  }
   await personalServerExtensionRuntime.start(db);
   // Server-backed agent definitions are visible only after their runtime reaches
   // functional readiness. Packages without a server entrypoint remain available
