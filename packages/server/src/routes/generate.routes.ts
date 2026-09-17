@@ -9350,6 +9350,10 @@ export async function generateRoutes(app: FastifyInstance) {
         const hasPostProcessingAgents = resolvedAgents.some((a) => a.phase === "post_processing");
         agentContext.mainResponseSegments = shouldPrefixGroupHistorySpeakers ? allResponseSegments : undefined;
         let lorebookKeeperProcessedMessageId = "";
+        // The swipe index pinned alongside lorebookKeeperProcessedMessageId:
+        // the processed message's OWN swipe (a read-behind historical target
+        // keeps its active swipe, not the current generation's).
+        let lorebookKeeperTargetSwipeIndex: number | null = null;
         // Illustration runs asynchronously so it doesn't block other agents.
         // (pendingIllustration is hoisted above the follow-up loop.)
         const hasPostWork =
@@ -9740,6 +9744,11 @@ export async function generateRoutes(app: FastifyInstance) {
 
             if (lorebookKeeperContext && processedMessageId) {
               lorebookKeeperProcessedMessageId = processedMessageId;
+              lorebookKeeperTargetSwipeIndex = historicalLorebookTarget
+                ? ((historicalLorebookTarget as { activeSwipeIndex?: number | null }).activeSwipeIndex ?? null)
+                : typeof lastSavedSwipeIndex === "number"
+                  ? lastSavedSwipeIndex
+                  : ((lastSavedMsg as { activeSwipeIndex?: number | null } | null)?.activeSwipeIndex ?? null);
               const lorebookKeeperResult = await executeAgent(
                 lorebookKeeperAgent,
                 lorebookKeeperContext,
@@ -10979,7 +10988,7 @@ export async function generateRoutes(app: FastifyInstance) {
                         : (resultAgent as { id: string }).id,
                     sourceMessageRefs: [
                       ...(currentTurnUserMessageId ? [{ id: currentTurnUserMessageId, swipeIndex: null }] : []),
-                      ...(resultMessageId ? [{ id: resultMessageId, swipeIndex: targetSwipeIndex ?? null }] : []),
+                      ...(resultMessageId ? [{ id: resultMessageId, swipeIndex: lorebookKeeperTargetSwipeIndex }] : []),
                     ],
                     updates,
                     revectorizeEntry: memoryRecallVectorizerAvailable

@@ -983,6 +983,7 @@ export function createChatsStorage(db: DB) {
         sourceMessageRefs: lorebookEntries.sourceMessageRefs,
         previousContent: lorebookEntries.previousContent,
         previousSourceMessageRefs: lorebookEntries.previousSourceMessageRefs,
+        previousSourceAgentId: lorebookEntries.previousSourceAgentId,
       })
       .from(lorebookEntries)
       .where(isNotNull(lorebookEntries.sourceAgentId));
@@ -998,7 +999,7 @@ export function createChatsStorage(db: DB) {
       if (snapshotPoisoned) {
         await db
           .update(lorebookEntries)
-          .set({ previousContent: null, previousSourceMessageRefs: null })
+          .set({ previousContent: null, previousSourceMessageRefs: null, previousSourceAgentId: null })
           .where(eq(lorebookEntries.id, entry.id));
       }
 
@@ -1010,8 +1011,12 @@ export function createChatsStorage(db: DB) {
             .set({
               content: entry.previousContent as string,
               sourceMessageRefs: entry.previousSourceMessageRefs ?? "[]",
+              // Provenance reverts with the content: the restored text was
+              // authored by whoever wrote the snapshot (agent or human).
+              sourceAgentId: entry.previousSourceAgentId ?? null,
               previousContent: null,
               previousSourceMessageRefs: null,
+              previousSourceAgentId: null,
               updatedAt: now(),
             })
             .where(eq(lorebookEntries.id, entry.id));
@@ -2830,7 +2835,10 @@ export function createChatsStorage(db: DB) {
             existingRows.map((row) => row.chatId),
           );
           await db.delete(messages).where(condition);
-          await cascadeAgentLorebookEntriesForMessages(chunk);
+          // Cascade only the ids this scoped deletion actually removed — a
+          // requested id excluded by the chatId filter (or nonexistent) keeps
+          // its message, so its lore must keep its anchors too.
+          await cascadeAgentLorebookEntriesForMessages(existingRows.map((row) => row.id));
         });
       }
       for (const [affectedChatId, createdAt] of earliestByChat) {

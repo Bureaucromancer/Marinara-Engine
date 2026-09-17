@@ -234,11 +234,13 @@ function parseEntryRow(row: Record<string, unknown>) {
     sourceAgentId: (row.sourceAgentId as string | null | undefined) || null,
     sourceMessageRefs: parseSourceMessageRefs(row.sourceMessageRefs),
   };
-  // previousContent/previousSourceMessageRefs are the storage-level depth-1
-  // undo snapshot; they stay internal (the message-delete cascade reads the
-  // raw rows) and must not leak into API payloads.
+  // previousContent/previousSourceMessageRefs/previousSourceAgentId are the
+  // storage-level depth-1 undo snapshot; they stay internal (the
+  // message-delete cascade reads the raw rows) and must not leak into API
+  // payloads.
   delete (parsed as Record<string, unknown>).previousContent;
   delete (parsed as Record<string, unknown>).previousSourceMessageRefs;
+  delete (parsed as Record<string, unknown>).previousSourceAgentId;
   return parsed;
 }
 
@@ -1008,6 +1010,7 @@ export function createLorebooksStorage(db: DB) {
           if (current) {
             updates.previousContent = current.content;
             updates.previousSourceMessageRefs = current.sourceMessageRefs ?? "[]";
+            updates.previousSourceAgentId = current.sourceAgentId ?? null;
           }
         }
         updates.sourceAgentId = input.sourceAgentId;
@@ -1020,6 +1023,7 @@ export function createLorebooksStorage(db: DB) {
         updates.sourceMessageRefs = "[]";
         updates.previousContent = null;
         updates.previousSourceMessageRefs = null;
+        updates.previousSourceAgentId = null;
       }
 
       await db.update(lorebookEntries).set(updates).where(eq(lorebookEntries.id, id));
@@ -1413,6 +1417,12 @@ export function createLorebooksStorage(db: DB) {
         delete clone.createdAt;
         delete clone.updatedAt;
         delete clone.embedding;
+        // A clone is a user-directed copy: born manual (like imports), never
+        // attributed to the original's author or anchored to the original's
+        // source messages — otherwise deleting those messages would cascade
+        // the clone too.
+        delete clone.sourceAgentId;
+        delete clone.sourceMessageRefs;
         await this.createEntry(clone as unknown as CreateLorebookEntryInput);
       }
 

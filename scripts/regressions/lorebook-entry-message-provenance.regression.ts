@@ -284,6 +284,12 @@ try {
     assert.ok(chat);
     const targetBook = await lorebooks.create({ name: "Keeper book", chatId: chat.id });
     assert.ok(targetBook);
+    const mTurnUser = (await chats.createMessage({ chatId: chat.id, role: "user", content: "keeper stamp turn" }))!.id;
+    const mTurnAssist = (await chats.createMessage({
+      chatId: chat.id,
+      role: "assistant",
+      content: "keeper stamp reply",
+    }))!.id;
 
     // Seed the pre-existing entry the second update rewrites in place.
     const seeded = await lorebooks.createEntry({
@@ -302,8 +308,8 @@ try {
       writableLorebookIds: [targetBook.id],
       sourceAgentId: "lorebook-keeper",
       sourceMessageRefs: [
-        { id: "m-turn-user", swipeIndex: null },
-        { id: "m-turn-assist", swipeIndex: 1 },
+        { id: mTurnUser, swipeIndex: null },
+        { id: mTurnAssist, swipeIndex: 1 },
       ],
       updates: [
         { name: "Fresh keeper lore", content: "Extracted this turn.", keys: ["fresh"] },
@@ -316,8 +322,8 @@ try {
     assert.ok(createdEntry, "keeper create landed");
     assert.equal(createdEntry.sourceAgentId, "lorebook-keeper", "keeper create is attributed");
     assert.deepEqual(createdEntry.sourceMessageRefs, [
-      { id: "m-turn-user", swipeIndex: null },
-      { id: "m-turn-assist", swipeIndex: 1 },
+      { id: mTurnUser, swipeIndex: null },
+      { id: mTurnAssist, swipeIndex: 1 },
     ]);
 
     const rewrittenEntry = (await lorebooks.listEntries(targetBook.id)).find((e) => e.name === "Existing keeper lore");
@@ -325,12 +331,12 @@ try {
     assert.equal(rewrittenEntry.content, "Rewritten this turn.");
     assert.equal(rewrittenEntry.sourceAgentId, "lorebook-keeper", "keeper rewrite is attributed");
     assert.deepEqual(rewrittenEntry.sourceMessageRefs, [
-      { id: "m-turn-user", swipeIndex: null },
-      { id: "m-turn-assist", swipeIndex: 1 },
+      { id: mTurnUser, swipeIndex: null },
+      { id: mTurnAssist, swipeIndex: 1 },
     ]);
     // And the delete cascade actually reaches keeper-written entries: removing
     // the turn that fed them reverts the rewrite and removes the create.
-    await chats.removeMessages(["m-turn-assist"], chat.id);
+    await chats.removeMessages([mTurnAssist], chat.id);
     const afterCascade = await lorebooks.getEntry(createdEntry.id);
     assert.equal(afterCascade, null, "keeper create is cascaded away with its turn");
     const revertedKeeperEntry = await lorebooks.getEntry(rewrittenEntry.id);
@@ -436,6 +442,79 @@ try {
       await db.select().from((await import("../../packages/server/src/db/schema/lorebooks.js")).lorebookEntries)
     ).find((candidate: { id: string }) => candidate.id === entry.id);
     assert.equal(row.previousContent, "First state.", "empty-refs rewrite still snapshots");
+  }
+
+  // ── part 5: CodeRabbit review fixes ──
+  {
+    // (a) A chatId-scoped bulk deletion must not cascade ids it did not
+    // actually remove (wrong-chat or nonexistent ids keep their messages, so
+    // their lore must survive).
+    const chatA = await chats.create({ name: "Scope A", mode: "conversation", characterIds: [] });
+    const chatB = await chats.create({ name: "Scope B", mode: "conversation", characterIds: [] });
+    const msgB = await chats.createMessage({ chatId: chatB!.id, role: "assistant", content: "scope test" });
+    const scopedEntry = await lorebooks.createEntry({
+      lorebookId: book.id,
+      name: "Cross-scope lore",
+      content: "Anchored to a message in another chat.",
+      keys: ["scope"],
+      sourceAgentId: "lorebook-keeper",
+      sourceMessageRefs: [{ id: msgB!.id, swipeIndex: 0 }],
+    });
+    await chats.removeMessages([msgB!.id], chatA!.id);
+    assert.ok(
+      await lorebooks.getEntry(scopedEntry!.id),
+      "scoped deletion that kept the message must not cascade its lore",
+    );
+    await chats.removeMessages([msgB!.id]);
+    assert.equal(await lorebooks.getEntry(scopedEntry!.id), null, "the real deletion cascades");
+
+    // (b) Revert restores the PREVIOUS author, not the newest one.
+    const chatC = await chats.create({ name: "Dual author chat", mode: "conversation", characterIds: [] });
+    const msgA = await chats.createMessage({ chatId: chatC!.id, role: "user", content: "agent a turn" });
+    const msgB2 = await chats.createMessage({ chatId: chatC!.id, role: "assistant", content: "agent b turn" });
+    const dual = await lorebooks.createEntry({
+      lorebookId: book.id,
+      name: "Dual author",
+      content: "Agent A state.",
+      keys: ["dual"],
+      sourceAgentId: "agent-a",
+      sourceMessageRefs: [{ id: msgA!.id, swipeIndex: null }],
+    });
+    await lorebooks.updateEntry(dual!.id, {
+      content: "Agent B state.",
+      sourceAgentId: "agent-b",
+      sourceMessageRefs: [{ id: msgB2!.id, swipeIndex: 0 }],
+    });
+    await chats.removeMessages([msgB2!.id], chatC!.id);
+    const dualReverted = await lorebooks.getEntry(dual!.id);
+    assert.ok(dualReverted, "agent B rewrite reverts");
+    assert.equal(dualReverted.content, "Agent A state.");
+    assert.equal(dualReverted.sourceAgentId, "agent-a", "revert restores the previous author");
+
+    // (c) Folder clones are user-directed copies: born manual, immune to the
+    // source entries' message cascade.
+    const chatD = await chats.create({ name: "Clone chat", mode: "conversation", characterIds: [] });
+    const msgD = await chats.createMessage({ chatId: chatD!.id, role: "assistant", content: "clone test" });
+    const folder = await lorebooks.createFolder(book.id, { name: "To clone" });
+    const folderEntry = await lorebooks.createEntry({
+      lorebookId: book.id,
+      folderId: folder!.id,
+      name: "Folder lore",
+      content: "Authored inside a folder.",
+      keys: ["folder"],
+      sourceAgentId: "lorebook-keeper",
+      sourceMessageRefs: [{ id: msgD!.id, swipeIndex: 0 }],
+    });
+    const clonedRoot = (await lorebooks.cloneFolder(folder!.id, book.id)) as { id: string } | null;
+    const newRootId = clonedRoot!.id;
+    const clones = (await lorebooks.listEntries(book.id)).filter((e) => e.folderId === newRootId);
+    assert.equal(clones.length, 1, "clone landed in the cloned folder");
+    assert.equal(clones[0].sourceAgentId, null, "clone is born manual, not attributed");
+    assert.deepEqual(clones[0].sourceMessageRefs, [], "clone carries no source refs");
+    await chats.removeMessages([msgD!.id]);
+    assert.equal(await lorebooks.getEntry(folderEntry!.id), null, "original cascaded with its message");
+    const cloneAfter = (await lorebooks.listEntries(book.id)).find((e) => e.folderId === newRootId);
+    assert.ok(cloneAfter, "clone survives the source message's deletion");
   }
 
   console.log("Lorebook entry message provenance regressions passed.");
