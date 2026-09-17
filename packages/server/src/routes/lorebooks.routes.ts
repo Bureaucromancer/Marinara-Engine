@@ -591,8 +591,17 @@ export async function lorebooksRoutes(app: FastifyInstance) {
 
   // ── Entries CRUD ──
 
-  app.get<{ Params: { id: string } }>("/:id/entries", async (req) => {
-    return storage.listEntries(req.params.id);
+  app.get<{ Params: { id: string }; Querystring: { sourceMessageId?: string } }>("/:id/entries", async (req) => {
+    const entries = await storage.listEntries(req.params.id);
+    // Entry→source linkage exposure (the UI's "purge lore from deleted
+    // message" flow): filter to agent-authored entries whose current
+    // content was extracted from the given message.
+    const sourceMessageId = req.query.sourceMessageId?.trim();
+    if (!sourceMessageId) return entries;
+    return entries.filter(
+      (entry) =>
+        Array.isArray(entry.sourceMessageRefs) && entry.sourceMessageRefs.some((ref) => ref.id === sourceMessageId),
+    );
   });
 
   app.get<{ Params: { id: string; entryId: string } }>("/:id/entries/:entryId", async (req, reply) => {

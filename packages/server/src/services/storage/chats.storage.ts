@@ -40,6 +40,7 @@ import {
   lorebookEntries,
 } from "../../db/schema/index.js";
 import { newId, now } from "../../utils/id-generator.js";
+import { parseSourceMessageRefs } from "./lorebook-provenance.js";
 import { existsSync, rmSync } from "fs";
 import { join } from "path";
 import { DATA_DIR } from "../../utils/data-dir.js";
@@ -946,6 +947,89 @@ export function createChatsStorage(db: DB) {
       // rewind it becomes the "latest" row the next turn refills from, so the chat would
       // resume from a queue belonging to a turn that no longer exists.
       await db.delete(gameDicePools).where(chatScoped(gameDicePools.chatId, inArray(gameDicePools.messageId, chunk)));
+    }
+  }
+
+  /**
+   * Cascade message deletions into agent-authored lorebook entries (deleted
+   * chat messages used to leave agent-written lore live, still steering later
+   * generations — the deleted-turn "facts" kept being injected and the model
+   * argued with the user's corrections).
+   *
+   * Entries carry sourceMessageRefs ({ id, swipeIndex } of the turn their
+   * CURRENT content was extracted from) and a depth-1 pre-write snapshot
+   * (previousContent/previousSourceMessageRefs, taken on every agent rewrite).
+   * For each agent-authored entry whose current refs mention a removed
+   * message:
+   *   - a snapshot whose own refs survive the batch → revert to it (an
+   *     in-place rewrite is undone, like addSwipe's outgoing-swipe backfill);
+   *   - otherwise → remove the entry: a keeper create has nothing to revert
+   *     to, and lore whose source turn is gone must not steer prompts.
+   * A snapshot whose refs are in the SAME batch is discarded first, so the
+   * entry deletes instead of reverting to lore whose source is also gone.
+   * Entries that never mention a removed message — and manual entries
+   * (sourceAgentId NULL; a human edit takes ownership) — are untouched.
+   *
+   * Removed entries' per-chat metadata (entryStateOverrides / timing
+   * states) is pruned in the same breath, matching removeEntry's cleanup.
+   */
+  async function cascadeAgentLorebookEntriesForMessages(messageIds: string[]): Promise<void> {
+    const deletedIds = new Set(messageIds.filter(Boolean));
+    if (deletedIds.size === 0) return;
+    const candidates = await db
+      .select({
+        id: lorebookEntries.id,
+        content: lorebookEntries.content,
+        sourceMessageRefs: lorebookEntries.sourceMessageRefs,
+        previousContent: lorebookEntries.previousContent,
+        previousSourceMessageRefs: lorebookEntries.previousSourceMessageRefs,
+        previousSourceAgentId: lorebookEntries.previousSourceAgentId,
+      })
+      .from(lorebookEntries)
+      .where(isNotNull(lorebookEntries.sourceAgentId));
+
+    const removed: string[] = [];
+    for (const entry of candidates) {
+      const currentRefs = parseSourceMessageRefs(entry.sourceMessageRefs);
+      const previousRefs = parseSourceMessageRefs(entry.previousSourceMessageRefs);
+      const currentHit = currentRefs.some((ref) => deletedIds.has(ref.id));
+      const snapshotPoisoned = previousRefs.some((ref) => deletedIds.has(ref.id));
+      if (!currentHit && !snapshotPoisoned) continue;
+
+      if (snapshotPoisoned) {
+        await db
+          .update(lorebookEntries)
+          .set({ previousContent: null, previousSourceMessageRefs: null, previousSourceAgentId: null })
+          .where(eq(lorebookEntries.id, entry.id));
+      }
+
+      if (currentHit) {
+        const canRevert = !snapshotPoisoned && typeof entry.previousContent === "string";
+        if (canRevert) {
+          await db
+            .update(lorebookEntries)
+            .set({
+              content: entry.previousContent as string,
+              embedding: null,
+              embeddingSpaceId: null,
+              sourceMessageRefs: entry.previousSourceMessageRefs ?? "[]",
+              sourceAgentId: entry.previousSourceAgentId ?? null,
+              previousSourceAgentId: null,
+              previousContent: null,
+              previousSourceMessageRefs: null,
+              updatedAt: now(),
+            })
+            .where(eq(lorebookEntries.id, entry.id));
+        } else {
+          await db.delete(lorebookEntries).where(eq(lorebookEntries.id, entry.id));
+          removed.push(entry.id);
+        }
+      }
+    }
+    if (removed.length > 0) {
+      // Same cleanup pattern as lorebooks.storage's removeEntry: a fresh
+      // store instance shares this module's db and metadata queues.
+      await createChatsStorage(db).pruneLorebookChatMetadata(async () => removed);
     }
   }
 
@@ -2713,6 +2797,7 @@ export function createChatsStorage(db: DB) {
         if (existing) await deleteGameStateForMessages([id], [existing.chatId]);
         await db.delete(messages).where(eq(messages.id, id));
         if (existing) {
+          await cascadeAgentLorebookEntriesForMessages([id]);
           await invalidateMemoryChunksFrom(db, existing.chatId, existing.createdAt);
           await refreshChatLastMessageAt(existing.chatId);
         }
@@ -2750,6 +2835,10 @@ export function createChatsStorage(db: DB) {
             existingRows.map((row) => row.chatId),
           );
           await db.delete(messages).where(condition);
+          // Cascade only the ids this scoped deletion actually removed — a
+          // requested id excluded by the chatId filter (or nonexistent) keeps
+          // its message, so its lore must keep its anchors too.
+          await cascadeAgentLorebookEntriesForMessages(existingRows.map((row) => row.id));
         });
       }
       for (const [affectedChatId, createdAt] of earliestByChat) {
