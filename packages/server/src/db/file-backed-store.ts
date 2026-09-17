@@ -3353,6 +3353,8 @@ class FileTableStore {
     if (transactionContext && force) transactionContext.flushed = true;
     if (this.activeFlush) {
       await this.activeFlush;
+      // An admitted flush joins shutdown's drain instead of starting a new flush after close.
+      if (this.closePromise && !allowClosed && !transactionContext) return this.closePromise;
       if (this.dirty || this.dirtyTables.size > 0) await this.flush(force, throwOnError, allowClosed);
       else if (throwOnError && this.lastFlushError) throw this.lastFlushError;
       return;

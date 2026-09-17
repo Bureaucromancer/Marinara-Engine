@@ -42,6 +42,7 @@ try {
   await writeCaptured;
 
   await db.insert(appSettings).values({ key: "queued-during-flush", value: "two", updatedAt: "2026-07-14" });
+  const queuedFlush = db._fileStore.flush();
   let closeResolved = false;
   const close = db._fileStore.close().then(() => {
     closeResolved = true;
@@ -50,7 +51,7 @@ try {
   assert.equal(closeResolved, false, "close must wait for the active table write");
 
   releaseWrite();
-  await Promise.all([activeFlush, close]);
+  await Promise.all([activeFlush, queuedFlush, close]);
 
   const persisted = readAppSettingsRows(storageDir, ["before-active-flush", "queued-during-flush"]);
   assert.deepEqual(persisted.map((row) => row.key).sort(), ["before-active-flush", "queued-during-flush"]);
