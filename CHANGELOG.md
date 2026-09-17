@@ -4,7 +4,7 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 
 ## [Unreleased]
 
-- Storage flushes already waiting when shutdown starts now join the final write drain, avoiding a spurious closed-store error while preserving pending data (#6298).
+- Storage flushes already waiting when shutdown starts now join the final write drain, avoiding a spurious closed-store error while preserving pending data and reporting failed admitted writes even when shutdown retries successfully (#6298).
 
 - Capability packages can now offer tools the model calls during a turn, so a package that owns live state receives structured, validated data instead of parsing it back out of the reply. Narration still streams while the call happens. See `docs/development/optional-agent-packages.md` for the package-author API.
 
@@ -15,6 +15,7 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 - Local embedding launches raise the logical batch when needed so physical batches above 2,048 tokens are not silently capped by llama.cpp (#6293).
 - Professor Mari validates edits and undo without scanning unrelated chat history, preserving lazy storage and avoiding repeated unrelated-error warnings. Plain-text agent memory no longer produces false JSON errors; explicit database validation still reports existing broken references without deleting data (#6294).
 
+- Repeated keeper writes preserve the original undo snapshot, and legacy profile imports clear foreign message references so restored lore remains usable. Storage format 7 protects the new provenance fields from older builds that cannot preserve them (#6288).
 - Refresh compatible dependency and CI-action versions while preserving the supported Node, schema and native-runtime compatibility pins. The sandbox regression fixture also resolves macOS temporary-directory aliases before comparing canonical store links, and restart-test failures retain startup-stage diagnostics.
 
 - Starting a Conversation or Roleplay chat from a character card keeps that character selected when saved wizard defaults are applied (#6284).

@@ -65,6 +65,49 @@ try {
   rmSync(storageDir, { recursive: true, force: true });
 }
 
+const retryStorageDir = mkdtempSync(join(tmpdir(), "marinara-file-close-retry-"));
+process.env.FILE_STORAGE_DIR = retryStorageDir;
+try {
+  const expectedFailure = new Error("first admitted batch failed");
+  let release!: () => void;
+  let started!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const ready = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let first = true;
+  const db = await createFileNativeDB({
+    beforeTableWrite: async (table) => {
+      if (!table.startsWith("app_settings/") || !first) return;
+      first = false;
+      started();
+      await gate;
+      throw expectedFailure;
+    },
+  });
+  await db.insert(appSettings).values({ key: "retry-on-close", value: "saved", updatedAt: "2026-09-17" });
+  const active = db._fileStore.flush();
+  await ready;
+  const queued = db._fileStore.flush();
+  const closed = db._fileStore.close();
+  const results = Promise.allSettled([active, queued, closed]);
+  release();
+  assert.deepEqual(
+    await results,
+    [
+      { status: "rejected", reason: expectedFailure },
+      { status: "rejected", reason: expectedFailure },
+      { status: "fulfilled", value: undefined },
+    ],
+    "successful shutdown retry must not hide an admitted flush error",
+  );
+  assert.equal(readAppSettingsRows(retryStorageDir, ["retry-on-close"])[0]?.value, "saved");
+} finally {
+  rmSync(retryStorageDir, { recursive: true, force: true });
+}
+
 const malformedRowStorageDir = mkdtempSync(join(tmpdir(), "marinara-file-malformed-row-"));
 process.env.FILE_STORAGE_DIR = malformedRowStorageDir;
 try {
