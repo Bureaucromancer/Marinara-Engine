@@ -86,7 +86,7 @@ function buildAttackOptions(state: TacticalCombatState, unit: TacticalUnit): Att
     for (const target of targets) {
       // Basic attack — bounded by the unit's class reach (archers never strike below min).
       evaluate(tile, target, { rangeMin: unit.attackRange.min, rangeMax: unit.attackRange.max });
-      // Attack skills — always reachable from 1, with a floor of 2 on max.
+      // Attack skills use their authored reach, or the legacy range-two fallback.
       for (const skill of unit.skills) {
         if (skill.reaction || skill.type !== "attack" || !skillReady(unit, skill)) continue;
         evaluate(tile, target, {
@@ -102,13 +102,13 @@ function buildAttackOptions(state: TacticalCombatState, unit: TacticalUnit): Att
   return options;
 }
 
-/** Pick a heal action if a hurt ally is within support range (2). */
+/** Pick a heal action if a hurt ally is within the skill's support range. */
 function tryHeal(state: TacticalCombatState, unit: TacticalUnit): TacticalAction | null {
   const healSkill = unit.skills.find((s) => !s.reaction && s.type === "heal" && skillReady(unit, s));
   if (!healSkill) return null;
   const allies = aliveUnits(state, unit.side);
   const hurt = allies
-    .filter((a) => a.hp / Math.max(1, a.maxHp) <= 0.6 && manhattan(unit, a) <= 2)
+    .filter((a) => a.hp / Math.max(1, a.maxHp) <= 0.6 && manhattan(unit, a) <= (healSkill.range ?? 2))
     .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
   if (!hurt) return null;
   return { type: "skill", unitId: unit.id, skillName: healSkill.name, targetId: hurt.id };

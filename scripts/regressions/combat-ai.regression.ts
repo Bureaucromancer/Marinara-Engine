@@ -413,3 +413,18 @@ assert.equal(
   "skill",
   "The same skill is available at its declared range",
 );
+
+legacyCaster!.skills = [{ ...heal, range: 1 }];
+legacyTarget!.side = legacyCaster!.side;
+legacyTarget!.hp = 10;
+assert.notEqual(
+  decideTacticalAction(legacyRange, legacyCaster!).type,
+  "skill",
+  "Legacy healing also respects range one",
+);
+legacyCaster!.skills[0]!.range = 2;
+assert.equal(
+  decideTacticalAction(legacyRange, legacyCaster!).type,
+  "skill",
+  "A wounded ally becomes healable at the declared range",
+);
