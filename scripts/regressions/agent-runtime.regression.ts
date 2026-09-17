@@ -652,4 +652,22 @@ assert.deepEqual(
   "local parallel slots should preserve the configured context budget per request",
 );
 
+for (const batchSize of [512, 4096, 32768]) {
+  const args = buildLlamaArgs({
+    modelPath: "gemma-4-E2B-it-Q8_0.gguf",
+    gpuLayers: 999,
+    port: 10_019,
+    contextSize: 32768,
+    runtimeVariant: "win-x64-hip",
+    enableNativeToolCalls: true,
+    embeddingPooling: "mean",
+    embeddingBatchSize: batchSize,
+    maxParallelJobs: 2,
+  });
+  const logicalBatch = Number(args[args.indexOf("--batch-size") + 1]);
+  const physicalBatch = Number(args[args.indexOf("--ubatch-size") + 1]);
+  assert.equal(physicalBatch, batchSize);
+  assert.equal(logicalBatch, Math.max(2048, batchSize), "logical batch must not silently cap configured embeddings");
+}
+
 console.log("Agent runtime regression checks passed.");
