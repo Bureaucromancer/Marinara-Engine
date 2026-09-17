@@ -1,5 +1,5 @@
 import { BUILT_IN_TOOLS, DEFAULT_AGENT_TOOLS, customAgentHasCapability } from "@marinara-engine/shared";
-import type { AgentContext } from "@marinara-engine/shared";
+import type { AgentContext, SourceMessageRef } from "@marinara-engine/shared";
 import type { LLMToolDefinition } from "../llm/base-provider.js";
 import type { ResolvedAgent } from "../agents/agent-pipeline.js";
 import {
@@ -565,11 +565,28 @@ function resolveAgentWritableLorebookId(agentSettings: Record<string, unknown>):
   return null;
 }
 
+/**
+ * The turn's user-message ref as of tool-resolution time: the assistant
+ * message being generated does not exist yet, so tool-path writes anchor to
+ * the user turn alone (deleting that user message cascades them; the keeper
+ * post-phase adds the assistant anchor on top).
+ * ponytail: known ceiling — deleting the later assistant message will not
+ * cascade tool-path entries; upgrade path is a post-save ref backfill.
+ */
+function resolveLorebookWriterSourceRefs(agentContext: AgentContext): SourceMessageRef[] {
+  for (let i = agentContext.recentMessages.length - 1; i >= 0; i--) {
+    const message = agentContext.recentMessages[i];
+    if (!message) continue;
+    if (message.role === "user" && message.id) return [{ id: message.id, swipeIndex: null }];
+  }
+  return [];
+}
+
 function createLorebookEntryWriter(
   lorebooksStore: LorebooksStore,
   agent: ResolvedAgent,
   agentSettings: Record<string, unknown>,
-  options: { requireApproval: boolean; chatId: string },
+  options: { requireApproval: boolean; chatId: string; sourceMessageRefs: SourceMessageRef[] },
 ) {
   const writableLorebookId = resolveAgentWritableLorebookId(agentSettings);
   if (!writableLorebookId) return undefined;
@@ -607,6 +624,8 @@ function createLorebookEntryWriter(
           preferredTargetLorebookId: writableLorebookId,
           writableLorebookIds: [writableLorebookId],
           existingEntries,
+          sourceAgentId: agent.id,
+          sourceMessageRefs: options.sourceMessageRefs,
         }),
       };
     }
@@ -650,6 +669,8 @@ function createLorebookEntryWriter(
         position: 0,
         depth: 4,
         role: "system",
+        sourceAgentId: agent.id,
+        sourceMessageRefs: options.sourceMessageRefs,
       });
       return {
         applied: true,
@@ -678,6 +699,8 @@ function createLorebookEntryWriter(
       keys: Array.from(new Set([...existingKeys, ...keys])),
       ...(entry.tag !== undefined ? { tag: entry.tag } : {}),
       enabled: true,
+      sourceAgentId: agent.id,
+      sourceMessageRefs: options.sourceMessageRefs,
     });
     return {
       applied: true,
@@ -1009,6 +1032,7 @@ async function resolveToolRuntime(
     const saveLorebookEntry = createLorebookEntryWriter(lorebooksStore, agent, agentSettings, {
       requireApproval: agentWriteApprovalRequired(chatMetadata),
       chatId,
+      sourceMessageRefs: resolveLorebookWriterSourceRefs(agentContext),
     });
     const replaceChatMessageContentForAgent = customAgentHasCapability(agentSettings, "edit_messages")
       ? replaceChatMessageContent

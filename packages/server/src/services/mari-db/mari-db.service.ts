@@ -1209,6 +1209,12 @@ export function buildLorebookEntryCreateRow(
     delayUntilRecursion: "false",
     excludeFromVectorization: "false",
     locked: "false",
+    // Message provenance: rows Mari creates are human-directed, so they are
+    // born unattributed (and cascade-immune) with an empty source-refs array.
+    sourceAgentId: null,
+    sourceMessageRefs: "[]",
+    previousContent: null,
+    previousSourceMessageRefs: null,
     createdAt: timestamp,
     updatedAt: timestamp,
   };

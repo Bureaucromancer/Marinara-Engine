@@ -10947,6 +10947,17 @@ export async function generateRoutes(app: FastifyInstance) {
                       : undefined,
                     lorebookNamingScheme: getLorebookNamingScheme(resultAgent?.settings),
                     worldName: agentContext.characters[0]?.world ?? chat.name,
+                    // Anchor keeper lore to the turn it was extracted from so
+                    // message deletion can cascade it (see
+                    // cascadeAgentLorebookEntriesForMessages).
+                    sourceAgentId:
+                      isBuiltInLorebookAgent || !resultAgent?.id
+                        ? "lorebook-keeper"
+                        : (resultAgent as { id: string }).id,
+                    sourceMessageRefs: [
+                      ...(currentTurnUserMessageId ? [{ id: currentTurnUserMessageId, swipeIndex: null }] : []),
+                      ...(resultMessageId ? [{ id: resultMessageId, swipeIndex: targetSwipeIndex ?? null }] : []),
+                    ],
                     updates,
                     revectorizeEntry: memoryRecallVectorizerAvailable
                       ? async (entry) => {

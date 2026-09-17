@@ -23,12 +23,14 @@ import {
   type BulkUpdateLorebookEntriesInput,
   type CreateLorebookFolderInput,
   type LorebookEntry,
+  type SourceMessageRef,
   type UpdateLorebookFolderInput,
 } from "@marinara-engine/shared";
 import { collectEffectivelyDisabledFolderIds, collectFolderSubtreeIds } from "@marinara-engine/shared";
 import { normalizeTimestampOverrides, type TimestampOverrides } from "../import/import-timestamps.js";
 import { toPaginatedList } from "../../utils/list-pagination.js";
 import { createChatsStorage } from "./chats.storage.js";
+import { parseSourceMessageRefs } from "./lorebook-provenance.js";
 
 function normalizeLorebookEntryLimit(value: unknown): number {
   const parsed = typeof value === "number" ? value : Number(value);
@@ -181,8 +183,18 @@ function parseStringArray(value: unknown): string[] {
   }
 }
 
+/** Provenance fields accepted on top of the zod-validated create/update inputs. The HTTP schemas deliberately strip these — only server-side agent paths may set attribution. */
+export type EntryProvenanceInput = {
+  sourceAgentId?: string | null;
+  sourceMessageRefs?: SourceMessageRef[];
+};
+
+function serializeMessageRefs(refs: SourceMessageRef[] | undefined): string {
+  return JSON.stringify(refs ?? []);
+}
+
 function parseEntryRow(row: Record<string, unknown>) {
-  return {
+  const parsed = {
     ...row,
     enabled: row.enabled === "true",
     constant: row.constant === "true",
@@ -219,7 +231,15 @@ function parseEntryRow(row: Record<string, unknown>) {
           ? JSON.parse(row.embedding as string)
           : null,
     embeddingSpaceId: (row.embeddingSpaceId as string | null | undefined) ?? null,
+    sourceAgentId: (row.sourceAgentId as string | null | undefined) || null,
+    sourceMessageRefs: parseSourceMessageRefs(row.sourceMessageRefs),
   };
+  // previousContent/previousSourceMessageRefs are the storage-level depth-1
+  // undo snapshot; they stay internal (the message-delete cascade reads the
+  // raw rows) and must not leak into API payloads.
+  delete (parsed as Record<string, unknown>).previousContent;
+  delete (parsed as Record<string, unknown>).previousSourceMessageRefs;
+  return parsed;
 }
 
 function parseFolderRow(row: Record<string, unknown>) {
@@ -829,7 +849,7 @@ export function createLorebooksStorage(db: DB) {
       return row ? parseEntryRow(row as Record<string, unknown>) : null;
     },
 
-    async createEntry(input: CreateLorebookEntryInput) {
+    async createEntry(input: CreateLorebookEntryInput & EntryProvenanceInput) {
       const id = newId();
       const timestamp = now();
       const requestedFolderId = input.folderId ?? null;
@@ -880,13 +900,15 @@ export function createLorebooksStorage(db: DB) {
         excludeRecursion: String(input.excludeRecursion ?? false),
         delayUntilRecursion: String(input.delayUntilRecursion ?? false),
         excludeFromVectorization: String(input.excludeFromVectorization ?? false),
+        sourceAgentId: input.sourceAgentId ?? null,
+        sourceMessageRefs: serializeMessageRefs(input.sourceMessageRefs),
         createdAt: timestamp,
         updatedAt: timestamp,
       });
       return this.getEntry(id);
     },
 
-    async updateEntry(id: string, input: UpdateLorebookEntryInput) {
+    async updateEntry(id: string, input: UpdateLorebookEntryInput & EntryProvenanceInput) {
       const updates: Record<string, unknown> = { updatedAt: now() };
       // Must cover EXACTLY the fields buildLorebookEntryEmbeddingText embeds
       // (name, description, keys, secondary keys, content) — description was
@@ -973,6 +995,31 @@ export function createLorebooksStorage(db: DB) {
       if (shouldClearEmbedding) {
         updates.embedding = null;
         updates.embeddingSpaceId = null;
+      }
+
+      // Message provenance. Only server-side agent paths may set attribution —
+      // the HTTP schemas strip these fields, so a PATCH from the UI never
+      // carries them.
+      if (input.sourceAgentId !== undefined) {
+        // Agent write: snapshot the immediate pre-write state (depth-1 undo,
+        // mirroring addSwipe's outgoing-swipe backfill) and take the new refs.
+        if (input.content !== undefined) {
+          const current = (await db.select().from(lorebookEntries).where(eq(lorebookEntries.id, id)))[0];
+          if (current) {
+            updates.previousContent = current.content;
+            updates.previousSourceMessageRefs = current.sourceMessageRefs ?? "[]";
+          }
+        }
+        updates.sourceAgentId = input.sourceAgentId;
+        updates.sourceMessageRefs = serializeMessageRefs(input.sourceMessageRefs);
+      } else if (input.content !== undefined) {
+        // Content-bearing write without provenance is a human edit: it takes
+        // ownership, so the message-delete cascade must never touch this
+        // entry again — and there is nothing agent-made left to revert to.
+        updates.sourceAgentId = null;
+        updates.sourceMessageRefs = "[]";
+        updates.previousContent = null;
+        updates.previousSourceMessageRefs = null;
       }
 
       await db.update(lorebookEntries).set(updates).where(eq(lorebookEntries.id, id));

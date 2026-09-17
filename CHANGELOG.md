@@ -4,6 +4,9 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 
 ## [Unreleased]
 
+- Deleting a chat message (or bulk-deleting messages) now cleans up lore that agents extracted from the deleted turns. The Lorebook Keeper's entries remember which messages they came from: rewriting an entry in place is undone when the turn that rewrote it is deleted, entries whose whole source turn is gone are removed, and hand-written entries are never touched.
+- Regenerating a message no longer keeps lore written from the discarded swipe active in the prompt. Swiping back to the original response brings its lore back.
+- Lorebook entries expose the messages they were extracted from, and the entries list can be filtered by source message, so lore left behind by a deleted message can be found and purged explicitly.
 - Tactical Game Mode can combine a GM terrain brief with a reusable battlefield seed and size. Requested terrain is validated and preserved, with an explicit generated-terrain fallback when a layout cannot be used. Flying and teleporting units gain distinct movement rules while retaining terrain defense and evasion bonuses. Malformed saved grids are excluded from GM battlefield summaries (#6265).
 - Added a contributor roadmap separating combat participation from battlefield rules, with follow-up plans for summoning and versioned tabletop rules profiles (#6265).
 - Codex contributors review locally with CodeRabbit and resolve valid findings before requesting PR review, reducing use of the repository's shared review quota. Documented false positives or purely pedantic suggestions do not block review.

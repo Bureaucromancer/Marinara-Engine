@@ -2656,6 +2656,7 @@ async function executeLorebookKeeperRetries(args: {
         if (updates.length > 0) {
           if (baseContext.signal?.aborted) return results;
           preferredTargetLorebookId = await persistLorebookKeeperUpdates({
+            signal: baseContext.signal,
             lorebooksStore,
             chatId,
             chatName,
@@ -2667,8 +2668,10 @@ async function executeLorebookKeeperRetries(args: {
               : undefined,
             lorebookNamingScheme: getLorebookNamingScheme(lorebookKeeperAgent.resolved.settings),
             worldName: retryContext.characters[0]?.world ?? chatName,
+            // Anchored for the message-delete lore cascade.
+            sourceAgentId: "lorebook-keeper",
+            sourceMessageRefs: [{ id: target.id, swipeIndex: target.activeSwipeIndex ?? 0 }],
             updates,
-            signal: baseContext.signal,
           });
           if (baseContext.signal?.aborted) return results;
         }
@@ -3242,6 +3245,10 @@ async function applyRetryResultEffects(args: {
               : undefined,
             lorebookNamingScheme: getLorebookNamingScheme(resultAgent?.settings),
             worldName: agentContext.characters[0]?.world ?? (chat as any).name,
+            // Anchor retried lore to the regenerated turn so message deletion
+            // can cascade it.
+            sourceAgentId: isBuiltInLorebookAgent || !resultAgent?.id ? "lorebook-keeper" : resultAgent.id,
+            sourceMessageRefs: retryMessageId ? [{ id: retryMessageId, swipeIndex: retrySwipeIndex ?? 0 }] : undefined,
             updates: retryUpdates,
             signal,
           });
