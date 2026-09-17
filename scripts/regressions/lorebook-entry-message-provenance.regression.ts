@@ -42,7 +42,11 @@ process.env.LOG_LEVEL = "silent";
 
 const { getDB, closeDB } = await import("../../packages/server/src/db/connection.js");
 const { createLorebooksStorage } = await import("../../packages/server/src/services/storage/lorebooks.storage.js");
-const { createChatsStorage } = await import("../../packages/server/src/services/storage/chats.storage.js");
+const { createChatsStorage, withChatMetadataPatchQueue } =
+  await import("../../packages/server/src/services/storage/chats.storage.js");
+const { lorebookEntries } = await import("../../packages/server/src/db/schema/lorebooks.js");
+const { eq } = await import("../../packages/server/src/db/file-query.js");
+const { MariDbService } = await import("../../packages/server/src/services/mari-db/mari-db.service.js");
 
 const db = await getDB();
 const lorebooks = createLorebooksStorage(db);
@@ -639,6 +643,105 @@ try {
     assert.equal(await lorebooks.getEntry(folderEntry!.id), null, "original cascaded with its message");
     const cloneAfter = (await lorebooks.listEntries(book.id)).find((e) => e.folderId === newRootId);
     assert.ok(cloneAfter, "clone survives the source message's deletion");
+  }
+
+  // Message deletion must release its transaction before waiting on metadata queues.
+  // A bulk call scans agent lore once even when its message IDs span multiple chunks.
+  for (const bulk of [false, true]) {
+    const chat = (await chats.create({ name: "Queued lore cleanup", mode: "roleplay", characterIds: [] }))!;
+    const first = (await chats.createMessage({ chatId: chat.id, role: "assistant", content: "First" }))!;
+    const last = (await chats.createMessage({ chatId: chat.id, role: "assistant", content: "Last" }))!;
+    const entry = (await lorebooks.createEntry({
+      lorebookId: book.id,
+      name: "Queued fact",
+      content: "Invented",
+      sourceAgentId: "keeper",
+      sourceMessageRefs: [{ id: first.id, swipeIndex: 0 }],
+    }))!;
+    await chats.patchMetadata(chat.id, { entryStateOverrides: { [entry.id]: { enabled: false } } });
+    let releaseMetadata!: () => void;
+    const metadataGate = new Promise<void>((resolve) => {
+      releaseMetadata = resolve;
+    });
+    let metadataAcquired!: () => void;
+    const acquired = new Promise<void>((resolve) => {
+      metadataAcquired = resolve;
+    });
+    const edit = withChatMetadataPatchQueue(chat.id, async () => {
+      metadataAcquired();
+      await metadataGate;
+      await chats.patchMetadata(chat.id, { concurrentSetting: "retained" }, { metadataQueueHeld: true });
+    });
+    await acquired;
+    const originalTransaction = db.transaction;
+    const originalSelect = db.select;
+    let transactionEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      transactionEntered = resolve;
+    });
+    let loreScans = 0;
+    db.transaction = ((operation: any) =>
+      originalTransaction.call(db, async (tx: any) => {
+        transactionEntered();
+        return operation(tx);
+      })) as typeof db.transaction;
+    db.select = ((...args: any[]) => {
+      const query = (originalSelect as any).apply(db, args);
+      const from = query.from;
+      query.from = (table: any) => {
+        if (table === lorebookEntries) loreScans += 1;
+        return from.call(query, table);
+      };
+      return query;
+    }) as typeof db.select;
+    // An uncaught watchdog also fails when a lock inversion prevents finally/closeDB from completing.
+    const watchdog = setTimeout(() => {
+      throw new Error("Message deletion and queued metadata deadlocked");
+    }, 3000);
+    try {
+      const deletion = bulk
+        ? chats.removeMessages([first.id, ...Array.from({ length: 499 }, (_, i) => `missing-${i}`), last.id], chat.id)
+        : chats.removeMessage(first.id);
+      await entered;
+      releaseMetadata();
+      await Promise.all([edit, deletion]);
+      assert.equal(loreScans, 1, "one agent-lore scan per deletion call");
+    } finally {
+      clearTimeout(watchdog);
+      releaseMetadata();
+      db.transaction = originalTransaction;
+      db.select = originalSelect;
+    }
+    const metadata = JSON.parse((await chats.getById(chat.id))!.metadata);
+    assert.equal(metadata.concurrentSetting, "retained");
+    assert.deepEqual(metadata.entryStateOverrides, {});
+    assert.equal(await lorebooks.getEntry(entry.id), null);
+  }
+
+  // Mari treats provenance arrays as JSON, including their stored undo references.
+  {
+    const mari = new MariDbService(db);
+    const entry = (await lorebooks.createEntry({
+      lorebookId: book.id,
+      name: "JSON provenance",
+      content: "Fixture",
+      sourceAgentId: "keeper",
+      sourceMessageRefs: [{ id: "json-source", swipeIndex: 0 }],
+    }))!;
+    const result = await mari.executeCli({ argv: ["db", "get", "--parsed", "lorebook_entries", entry.id] });
+    assert.deepEqual((result.output as any).sourceMessageRefs, [{ id: "json-source", swipeIndex: 0 }]);
+    for (const key of ["sourceMessageRefs", "previousSourceMessageRefs"] as const) {
+      await db
+        .update(lorebookEntries)
+        .set({ [key]: "broken JSON" })
+        .where(eq(lorebookEntries.id, entry.id));
+      const validation = await mari.validate("lorebook_entries");
+      assert.ok(validation.errors.some((issue) => issue.id === entry.id && issue.message.includes(key)));
+      await db
+        .update(lorebookEntries)
+        .set({ [key]: "[]" })
+        .where(eq(lorebookEntries.id, entry.id));
+    }
   }
 
   console.log("Lorebook entry message provenance regressions passed.");
