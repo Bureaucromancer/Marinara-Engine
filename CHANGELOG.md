@@ -4,6 +4,14 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 
 ## [Unreleased]
 
+- Contributor agents now share `CLAUDE.md` and `.claude/skills` through `AGENTS.md` and `.agents/skills` symlinks, preserving the existing workflow and skill guidance.
+
+- New Game Mode battles use saved combat temperaments in Classic and Tactical, including Patient, Methodical and Coordinated. Explicit Mindless hints also work for other creature types. Companion control can be chosen per member; generated enemies retain usable MP, and Classic support skills target the correct side with saved cooldowns.
+- New Game Mode battles can let the GM direct authored bosses in Classic and Tactical, with legendary actions, turn-start anticipation, and optional Counterspell/guard reactions. Saved decisions protect resources across reloads, duplicate commands and late GM replies; manual party reactions show their MP or spell-slot cost.
+- Restoring combat preserves the encounter anchor and mechanics instead of clearing them during screen initialization.
+- Classic combat consumes items only when their accepted action executes, keeping abandoned retries and skipped turns from spending inventory, and retains spent spell slots between rounds. Tactical AI uses the same skill-power floor as combat resolution when weighing area attacks.
+- Game creation describes Tactical combat without an external game comparison and no longer asks for permanent terrain guidance. Added combat AI, Summoning and versioned ruleset handoffs, with the implemented boss/reaction boundaries and remaining ruleset work.
+
 - Refresh compatible dependency and CI-action versions while preserving the supported Node, schema and native-runtime compatibility pins. The sandbox regression fixture also resolves macOS temporary-directory aliases before comparing canonical store links, and restart-test failures retain startup-stage diagnostics.
 
 - Starting a Conversation or Roleplay chat from a character card keeps that character selected when saved wizard defaults are applied (#6284).

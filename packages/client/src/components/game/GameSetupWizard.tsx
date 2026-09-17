@@ -253,7 +253,6 @@ const SPATIAL_MAP_DRAFT_SIZE_OPTIONS: Array<{
 ];
 const SPATIAL_CUSTOM_TARGET_LOCATION_LIMIT = 40;
 const TACTICAL_BATTLEFIELD_SEED_MAX = 0xffffffff;
-const TACTICAL_BATTLEFIELD_INSTRUCTIONS_MAX = 4_000;
 const TACTICAL_BATTLEFIELD_SIZE_OPTIONS: Array<{
   value: "auto" | TacticalBattlefieldSize;
   labelKey: string;
@@ -525,9 +524,9 @@ export function GameSetupWizard({
   const [customTone, setCustomTone] = useState("");
   const [difficulty, setDifficulty] = useState("Normal");
   const [combatStyle, setCombatStyle] = useState<GameCombatStyle>("classic");
+  const [gmBossControl, setGmBossControl] = useState(true);
   const [tacticalBattlefieldSeed, setTacticalBattlefieldSeed] = useState("");
   const [tacticalBattlefieldSize, setTacticalBattlefieldSize] = useState<"auto" | TacticalBattlefieldSize>("auto");
-  const [tacticalBattlefieldInstructions, setTacticalBattlefieldInstructions] = useState("");
   const [gmMode, setGmMode] = useState<GameGmMode>("standalone");
   const [gmCharacterId, setGmCharacterId] = useState<string | null>(null);
   const [partyCharacterIds, setPartyCharacterIds] = useState<string[]>(() =>
@@ -1147,11 +1146,11 @@ export function GameSetupWizard({
       setCustomTone("");
       setDifficulty(config.difficulty);
       setCombatStyle(config.combatStyle === "tactical" ? "tactical" : "classic");
+      setGmBossControl(config.gmBossControl ?? true);
       setTacticalBattlefieldSeed(
         typeof config.tacticalBattlefield?.seed === "number" ? String(config.tacticalBattlefield.seed) : "",
       );
       setTacticalBattlefieldSize(config.tacticalBattlefield?.size ?? "auto");
-      setTacticalBattlefieldInstructions(config.tacticalBattlefield?.instructions ?? "");
       setRating(config.rating);
       setLanguage(config.language?.trim() || "English");
       setAutoTranslate(config.autoTranslate === true);
@@ -1283,7 +1282,6 @@ export function GameSetupWizard({
         ? {
             ...(typeof tacticalSeed === "number" && !Number.isNaN(tacticalSeed) ? { seed: tacticalSeed } : {}),
             ...(tacticalBattlefieldSize !== "auto" ? { size: tacticalBattlefieldSize } : {}),
-            ...(tacticalBattlefieldInstructions.trim() ? { instructions: tacticalBattlefieldInstructions.trim() } : {}),
           }
         : {};
 
@@ -1294,6 +1292,8 @@ export function GameSetupWizard({
       tone: tones.join(", ") || "Heroic",
       difficulty,
       combatStyle,
+      combatDirector: true,
+      gmBossControl,
       ...(Object.keys(tacticalBattlefield).length > 0 ? { tacticalBattlefield } : {}),
       spatialMapInstructions:
         enableAgents && hierarchicalMapsInstalled && draftSpatialMap
@@ -1950,6 +1950,20 @@ export function GameSetupWizard({
                           </div>
                         </button>
                       </div>
+                      <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--border)] p-3 text-sm text-[var(--foreground)]">
+                        <input
+                          type="checkbox"
+                          checked={gmBossControl}
+                          onChange={(e) => setGmBossControl(e.target.checked)}
+                          className="mt-1 size-4 accent-[var(--primary)]"
+                        />
+                        <span>
+                          {localizeUi("game.combat.director.setupLabel")}
+                          <span className="mt-1 block text-xs text-[var(--muted-foreground)]">
+                            {localizeUi("game.combat.director.setupHelp")}
+                          </span>
+                        </span>
+                      </label>
                       {combatStyle === "tactical" && (
                         <div className="mt-3 space-y-3 rounded-xl border border-[var(--primary)]/20 bg-[var(--primary)]/5 p-3">
                           <div className="grid gap-3 sm:grid-cols-2">
@@ -2006,26 +2020,6 @@ export function GameSetupWizard({
                                 ))}
                               </select>
                             </div>
-                          </div>
-                          <div>
-                            <label htmlFor="game-setup-terrain-guidance" className={GAME_SETUP_FIELD_LABEL}>
-                              {localizeUi("ui.game.gamesetupwizard.terrainGuidance")}
-                            </label>
-                            <textarea
-                              id="game-setup-terrain-guidance"
-                              value={tacticalBattlefieldInstructions}
-                              onChange={(event) =>
-                                setTacticalBattlefieldInstructions(
-                                  event.target.value.slice(0, TACTICAL_BATTLEFIELD_INSTRUCTIONS_MAX),
-                                )
-                              }
-                              maxLength={TACTICAL_BATTLEFIELD_INSTRUCTIONS_MAX}
-                              placeholder={localizeUi("ui.game.gamesetupwizard.terrainGuidancePlaceholder")}
-                              className={cn(GAME_SETUP_INPUT_CLASS, "min-h-20 resize-y")}
-                            />
-                            <p className="mt-1 text-[0.68rem] text-[var(--muted-foreground)]">
-                              {localizeUi("ui.game.gamesetupwizard.terrainGuidanceHint")}
-                            </p>
                           </div>
                         </div>
                       )}

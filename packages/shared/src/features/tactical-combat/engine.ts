@@ -1,3 +1,4 @@
+import { assignCombatTactics } from "../combat-ai.js";
 // ──────────────────────────────────────────────
 // Tactical Combat — pure engine
 // ──────────────────────────────────────────────
@@ -102,7 +103,11 @@ function combatantToUnit(c: Combatant, side: "party" | "enemy", isBoss: boolean)
     element: c.element,
     sprite: c.sprite,
     movementMode: c.movementMode,
-    isBoss,
+    isBoss: side === "enemy" && (c.boss !== undefined || isBoss),
+    boss: side === "enemy" ? c.boss : undefined,
+    spellSlots: c.spellSlots ? { ...c.spellSlots } : undefined,
+    tactics: c.tactics,
+    controller: c.controller,
     x: 0,
     y: 0,
     unitClass,
@@ -150,8 +155,8 @@ export function createTacticalCombat(
   }
 
   const units: TacticalUnit[] = [
-    ...party.map((c) => combatantToUnit(c, "party", false)),
-    ...enemies.map((c) => combatantToUnit(c, "enemy", c.id === bossId)),
+    ...party.map((c) => ({ ...combatantToUnit(c, "party", false), tactics: assignCombatTactics(c, seed) })),
+    ...enemies.map((c) => ({ ...combatantToUnit(c, "enemy", c.id === bossId), tactics: assignCombatTactics(c, seed) })),
   ];
 
   const setupRng = deterministicRng(seed, 0);
@@ -191,6 +196,14 @@ function aliveUnits(state: TacticalCombatState, side?: "party" | "enemy"): Tacti
 
 function occupantAt(state: TacticalCombatState, x: number, y: number, exceptId?: string): TacticalUnit | undefined {
   return state.units.find((u) => u.hp > 0 && u.x === x && u.y === y && u.id !== exceptId);
+}
+
+export function canTraverseTile(state: TacticalCombatState, unit: TacticalUnit, tile: TacticalCoord): boolean {
+  if (!inBounds(state.grid, tile.x, tile.y)) return false;
+  if (unit.movementMode === "fly") return true;
+  if (isImpassable(state.grid, tile.x, tile.y)) return false;
+  const blocker = occupantAt(state, tile.x, tile.y, unit.id);
+  return !blocker || (unit.movementMode !== "teleport" && blocker.side === unit.side);
 }
 
 // ── Movement ──
@@ -248,10 +261,7 @@ export function getMovementRange(state: TacticalCombatState, unitId: string): Ta
     ] as const) {
       const nx = cx + dx;
       const ny = cy + dy;
-      if (!inBounds(grid, nx, ny) || isImpassable(grid, nx, ny)) continue;
-      const blocker = occupantAt(state, nx, ny, unit.id);
-      // Enemy units block traversal entirely.
-      if (blocker && blocker.side !== unit.side) continue;
+      if (!canTraverseTile(state, unit, { x: nx, y: ny })) continue;
       const enterCost = terrainInfoAt(grid, nx, ny).moveCost;
       const newCost = bestCost + enterCost;
       if (newCost > unit.movement) continue;
@@ -477,7 +487,7 @@ function canCounter(attacker: TacticalUnit, defender: TacticalUnit): boolean {
 
 function skillReady(unit: TacticalUnit, skill: CombatSkill): boolean {
   const cd = unit.skillCooldowns[skill.name] ?? 0;
-  return cd <= 0 && unit.mp >= skill.mpCost;
+  return cd <= 0 && (skill.slotLevel ? (unit.spellSlots?.[String(skill.slotLevel)] ?? 0) > 0 : unit.mp >= skill.mpCost);
 }
 
 function findSkill(unit: TacticalUnit, skillName: string): CombatSkill | undefined {
@@ -497,6 +507,7 @@ function performUnitAction(
   unit: TacticalUnit,
   action: Extract<TacticalAction, { unitId: string }>,
   events: TacticalEvent[],
+  prepaid = false,
 ): void {
   // Optional move-then-act.
   const to = "to" in action ? action.to : undefined;
@@ -565,13 +576,16 @@ function performUnitAction(
     case "skill": {
       unit.hasActed = true;
       const skill = findSkill(unit, action.skillName);
-      if (!skill) return;
-      if (!skillReady(unit, skill)) {
+      if (!skill || skill.reaction) return;
+      if (!prepaid && !skillReady(unit, skill)) {
         // Illegal at the AI layer shouldn't happen; fall back to a basic strike is avoided here.
         return;
       }
-      unit.mp = Math.max(0, unit.mp - skill.mpCost);
-      unit.skillCooldowns[skill.name] = Math.max(1, skill.cooldown ?? 1);
+      if (!prepaid) {
+        if (skill.slotLevel) unit.spellSlots![String(skill.slotLevel)]!--;
+        else unit.mp = Math.max(0, unit.mp - skill.mpCost);
+        unit.skillCooldowns[skill.name] = Math.max(1, skill.cooldown ?? 1);
+      }
 
       if (skill.type === "heal") {
         const target = getUnit(state, action.targetId ?? unit.id) ?? unit;
@@ -613,6 +627,27 @@ function performUnitAction(
       // Attack skill.
       const target = getUnit(state, action.targetId ?? "");
       if (!target || target.hp <= 0) return;
+      if ((skill.areaRadius ?? 0) > 0) {
+        const targets = aliveUnits(state).filter(
+          (other) =>
+            manhattan(target, other) <= skill.areaRadius! && (skill.friendlyFire === true || other.side !== unit.side),
+        );
+        for (const other of targets)
+          resolveHit(
+            state,
+            unit,
+            other,
+            {
+              power: Math.max(1, skill.power),
+              element: skill.element,
+              skillName: skill.name,
+              statusEffect: skill.statusEffect,
+              cooldownForStatus: skill.cooldown,
+            },
+            events,
+          );
+        return;
+      }
       const outcome = resolveHit(
         state,
         unit,
@@ -727,37 +762,11 @@ function clone(state: TacticalCombatState): TacticalCombatState {
  * acted, the phase auto-advances to "enemy" (the caller then runs
  * `runEnemyPhase`).
  */
-export function applyAction(state: TacticalCombatState, action: TacticalAction): ApplyActionResult {
-  if (isTerminal(state)) return { ok: false, error: "The battle is already over." };
-
-  const next = clone(state);
-  const events: TacticalEvent[] = [];
-
-  // Phase-level actions.
-  if (action.type === "flee") {
-    next.outcome = "fled";
-    events.push({ kind: "flee", text: "The party retreats from battle." });
-    appendLog(next, events);
-    return { ok: true, state: next, events };
-  }
-
-  if (action.type === "endTurn") {
-    if (next.phase !== "player") return { ok: false, error: "Not the player phase." };
-    for (const u of aliveUnits(next, "party")) u.hasActed = true;
-    next.phase = "enemy";
-    events.push({ kind: "phase", text: "Enemy Phase", phase: "enemy" });
-    appendLog(next, events);
-    return { ok: true, state: next, events };
-  }
-
-  // Unit actions.
-  if (next.phase !== "player") return { ok: false, error: "Not the player phase." };
-  const unit = getUnit(next, action.unitId);
-  if (!unit) return { ok: false, error: `Unknown unit: ${action.unitId}` };
-  if (unit.hp <= 0) return { ok: false, error: `${unit.name} is defeated.` };
-  if (unit.side !== "party") return { ok: false, error: "You can only command party units." };
-  if (unit.hasActed) return { ok: false, error: `${unit.name} has already acted this turn.` };
-
+export function validateTacticalUnitAction(
+  next: TacticalCombatState,
+  unit: TacticalUnit,
+  action: Extract<TacticalAction, { unitId: string }>,
+): { ok: false; error: string } | undefined {
   // Validate optional move (move-then-act) or dedicated move.
   const dest = action.type === "move" ? action.to : "to" in action ? action.to : undefined;
   if (dest && (dest.x !== unit.x || dest.y !== unit.y)) {
@@ -790,14 +799,17 @@ export function applyAction(state: TacticalCombatState, action: TacticalAction):
       const skill = findSkill(unit, action.skillName);
       if (!skill) return { ok: false, error: `Unknown skill: ${action.skillName}` };
       if ((unit.skillCooldowns[skill.name] ?? 0) > 0) return { ok: false, error: `${skill.name} is on cooldown.` };
-      if (unit.mp < skill.mpCost) return { ok: false, error: `Not enough MP for ${skill.name}.` };
+      if (skill.reaction) return { ok: false, error: "This ability requires a reaction window." };
+      if (skill.slotLevel && (unit.spellSlots?.[String(skill.slotLevel)] ?? 0) <= 0)
+        return { ok: false, error: "No spell slot available." };
+      if (!skill.slotLevel && unit.mp < skill.mpCost) return { ok: false, error: `Not enough MP for ${skill.name}.` };
       if (skill.type === "attack") {
         const target = getUnit(next, action.targetId ?? "");
         if (!target || target.hp <= 0 || target.side === unit.side) {
           return { ok: false, error: "Invalid skill target." };
         }
         const d = manhattan(fromTile, target);
-        const max = Math.max(unit.attackRange.max, 2);
+        const max = skill.range ?? Math.max(unit.attackRange.max, 2);
         if (d < 1 || d > max) return { ok: false, error: `${target.name} is out of skill range.` };
       } else {
         // heal/buff/debuff — must target a valid unit (ally for heal/buff, enemy for debuff) within support range.
@@ -807,7 +819,7 @@ export function applyAction(state: TacticalCombatState, action: TacticalAction):
         if (wantAlly && target.side !== unit.side) return { ok: false, error: "That skill targets allies." };
         if (!wantAlly && target.side === unit.side) return { ok: false, error: "That skill targets enemies." };
         const d = manhattan(fromTile, target);
-        if (d > 2) return { ok: false, error: `${target.name} is out of support range.` };
+        if (d > (skill.range ?? 2)) return { ok: false, error: `${target.name} is out of support range.` };
       }
       break;
     }
@@ -824,6 +836,50 @@ export function applyAction(state: TacticalCombatState, action: TacticalAction):
     case "wait":
       break;
   }
+}
+
+export function applyAction(state: TacticalCombatState, action: TacticalAction): ApplyActionResult {
+  if (isTerminal(state)) return { ok: false, error: "The battle is already over." };
+
+  const next = clone(state);
+  const events: TacticalEvent[] = [];
+
+  // Phase-level actions.
+  if (action.type === "flee") {
+    next.outcome = "fled";
+    events.push({ kind: "flee", text: "The party retreats from battle." });
+    appendLog(next, events);
+    return { ok: true, state: next, events };
+  }
+
+  if (action.type === "endTurn") {
+    if (next.phase !== "player") return { ok: false, error: "Not the player phase." };
+    for (const u of aliveUnits(next, "party")) u.hasActed = true;
+    next.phase = "enemy";
+    events.push({ kind: "phase", text: "Enemy Phase", phase: "enemy" });
+    appendLog(next, events);
+    return { ok: true, state: next, events };
+  }
+
+  // Unit actions.
+  if (next.phase !== "player") return { ok: false, error: "Not the player phase." };
+  const unit = getUnit(next, action.unitId);
+  if (!unit) return { ok: false, error: `Unknown unit: ${action.unitId}` };
+  if (unit.hp <= 0) return { ok: false, error: `${unit.name} is defeated.` };
+  if (unit.side !== "party") return { ok: false, error: "You can only command party units." };
+  if (unit.hasActed) return { ok: false, error: `${unit.name} has already acted this turn.` };
+
+  if (action.type === "control") {
+    if (action.controller !== "manual" && action.controller !== "ai")
+      return { ok: false, error: "Invalid controller." };
+    if (aliveUnits(next, "party")[0]?.id === unit.id && action.controller === "ai")
+      return { ok: false, error: "The active leader stays under player control." };
+    unit.controller = action.controller;
+    return { ok: true, state: next, events };
+  }
+
+  const invalid = validateTacticalUnitAction(next, unit, action);
+  if (invalid) return invalid;
 
   performUnitAction(next, unit, action, events);
 
@@ -876,6 +932,7 @@ export function buildTacticalSummary(state: TacticalCombatState): CombatSummary 
 // NOT via the feature's public index.ts — keeps the shared public surface clean).
 export {
   aliveUnits,
+  occupantAt,
   appendLog,
   canCounter,
   checkTerminal,

@@ -527,7 +527,7 @@ test("an ordinary setup import keeps the prefilled seed", async ({ page }, testI
   await expect(wizard.getByRole("alert")).toHaveCount(0);
 });
 
-test("Tactical setup imports and submits seed zero, size and terrain guidance", async ({ page }, testInfo) => {
+test("Tactical setup keeps seed and size without global terrain guidance", async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   await page.route("**/api/capability-packages/installed", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/capability-packages/agents", (route) => route.fulfill({ json: [] }));
@@ -569,7 +569,8 @@ test("Tactical setup imports and submits seed zero, size and terrain guidance", 
   const seed = wizard.getByLabel("Battlefield seed", { exact: true });
   await expect(seed).toHaveValue("0");
   await expect(wizard.getByLabel("Battlefield size", { exact: true })).toHaveValue("large");
-  await expect(wizard.getByLabel("Terrain guidance", { exact: true })).toHaveValue("Ruins beside a forest clearing.");
+  await expect(wizard.getByLabel("Terrain guidance", { exact: true })).toHaveCount(0);
+  await expect(wizard.getByText(/Fire Emblem/)).toHaveCount(0);
   await seed.fill("1.5");
   await expect(wizard.getByRole("alert")).toContainText(/whole number/i);
   for (let step = 0; step < 5; step++) await next();
@@ -583,7 +584,7 @@ test("Tactical setup imports and submits seed zero, size and terrain guidance", 
   await expect(seed).toHaveCount(0);
   await wizard.getByRole("button", { name: /^Tactical/ }).click();
   await expect(seed).toHaveValue("0");
-  await wizard.getByLabel("Terrain guidance", { exact: true }).scrollIntoViewIfNeeded();
+  await seed.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("hybrid-terrain-setup.png") });
   for (let step = 0; step < 5; step++) await next();
   await expect(wizard.getByRole("button", { name: "Download setup", exact: true })).toBeEnabled();
@@ -593,6 +594,5 @@ test("Tactical setup imports and submits seed zero, size and terrain guidance", 
   expect(result.config.tacticalBattlefield).toEqual({
     seed: 0,
     size: "large",
-    instructions: "Ruins beside a forest clearing.",
   });
 });

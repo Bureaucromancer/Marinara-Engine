@@ -1,3 +1,4 @@
+import type { CombatController, CombatTactics } from "../combat-ai.js";
 // ──────────────────────────────────────────────
 // Tactical Combat — shared types
 // ──────────────────────────────────────────────
@@ -136,6 +137,10 @@ export interface TacticalAttackRange {
  * fields verbatim (so summaries + hydration stay lossless) plus grid state.
  */
 export interface TacticalUnit {
+  boss?: import("../combat-director.js").CombatBoss;
+  spellSlots?: Record<string, number>;
+  tactics?: CombatTactics;
+  controller?: CombatController;
   // ── carried from Combatant ──
   id: string;
   name: string;
@@ -184,6 +189,7 @@ export interface TacticalUnit {
 // ── Actions ──
 
 export type TacticalAction =
+  | { type: "control"; unitId: string; controller: CombatController }
   | { type: "move"; unitId: string; to: TacticalCoord }
   | { type: "attack"; unitId: string; targetId: string; to?: TacticalCoord }
   | { type: "skill"; unitId: string; skillName: string; targetId?: string; tile?: TacticalCoord; to?: TacticalCoord }

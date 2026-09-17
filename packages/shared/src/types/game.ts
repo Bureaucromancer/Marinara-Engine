@@ -1,3 +1,4 @@
+import type { CombatAiHints, CombatController, CombatTactics } from "../features/combat-ai.js";
 // ──────────────────────────────────────────────
 // Game Mode Types
 // ──────────────────────────────────────────────
@@ -209,6 +210,9 @@ export interface GameSetupConfig {
   rating: "sfw" | "nsfw";
   /** Combat presentation preference (classic menu battles vs tactical grid battles). Defaults to "classic". */
   combatStyle?: GameCombatStyle;
+  /** Versioned server-owned combat with interruption windows; absent preserves legacy battles. */
+  combatDirector?: boolean;
+  gmBossControl?: boolean;
   /** Optional tactical battlefield preferences used for newly-created encounters. */
   tacticalBattlefield?: TacticalBattlefieldSetup;
   /** Optional user prompt used to create the initial hierarchical world map draft. */
@@ -485,6 +489,13 @@ export interface GameDicePoolSlotName {
 
 /** A combatant (player or enemy) in the battle system. */
 export interface Combatant {
+  boss?: import("../features/combat-director.js").CombatBoss;
+  spellSlots?: Record<string, number>;
+  combatRound?: number;
+  tactics?: CombatTactics;
+  aiHints?: CombatAiHints;
+  controller?: CombatController;
+  skillCooldowns?: Record<string, number>;
   id: string;
   name: string;
   hp: number;
@@ -520,6 +531,14 @@ export interface CombatStatusEffect {
 }
 
 export interface CombatSkill {
+  areaRadius?: number;
+  friendlyFire?: boolean;
+  targetScope?: "single" | "all-enemies";
+  spell?: boolean;
+  reaction?: "counterspell" | "guard";
+  range?: number;
+  slotLevel?: number;
+  legendaryCost?: number;
   id: string;
   name: string;
   /** "attack" | "heal" | "buff" | "debuff" */
@@ -596,9 +615,9 @@ export type CombatPlayerAction =
 /**
  * Snapshot of an in-progress combat encounter, persisted to chat metadata so a
  * page refresh during a fight restores the live party/enemy state instead of
- * dropping back into prose narration. Internal GameCombatUI state (round
- * number, action queue, animation phase) is intentionally NOT persisted —
- * those resume from the start of the round on restore.
+ * dropping back into prose narration. Combatants carry the next Classic round,
+ * profiles, controllers and cooldowns. Pending manual orders and cosmetic
+ * animation are not persisted; restore presents the last accepted result.
  */
 export interface GameCombatStateSnapshot {
   party: Combatant[];
@@ -631,6 +650,9 @@ export interface CombatSummary {
     hp: number;
     maxHp: number;
     ko: boolean;
+    mp?: number;
+    maxMp?: number;
+    spellSlots?: Record<string, number>;
     statusEffects: string[];
   }>;
   enemies: Array<{
