@@ -449,7 +449,7 @@ try {
 
   // Tools can run before the assistant exists; bind their writes after save without
   // overwriting a human edit, and preserve the pre-turn snapshot across repeated calls.
-  {
+  for (const hasUserSource of [true, false]) {
     const { resolveGenerationTools } =
       await import("../../packages/server/src/services/generation/tool-resolution-runtime.js");
     const { stampLorebookWriteApprovalSource, buildLorebookWriteApprovalProposal } =
@@ -457,7 +457,9 @@ try {
     const chat = (await chats.create({ name: "Tool provenance", mode: "roleplay", characterIds: [] }))!;
     const user = (await chats.createMessage({ chatId: chat.id, role: "user", content: "Inspect the ledger" }))!;
     const toolBook = (await lorebooks.create({ name: "Tool lore" }))!;
-    let refs: Array<{ id: string; swipeIndex: number | null }> = [{ id: user.id, swipeIndex: null }];
+    let refs: Array<{ id: string; swipeIndex: number | null }> = hasUserSource
+      ? [{ id: user.id, swipeIndex: null }]
+      : [];
     const agent = {
       id: "tool-keeper",
       type: "tool-keeper",
@@ -490,7 +492,7 @@ try {
       agentContext: {
         chatId: chat.id,
         chatMode: "roleplay",
-        recentMessages: [{ id: user.id, role: "user", content: user.content }],
+        recentMessages: hasUserSource ? [{ id: user.id, role: "user", content: user.content }] : [],
         mainResponse: null,
         gameState: null,
         characters: [],

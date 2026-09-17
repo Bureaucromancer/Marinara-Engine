@@ -187,6 +187,8 @@ function parseStringArray(value: unknown): string[] {
 export type EntryProvenanceInput = {
   sourceAgentId?: string | null;
   sourceMessageRefs?: SourceMessageRef[];
+  /** Repeated tool writes in one turn retain the snapshot taken by its first write. */
+  preserveProvenanceSnapshot?: boolean;
 };
 
 function serializeMessageRefs(refs: SourceMessageRef[] | undefined): string {
@@ -1018,7 +1020,7 @@ export function createLorebooksStorage(db: DB) {
           const current = (await db.select().from(lorebookEntries).where(eq(lorebookEntries.id, id)))[0];
           if (
             current &&
-            (!input.sourceMessageRefs?.length ||
+            ((!input.sourceMessageRefs?.length && !input.preserveProvenanceSnapshot) ||
               current.sourceAgentId !== input.sourceAgentId ||
               current.sourceMessageRefs !== serializeMessageRefs(input.sourceMessageRefs))
           ) {
