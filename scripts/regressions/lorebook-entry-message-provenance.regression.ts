@@ -86,6 +86,23 @@ try {
     );
     const listed = await lorebooks.listEntries(book.id);
     assert.ok(listed.some((entry) => entry.id === created.id && entry.sourceAgentId === "lorebook-keeper"));
+    const { default: Fastify } = await import("../../packages/server/node_modules/fastify/fastify.js");
+    const { lorebooksRoutes } = await import("../../packages/server/src/routes/lorebooks.routes.js");
+    const app = Fastify();
+    app.decorate("db", db);
+    await app.register(lorebooksRoutes, { prefix: "/api/lorebooks" });
+    try {
+      const result = await app.inject(
+        `/api/lorebooks/${book.id}/entries?sourceMessageId=m-user-1&sourceMessageId=other`,
+      );
+      assert.equal(result.statusCode, 200, result.body);
+      assert.deepEqual(
+        result.json().map((entry: { id: string }) => entry.id),
+        [created.id],
+      );
+    } finally {
+      await app.close();
+    }
   }
 
   // ── createEntry without provenance reads back unattributed ──
@@ -438,7 +455,12 @@ try {
       writableLorebookIds: [book3.id],
       sourceAgentId: "lorebook-keeper",
       sourceMessageRefs: [],
-      updates: [{ name: "Anchored lore", content: "Second state.", keys: ["anchor"] }],
+      updates: [
+        { name: "Anchored lore", content: "Intermediate state.", keys: ["anchor"], targetLorebook: book3.name },
+        { name: "Anchored lore", content: "Second state.", keys: ["anchor"] },
+        { name: "New unanchored lore", content: "Intermediate new state." },
+        { name: "New unanchored lore", content: "Final new state." },
+      ],
     });
     const rewritten = await lorebooks.getEntry(entry.id);
     assert.ok(rewritten);
@@ -449,6 +471,8 @@ try {
       await db.select().from((await import("../../packages/server/src/db/schema/lorebooks.js")).lorebookEntries)
     ).find((candidate: { id: string }) => candidate.id === entry.id);
     assert.equal(row.previousContent, "First state.", "empty-refs rewrite still snapshots");
+    const newEntry = (await db.select().from(lorebookEntries)).find((entry) => entry.name === "New unanchored lore");
+    assert.equal(newEntry?.previousContent, null, "new entries must not acquire an intermediate undo snapshot");
   }
 
   // Tools can run before the assistant exists; bind their writes after save without

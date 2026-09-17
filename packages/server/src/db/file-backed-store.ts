@@ -319,7 +319,7 @@ type InsertValuesBuilder = Executable<void> & {
 // Exported so regressions can pin behavior against the CURRENT version
 // without chasing literals on every bump. Must equal root storage-format.json
 // (the launcher-format-guard regression pins the pairing).
-export const STORAGE_VERSION = 6;
+export const STORAGE_VERSION = 7;
 export const STORAGE_WRITER_LEASE_FILENAME = ".writer-lease";
 export const STORAGE_WRITER_OWNER_FILENAME = "owner.json";
 export const STORAGE_WRITER_LIVENESS_FILENAME = "live.sock";
@@ -3354,7 +3354,12 @@ class FileTableStore {
     if (this.activeFlush) {
       await this.activeFlush;
       // An admitted flush joins shutdown's drain instead of starting a new flush after close.
-      if (this.closePromise && !allowClosed && !transactionContext) return this.closePromise;
+      if (this.closePromise && !allowClosed && !transactionContext) {
+        const activeFlushError = this.lastFlushError;
+        await this.closePromise;
+        if (throwOnError && activeFlushError) throw activeFlushError;
+        return;
+      }
       if (this.dirty || this.dirtyTables.size > 0) await this.flush(force, throwOnError, allowClosed);
       else if (throwOnError && this.lastFlushError) throw this.lastFlushError;
       return;
