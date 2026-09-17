@@ -16,9 +16,11 @@ export {
   applyAction,
   isTerminal,
   buildTacticalSummary,
+  validateTacticalUnitAction,
+  performUnitAction as performTacticalUnitAction,
+  tickRound as tickTacticalRound,
 } from "./engine.js";
-
-export { runEnemyPhase } from "./ai.js";
+export { decideTacticalAction, runEnemyPhase, applyTacticalTurn } from "./ai.js";
 
 export { summarizeTacticalBattlefield } from "./battlefield-summary.js";
 

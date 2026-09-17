@@ -1,3 +1,5 @@
+import { chooseClassicAction } from "./combat-ai.service.js";
+import type { CombatController, CombatTactics } from "@marinara-engine/shared";
 // ──────────────────────────────────────────────
 // Game: Combat Math Service
 //
@@ -14,6 +16,10 @@ import { resolveElementApplication, applyReactionDamage } from "./element-reacti
 // ── Types ──
 
 export interface CombatantStats {
+  tactics?: CombatTactics;
+  controller?: CombatController;
+  skillCooldowns?: Record<string, number>;
+  spellSlots?: Record<string, number>;
   id: string;
   name: string;
   hp: number;
@@ -106,7 +112,16 @@ export interface CombatRoundResult {
   reactions: Array<{ attackerId: string; defenderId: string; reaction: string; description: string }>;
 }
 
-const TURN_SKIP_STATUS_NAMES = new Set(["frozen", "stunned", "imprisoned"]);
+const TURN_SKIP_STATUS_NAMES = new Set([
+  "frozen",
+  "stun",
+  "stunned",
+  "imprisoned",
+  "paralyzed",
+  "incapacitated",
+  "sleep",
+  "asleep",
+]);
 
 function activeStatusEffects(combatant: CombatantStats): StatusEffect[] {
   return combatant.statusEffects?.filter((effect) => effect.turnsLeft > 0) ?? [];
@@ -127,20 +142,72 @@ function getTurnSkipReason(combatant: CombatantStats, effectiveSpeed: number): s
   return effectiveSpeed <= 0 ? "immobilized" : null;
 }
 
+export function canCombatantAct(combatant: CombatantStats): boolean {
+  return combatant.hp > 0 && getTurnSkipReason(combatant, getEffectiveSpeed(combatant)) === null;
+}
+
 function resolveSkillAction(
   attacker: CombatantStats,
   target: CombatantStats,
   skill: CombatSkill,
   difficulty: string = "normal",
   elementPreset?: string,
+  prepaid = false,
 ): AttackResult {
   const currentMp = attacker.mp ?? 0;
-  if (skill.mpCost > currentMp) {
-    const fallback = resolveAttack(attacker, target, difficulty, elementPreset);
-    return { ...fallback, skillName: skill.name };
+  if (
+    !prepaid &&
+    ((skill.slotLevel ? (attacker.spellSlots?.[String(skill.slotLevel)] ?? 0) <= 0 : skill.mpCost > currentMp) ||
+      (attacker.tactics && (attacker.skillCooldowns?.[skill.id] ?? 0) > 0))
+  ) {
+    return {
+      attackerId: attacker.id,
+      defenderId: target.id,
+      attackRoll: 0,
+      defenseRoll: 0,
+      rawDamage: 0,
+      mitigated: 0,
+      finalDamage: 0,
+      isCritical: false,
+      isMiss: false,
+      remainingHp: target.hp,
+      isKo: target.hp <= 0,
+      isHeal: skill.type === "heal" || skill.type === "buff",
+      skillName: skill.name,
+    };
   }
 
-  attacker.mp = Math.max(0, currentMp - skill.mpCost);
+  if (!prepaid) {
+    if (skill.slotLevel) attacker.spellSlots![String(skill.slotLevel)]!--;
+    else attacker.mp = Math.max(0, currentMp - skill.mpCost);
+  }
+  if (attacker.tactics && !prepaid) {
+    attacker.skillCooldowns ??= {};
+    attacker.skillCooldowns[skill.id] = Math.max(1, skill.cooldown ?? 1);
+  }
+  if (skill.type === "buff" || skill.type === "debuff") {
+    applyNamedStatus(target, {
+      name: skill.statusEffect || skill.name,
+      modifier: skill.type === "buff" ? 2 : -2,
+      stat: "defense",
+      turnsLeft: Math.max(2, skill.cooldown ?? 2),
+    });
+    return {
+      attackerId: attacker.id,
+      defenderId: target.id,
+      attackRoll: 0,
+      defenseRoll: 0,
+      rawDamage: 0,
+      mitigated: 0,
+      finalDamage: 0,
+      isCritical: false,
+      isMiss: false,
+      remainingHp: target.hp,
+      isKo: false,
+      isHeal: skill.type === "buff",
+      skillName: skill.name,
+    };
+  }
 
   if (skill.type === "heal") {
     const healAmount = Math.max(1, Math.floor((attacker.attack + attacker.level * 2) * Math.max(skill.power, 0.5)));
@@ -296,7 +363,11 @@ function chooseAutoSkill(
   round: number,
 ): { skill: CombatSkill; target: CombatantStats } | null {
   const usableSkills = (attacker.skills ?? []).filter((skill) => {
-    if ((attacker.mp ?? 0) < skill.mpCost) return false;
+    if (skill.reaction) return false;
+    if (
+      skill.slotLevel ? (attacker.spellSlots?.[String(skill.slotLevel)] ?? 0) <= 0 : (attacker.mp ?? 0) < skill.mpCost
+    )
+      return false;
     const cooldown = Math.max(0, Math.floor(Number(skill.cooldown) || 0));
     return cooldown <= 1 || round % cooldown === 0;
   });
@@ -316,7 +387,8 @@ function chooseAutoSkill(
   }
 
   const skill = offensiveSkills[Math.floor(Math.random() * offensiveSkills.length)]!;
-  const target = enemies[Math.floor(Math.random() * enemies.length)]!;
+  const pool = skill.type === "buff" ? allies : enemies;
+  const target = pool[Math.floor(Math.random() * pool.length)]!;
   return { skill, target };
 }
 
@@ -593,16 +665,29 @@ export function resolveCombatRound(
   elementPreset?: string,
   playerAction?: PlayerAction,
   mechanics?: CombatMechanic[],
+  partyActions?: Record<string, PlayerAction>,
+  controlledId?: string,
+  directed?: {
+    actorId: string;
+    action: PlayerAction;
+    defendingIds: Set<string>;
+    prepaid?: boolean;
+    finishRound?: boolean;
+  },
 ): CombatRoundResult {
   const alive = combatants.filter((c) => c.hp > 0);
-  const initiative = rollInitiative(alive);
+  const initiative: InitiativeEntry[] = directed
+    ? alive
+        .filter((c) => c.id === directed.actorId)
+        .map((c) => ({ id: c.id, name: c.name, roll: 0, speed: c.speed, total: c.speed }))
+    : rollInitiative(alive);
   const actions: AttackResult[] = [];
   const statusTicks: Array<{ id: string; effect: string; expired: boolean }> = [];
   const reactions: CombatRoundResult["reactions"] = [];
 
   // Track defending combatants for defense bonus
-  const defendingIds = new Set<string>();
-  const controlledPlayerId = combatants.find((c) => c.hp > 0 && (c as { side?: string }).side === "player")?.id ?? null;
+  const defendingIds = directed?.defendingIds ?? new Set<string>();
+  const controlledPlayerId = controlledId ?? combatants.find((c) => c.hp > 0 && c.side === "player")?.id ?? null;
 
   // Each combatant acts in initiative order
   for (const entry of initiative) {
@@ -611,6 +696,74 @@ export function resolveCombatRound(
     if (entry.skipsTurn) continue;
 
     const isPlayerSide = (attacker as { side?: string }).side === "player";
+
+    if (directed || attacker.tactics || (isPlayerSide && partyActions?.[attacker.id])) {
+      const allies = combatants.filter((c) => c.hp > 0 && c.side === attacker.side);
+      const opponents = combatants.filter((c) => c.hp > 0 && c.side !== attacker.side);
+      if (!opponents.length) break;
+      const command =
+        directed?.action ??
+        (isPlayerSide
+          ? (partyActions?.[attacker.id] ?? (attacker.id === controlledPlayerId ? playerAction : undefined))
+          : undefined);
+      const choice =
+        command ??
+        (isPlayerSide && attacker.controller === "manual"
+          ? { type: "defend" as const }
+          : chooseClassicAction(attacker, allies, opponents, round));
+      if (choice.type === "defend") {
+        defendingIds.add(attacker.id);
+        continue;
+      }
+      if (choice.type === "flee") continue;
+      const skill = choice.type === "skill" ? attacker.skills?.find((s) => s.id === choice.skillId) : undefined;
+      const support = skill?.type === "heal" || skill?.type === "buff";
+      const pool =
+        choice.type === "item"
+          ? choice.itemEffect?.target === "enemy"
+            ? opponents
+            : choice.itemEffect?.target === "any"
+              ? [...allies, ...opponents]
+              : allies
+          : support
+            ? allies
+            : opponents;
+      const target = pool.find((c) => c.id === choice.targetId) ?? pool[0]!;
+      // An unavailable skill must never become friendly-fire damage.
+      if (
+        choice.type === "skill" &&
+        (!skill ||
+          skill.reaction ||
+          (!directed?.prepaid &&
+            ((skill.slotLevel
+              ? (attacker.spellSlots?.[String(skill.slotLevel)] ?? 0) <= 0
+              : (attacker.mp ?? 0) < skill.mpCost) ||
+              (attacker.skillCooldowns?.[skill.id] ?? 0) > 0)))
+      ) {
+        defendingIds.add(attacker.id);
+        continue;
+      }
+      const originalDefense = target.defense;
+      if (defendingIds.has(target.id) && target.side !== attacker.side)
+        target.defense = Math.floor(target.defense * 1.5);
+      const result =
+        choice.type === "item"
+          ? resolveItemAction(attacker, target, choice.itemId, choice.itemEffect, elementPreset)
+          : skill
+            ? resolveSkillAction(attacker, target, skill, difficulty, elementPreset, directed?.prepaid)
+            : resolveAttack(attacker, target, difficulty, elementPreset);
+      target.defense = originalDefense;
+      target.hp = result.remainingHp;
+      actions.push(result);
+      if (result.reaction)
+        reactions.push({
+          attackerId: attacker.id,
+          defenderId: target.id,
+          reaction: result.reaction.reaction,
+          description: result.reaction.description,
+        });
+      continue;
+    }
 
     if (isPlayerSide) {
       const allies = combatants.filter((c) => c.hp > 0 && (c as { side?: string }).side === "player");
@@ -645,7 +798,8 @@ export function resolveCombatRound(
 
         if (playerAction.type === "skill") {
           const skill = attacker.skills?.find((candidate) => candidate.id === playerAction.skillId);
-          const targetPool = skill?.type === "heal" ? allies : opposingSide;
+          if (skill?.reaction) continue;
+          const targetPool = skill?.type === "heal" || skill?.type === "buff" ? allies : opposingSide;
           let target = playerAction.targetId ? targetPool.find((c) => c.id === playerAction.targetId) : undefined;
           if (!target) target = targetPool[Math.floor(Math.random() * targetPool.length)]!;
           const result = skill
@@ -731,12 +885,16 @@ export function resolveCombatRound(
     target.hp = result.remainingHp;
   }
 
+  if (directed && !directed.finishRound) return { round, initiative, actions, statusTicks, reactions };
+
   const mechanicResult = resolveMechanicActions(combatants, round, mechanics, elementPreset, defendingIds);
   actions.push(...mechanicResult.actions);
   reactions.push(...mechanicResult.reactions);
 
   // Tick status effects at end of round
   for (const c of combatants) {
+    if (c.tactics && c.skillCooldowns)
+      for (const key of Object.keys(c.skillCooldowns)) c.skillCooldowns[key] = Math.max(0, c.skillCooldowns[key]! - 1);
     if (c.hp <= 0) continue;
     const { updated, ticks } = tickStatusEffects(c);
     Object.assign(c, updated);

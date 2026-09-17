@@ -4,6 +4,17 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 
 ## [Unreleased]
 
+- Linux sandbox regressions probe the actual host process instead of Bubblewrap’s isolated supervisor and accept explicit denial when reading a masked secret file, avoiding false failures without weakening the isolation checks.
+
+- Combat AI review fixes keep Methodical units focused on real opponents, respect legacy skill ranges, and report invalid enemy MP and corrupt saves clearly. Combat events can be translated, item prompts match their targets, and mobile terrain inspection leaves battle controls accessible. Battlefield reload checks no longer depend on browser resource-timing history (#6303).
+
+- Codex has a dedicated `AGENTS.md` with OpenAI model and tool guidance; skills remain shared through `.agents/skills → .claude/skills`. Completed, locally validated and reviewed PRs now proceed to ready for review without a separate confirmation.
+
+- New Game Mode battles use saved combat temperaments in Classic and Tactical, including Patient, Methodical and Coordinated. Explicit Mindless hints also work for other creature types. Companion control can be chosen per member; generated enemies retain usable MP, and Classic support skills target the correct side with saved cooldowns.
+- New Game Mode battles can let the GM direct authored bosses in Classic and Tactical, with legendary actions, turn-start anticipation, and optional Counterspell/guard reactions. Saved decisions protect resources across reloads, duplicate commands and late GM replies; manual party reactions show their MP or spell-slot cost.
+- Restoring combat preserves the encounter anchor and mechanics instead of clearing them during screen initialization.
+- Classic combat consumes items only when their accepted action executes, keeping abandoned retries and skipped turns from spending inventory, and retains spent spell slots between rounds. Tactical AI uses the same skill-power floor as combat resolution when weighing area attacks.
+- Game creation describes Tactical combat without an external game comparison and no longer asks for permanent terrain guidance. Added combat AI, Summoning and versioned ruleset handoffs, with the implemented boss/reaction boundaries and remaining ruleset work.
 - Storage flushes already waiting when shutdown starts now join the final write drain, avoiding a spurious closed-store error while preserving pending data and reporting failed admitted writes even when shutdown retries successfully (#6298).
 
 - Capability packages can now offer tools the model calls during a turn, so a package that owns live state receives structured, validated data instead of parsing it back out of the reply. Narration still streams while the call happens. See `docs/development/optional-agent-packages.md` for the package-author API.

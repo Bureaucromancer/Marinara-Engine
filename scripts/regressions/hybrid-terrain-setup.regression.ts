@@ -38,7 +38,10 @@ assert.ok(
   summary.some((row) => row.value === "Localized large battlefield"),
   "The reusable summary uses the localized size label",
 );
-assert.ok(summary.some((row) => String(row.value).includes("forest clearing")));
+assert.ok(
+  !summary.some((row) => String(row.value).includes("forest clearing")),
+  "Retired creation-time guidance is preserved in imported data but is not advertised as an active setting.",
+);
 
 for (const [size, expectedLabel] of [
   [undefined, "Localized automatic battlefield"],

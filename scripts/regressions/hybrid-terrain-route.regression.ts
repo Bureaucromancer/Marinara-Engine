@@ -74,7 +74,57 @@ try {
   });
   assert.equal(created.statusCode, 200, created.body);
   const session = created.json().sessionChat;
+  for (const controlledId of ["guard", "missing", "dead"]) {
+    const invalidControl = await app.inject({
+      method: "POST",
+      url: "/api/game/combat/round",
+      payload: {
+        chatId: session.id,
+        round: 1,
+        combatants: [
+          { ...party[0], side: "player" },
+          { ...party[0], id: "dead", hp: 0, side: "player" },
+          { ...enemies[0], side: "enemy" },
+        ],
+        controlledId,
+        playerAction: { type: "defend" },
+      },
+    });
+    assert.equal(invalidControl.statusCode, 400, "Invalid controlled units must be rejected");
+  }
+  for (const commands of [
+    {},
+    { controlledId: "hero", playerAction: { type: "defend" } },
+    { partyActions: { hero: { type: "defend" } } },
+  ]) {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/game/combat/round",
+      payload: { chatId: session.id, round: 1, combatants: [...party, ...enemies], ...commands },
+    });
+    assert.equal(
+      response.statusCode,
+      Object.keys(commands).length ? 400 : 200,
+      "Omitted-side legacy rounds remain accepted, but new party commands require an explicit player side",
+    );
+  }
   const metadata = JSON.parse(session.metadata);
+  for (const id of ["missing", "guard", "constructor", "__proto__"]) {
+    const invalidOrders = await app.inject({
+      method: "POST",
+      url: "/api/game/combat/round",
+      payload: {
+        chatId: session.id,
+        round: 1,
+        combatants: [
+          { ...party[0], side: "player" },
+          { ...enemies[0], side: "enemy" },
+        ],
+        partyActions: Object.fromEntries([[id, { type: "defend" }]]),
+      },
+    });
+    assert.equal(invalidOrders.statusCode, 400, `Invalid order actor ${id} must be rejected`);
+  }
   assert.deepEqual(metadata.gameSetupConfig.tacticalBattlefield, setupConfig.tacticalBattlefield);
 
   const started = await app.inject({
@@ -211,6 +261,46 @@ try {
     assert.notEqual(validTerrain.blueprint.battlefield, validTerrainInput.battlefield);
   }
   assert.equal(validTerrainInput.battlefield.terrainBriefError, "model-authored spoof");
+
+  const invalidProfile = structuredClone(state);
+  invalidProfile.units[0].tactics.category = "beast";
+  invalidProfile.units[0].tactics.adjective = "cautious";
+  const rejectedProfile = await app.inject({
+    method: "POST",
+    url: "/api/game/combat/tactical/action",
+    payload: { chatId: session.id, state: invalidProfile, action: { type: "wait", unitId: "hero" } },
+  });
+  assert.equal(rejectedProfile.statusCode, 400);
+  assert.match(rejectedProfile.json().error, /Mindless/);
+  const invalidController = await app.inject({
+    method: "POST",
+    url: "/api/game/combat/tactical/action",
+    payload: { chatId: session.id, state, action: { type: "control", unitId: "hero", controller: "remote" } },
+  });
+  assert.equal(invalidController.statusCode, 400);
+  const automatedLeader = await app.inject({
+    method: "POST",
+    url: "/api/game/combat/tactical/action",
+    payload: { chatId: session.id, state, action: { type: "control", unitId: "hero", controller: "ai" } },
+  });
+  assert.equal(automatedLeader.statusCode, 400);
+  assert.match(automatedLeader.json().error, /leader stays under player control/);
+  const classicParty = { ...party[0], side: "player", tactics: state.units[0].tactics, skillCooldowns: { heal: 2 } };
+  const classicEnemy = { ...enemies[0], side: "enemy", hp: 5000, maxHp: 5000, tactics: state.units[1].tactics };
+  const classic = await app.inject({
+    method: "POST",
+    url: "/api/game/combat/round",
+    payload: {
+      chatId: session.id,
+      combatants: [classicParty, classicEnemy],
+      round: 4,
+      controlledId: "hero",
+      partyActions: { hero: { type: "defend" } },
+    },
+  });
+  assert.equal(classic.statusCode, 200, classic.body);
+  assert.deepEqual(classic.json().combatants[0].tactics, classicParty.tactics);
+  assert.equal(classic.json().combatants[0].skillCooldowns.heal, 1);
 
   const legacyState = structuredClone(state);
   for (const unit of legacyState.units) delete unit.movementMode;

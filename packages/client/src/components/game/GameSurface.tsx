@@ -1,3 +1,4 @@
+import { assignCombatTactics, combatTacticsSchema } from "@marinara-engine/shared";
 // ──────────────────────────────────────────────
 // Game: Main Surface (rendered by ChatArea when mode === "game")
 // ──────────────────────────────────────────────
@@ -965,12 +966,20 @@ function combatSkillsFromGeneratedAttacks(
     if (!id || seen.has(id)) continue;
     seen.add(id);
     const description = attack.description || (attack.type === "AoE" ? "Area combat ability" : "Combat ability");
-    const type = inferCombatSkillType(`${name} ${description} ${attack.statusEffect ?? ""}`);
+    const type = attack.kind ?? inferCombatSkillType(`${name} ${description} ${attack.statusEffect ?? ""}`);
     skills.push({
       id,
       name,
       type,
-      mpCost: Math.max(4, Math.min(18, 5 + level)),
+      areaRadius: attack.areaRadius,
+      friendlyFire: attack.friendlyFire,
+      targetScope: attack.targetScope,
+      spell: attack.spell,
+      reaction: attack.reaction,
+      range: attack.range,
+      slotLevel: attack.slotLevel,
+      legendaryCost: attack.legendaryCost,
+      mpCost: attack.mpCost ?? Math.max(4, Math.min(18, 5 + level)),
       power:
         typeof attack.power === "number" && Number.isFinite(attack.power)
           ? Math.max(0.5, Math.min(3, attack.power))
@@ -1013,7 +1022,8 @@ function isValidCombatant(value: unknown): value is Combatant {
     typeof v.defense === "number" &&
     typeof v.speed === "number" &&
     typeof v.level === "number" &&
-    (v.side === "player" || v.side === "enemy")
+    (v.side === "player" || v.side === "enemy") &&
+    (v.tactics === undefined || combatTacticsSchema.safeParse(v.tactics).success)
   );
 }
 
@@ -1039,6 +1049,8 @@ export function generatedPartyMemberToCombatant(
   const combatClass = typeof member.class === "string" && member.class.trim() ? member.class.trim() : undefined;
   const movementMode = normalizeCombatMovementMode(member.movementMode);
   return {
+    aiHints: member.aiHints,
+    spellSlots: member.spellSlots,
     id: matchedAvatar?.id ?? `generated-party-${index}-${slugifyCombatantId(member.name)}`,
     name: member.name || `Ally ${index + 1}`,
     hp,
@@ -1052,7 +1064,13 @@ export function generatedPartyMemberToCombatant(
     side: "player",
     sprite: matchedAvatar?.avatarUrl ?? undefined,
     statusEffects: combatStatusEffectsFromGenerated(member.statuses),
-    skills: combatSkillsFromSheet(gameCard?.abilities) ?? combatSkillsFromGeneratedAttacks(member.attacks, level),
+    skills:
+      combatSkillsFromSheet(gameCard?.abilities)?.map((skill) => ({
+        ...skill,
+        ...combatSkillsFromGeneratedAttacks(member.attacks, level)?.find(
+          (generated) => generated.name.trim().toLowerCase() === skill.name.trim().toLowerCase(),
+        ),
+      })) ?? combatSkillsFromGeneratedAttacks(member.attacks, level),
     element,
     combatClass,
     movementMode,
@@ -1083,6 +1101,11 @@ export function generatedEnemyToCombatant(enemy: CombatEnemy, index: number, fal
   const combatClass = typeof enemy.class === "string" && enemy.class.trim() ? enemy.class.trim() : undefined;
   const movementMode = normalizeCombatMovementMode(enemy.movementMode);
   return {
+    aiHints: enemy.aiHints,
+    boss: enemy.boss,
+    spellSlots: enemy.spellSlots,
+    mp: enemy.mp ?? enemy.maxMp ?? 20 + level * 3,
+    maxMp: enemy.maxMp ?? enemy.mp ?? 20 + level * 3,
     id: `generated-enemy-${index}-${slugifyCombatantId(enemy.name)}`,
     name: enemy.name || `Enemy ${index + 1}`,
     hp,
@@ -1524,6 +1547,8 @@ const GameAssetsBrowserView = lazy(async () => {
   const module = await import("../game-assets/GameAssetsBrowserView");
   return { default: module.GameAssetsBrowserView };
 });
+
+const DirectedCombatUI = lazy(() => import("./DirectedCombatUI").then((m) => ({ default: m.DirectedCombatUI })));
 
 const GameCombatUI = lazy(async () => {
   const module = await import("./GameCombatUI");
@@ -4622,6 +4647,25 @@ function GameSurfaceComponent({
     api.patch(`/chats/${chatId}/metadata`, { gameCombatState: null, gameTacticalCombatSnapshot: null }).catch(() => {});
   }, []);
 
+  const combatRestoredChatIdRef = useRef<string | null>(null);
+  // Reset before restoration: resetting afterward erased the restored encounter anchor and mechanics.
+  useEffect(() => {
+    setPendingMapMove(null);
+    setViewedMapId(null);
+    combatRestoredChatIdRef.current = null;
+    setCombatStartMessageId(null);
+    setQueuedCombatGeneration(null);
+    // #5094: abandon any in-flight combat generation here — clear the lock so a fresh request isn't
+    // blocked by it, and bump the request id so the old generation's stale completion can't re-queue
+    // combat, apply state, or set an error against the reset combat state.
+    combatGenerationInFlightRef.current = false;
+    combatGenerationRequestIdRef.current += 1;
+    setCombatGenerationPending(false);
+    setCombatItemEffects([]);
+    setCombatMechanics([]);
+    setCombatDialogueCues([]);
+  }, [activeChatId]);
+
   // ── Restore in-progress combat state from chat metadata on page load ──
   // Without this, refreshing during a fight drops the user back into prose narration even
   // though gameActiveState is still "combat", because the live party/enemy snapshot only
@@ -4629,7 +4673,6 @@ function GameSurfaceComponent({
   // Scoped per-chat so switching to another chat in the same mounted GameSurface still
   // gets a chance to restore that chat's snapshot — a single boolean would permanently
   // skip restore after the first chat opened.
-  const combatRestoredChatIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (isMessagesLoading) return;
     if (combatRestoredChatIdRef.current === activeChatId) return;
@@ -8452,7 +8495,11 @@ function GameSurfaceComponent({
         : [];
 
       if (partyCombatants.length === 0 || enemyCombatants.length === 0) return null;
-      return { party: partyCombatants, enemies: enemyCombatants };
+      const seed = Math.floor(Math.random() * 0x100000000);
+      return {
+        party: partyCombatants.map((c) => ({ ...c, tactics: assignCombatTactics(c, seed) })),
+        enemies: enemyCombatants.map((c) => ({ ...c, tactics: assignCombatTactics(c, seed) })),
+      };
     },
     [chatMeta.gameCharacterCards, combatAvatarCandidates, sessionNumber],
   );
@@ -9135,7 +9182,9 @@ function GameSurfaceComponent({
       side: "enemy" as const,
       element: e.element,
     }));
-    setCombatEnemies(enemyCombatants);
+    setCombatEnemies(
+      enemyCombatants.map((c) => ({ ...c, tactics: assignCombatTactics(c, Math.floor(Math.random() * 0x100000000)) })),
+    );
 
     const playerMembers = partyMembers.filter((member) => member.id.startsWith("persona:"));
     const npcByPartyId = buildPartyNpcLookup(npcs, chatMeta.gameNpcs);
@@ -9288,7 +9337,9 @@ function GameSurfaceComponent({
       return;
     }
 
-    setCombatParty(partyCombatants);
+    setCombatParty(
+      partyCombatants.map((c) => ({ ...c, tactics: assignCombatTactics(c, Math.floor(Math.random() * 0x100000000)) })),
+    );
   }, [
     pendingEncounter,
     partyMembers,
@@ -10039,22 +10090,6 @@ function GameSurfaceComponent({
   );
 
   useEffect(() => {
-    setPendingMapMove(null);
-    setViewedMapId(null);
-    setCombatStartMessageId(null);
-    setQueuedCombatGeneration(null);
-    // #5094: abandon any in-flight combat generation here — clear the lock so a fresh request isn't
-    // blocked by it, and bump the request id so the old generation's stale completion can't re-queue
-    // combat, apply state, or set an error against the reset combat state.
-    combatGenerationInFlightRef.current = false;
-    combatGenerationRequestIdRef.current += 1;
-    setCombatGenerationPending(false);
-    setCombatItemEffects([]);
-    setCombatMechanics([]);
-    setCombatDialogueCues([]);
-  }, [activeChatId]);
-
-  useEffect(() => {
     if (!viewedMapId) return;
     const exists = availableMaps.some((map, index) => getGameMapId(map, index) === viewedMapId);
     if (!exists) setViewedMapId(null);
@@ -10251,7 +10286,13 @@ function GameSurfaceComponent({
         const hpPct = p.maxHp > 0 ? Math.round((p.hp / p.maxHp) * 100) : 0;
         const effects = p.statusEffects.length > 0 ? ` [${p.statusEffects.join(", ")}]` : "";
         const ko = p.ko ? " KO" : "";
-        return `${p.name}: ${p.hp}/${p.maxHp} HP (${hpPct}%)${effects}${ko}`;
+        const resources = [
+          p.mp !== undefined ? `${p.mp}/${p.maxMp ?? p.mp} MP` : "",
+          p.spellSlots ? `remaining spell slots ${JSON.stringify(p.spellSlots)}` : "",
+        ]
+          .filter(Boolean)
+          .join(", ");
+        return `${p.name}: ${p.hp}/${p.maxHp} HP (${hpPct}%)${resources ? `; ${resources}` : ""}${effects}${ko}`;
       });
       const lootText =
         summary.loot && summary.loot.length > 0
@@ -12624,7 +12665,25 @@ function GameSurfaceComponent({
                             </div>
                           }
                         >
-                          {effectiveCombatStyle === "tactical" ? (
+                          {combatSetupConfig?.combatDirector && combatStartMessageId ? (
+                            <DirectedCombatUI
+                              key={`${activeChatId}:${combatStartMessageId}`}
+                              chatId={activeChatId}
+                              anchor={combatStartMessageId}
+                              style={effectiveCombatStyle}
+                              battlefield={combatSceneMeta?.battlefield ?? undefined}
+                              party={combatParty}
+                              enemies={combatEnemies}
+                              inventoryItems={inventoryItems}
+                              combatItemEffects={combatItemEffects}
+                              combatMechanics={combatMechanics}
+                              environment={combatSceneMeta?.environmentType ?? undefined}
+                              formation={combatSceneMeta?.formation ?? undefined}
+                              onCombatEnd={handleCombatEnd}
+                              onInventoryItemUsed={handleUseCombatInventoryItem}
+                              onCombatantsChange={handleCombatantsChange}
+                            />
+                          ) : effectiveCombatStyle === "tactical" ? (
                             <TacticalCombatUI
                               key={activeChatId}
                               chatId={activeChatId}

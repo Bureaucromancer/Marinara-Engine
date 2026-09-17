@@ -759,10 +759,6 @@ function tacticalBattlefieldRows(config: GameSetupConfig): GameSetupSummaryRow[]
               ? translate("ui.game.gamesetupsummary.sizeLarge")
               : translate("ui.game.gamesetupsummary.sizeMedium"),
     },
-    {
-      label: translate("ui.game.gamesetupsummary.terrainGuidance"),
-      value: settings?.instructions?.trim() || translate("ui.game.gamesetupsummary.none"),
-    },
   ];
 }
 

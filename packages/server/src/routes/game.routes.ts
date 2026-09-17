@@ -1,3 +1,5 @@
+import { resolveGameConnection } from "../services/game/connection.service.js";
+import { combatAiHintsSchema, combatTacticsSchema, combatInterruptFields } from "@marinara-engine/shared";
 // ──────────────────────────────────────────────
 // Routes: Game Mode
 // ──────────────────────────────────────────────
@@ -157,7 +159,6 @@ import {
   getDefaultAgentPrompt,
   resolveAgentPromptTemplate,
   isClaudeAdaptiveOnlyNoSamplingModel,
-  localAuthProviderBaseUrl,
   sceneAnalysisRequestSchema,
   resolveProviderReasoningEffort,
   scoreMusic,
@@ -181,9 +182,7 @@ import {
   STORYBOARD_AGENT_ID,
   SPOTIFY_RECENT_TRACK_HISTORY_LIMIT,
   createTacticalCombat,
-  applyAction as applyTacticalAction,
-  runEnemyPhase as runTacticalEnemyPhase,
-  isTerminal as isTacticalTerminal,
+  applyTacticalTurn,
   TERRAIN_DATA,
   extractLeadingThinkingBlocks,
   type RPGStatsConfig,
@@ -1792,6 +1791,8 @@ const gameSetupConfigSchema = z.object({
   tone: z.string().min(1).max(200),
   difficulty: z.string().min(1).max(100),
   combatStyle: z.enum(["classic", "tactical"]).optional(),
+  combatDirector: z.boolean().optional(),
+  gmBossControl: z.boolean().optional(),
   tacticalBattlefield: tacticalBattlefieldSetupSchema.optional(),
   spatialMapInstructions: z.string().max(4000).optional(),
   gameWorldMapMode: z.enum(["standard", "hierarchical"]).optional(),
@@ -2986,26 +2987,7 @@ async function resolveConnection(
   connId: string | null | undefined,
   chatConnectionId: string | null,
 ) {
-  let id = connId ?? chatConnectionId;
-  if (id === "random") {
-    const pool = await connections.listRandomPool();
-    if (!pool.length) throw new Error("No connections marked for the random pool");
-    id = pool[Math.floor(Math.random() * pool.length)].id;
-  }
-  if (!id) throw new Error("No API connection configured");
-  const conn = await connections.getWithKey(id);
-  if (!conn) throw new Error("API connection not found");
-
-  let baseUrl = conn.baseUrl;
-  if (!baseUrl) {
-    const { PROVIDERS } = await import("@marinara-engine/shared");
-    const providerDef = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
-    baseUrl = providerDef?.defaultBaseUrl ?? "";
-  }
-  const localAuthBaseUrl = localAuthProviderBaseUrl(conn.provider);
-  if (!baseUrl && localAuthBaseUrl) baseUrl = localAuthBaseUrl;
-  if (!baseUrl) throw new Error("No base URL configured for this connection");
-
+  const { conn, baseUrl } = await resolveGameConnection(connections, connId, chatConnectionId);
   return { conn, baseUrl, defaultGenerationParameters: parseStoredGenerationParameters(conn.defaultParameters) };
 }
 
@@ -9534,7 +9516,7 @@ export async function gameRoutes(app: FastifyInstance) {
   });
 
   // ── POST /game/combat/round ──
-  app.post("/combat/round", async (req) => {
+  app.post("/combat/round", async (req, reply) => {
     const schema = z.object({
       chatId: z.string().min(1),
       combatants: z.array(
@@ -9543,6 +9525,7 @@ export async function gameRoutes(app: FastifyInstance) {
           name: generatedRequiredStringSchema,
           hp: z.number(),
           maxHp: z.number(),
+          spellSlots: z.record(z.string().regex(/^[1-9]$/), z.number().int().min(0).max(100)).optional(),
           mp: z.number().optional(),
           maxMp: z.number().optional(),
           attack: z.number(),
@@ -9550,13 +9533,17 @@ export async function gameRoutes(app: FastifyInstance) {
           speed: z.number(),
           level: z.number(),
           side: z.enum(["player", "enemy"]).optional(),
+          tactics: combatTacticsSchema.optional(),
+          controller: z.enum(["manual", "ai"]).optional(),
+          skillCooldowns: z.record(z.number().int().min(0).max(10000)).optional(),
           skills: z
             .array(
               z.object({
                 id: generatedRequiredStringSchema,
                 name: generatedRequiredStringSchema,
                 type: z.enum(["attack", "heal", "buff", "debuff"]),
-                mpCost: z.number(),
+                ...combatInterruptFields,
+                mpCost: z.number().min(0),
                 power: z.number(),
                 description: generatedOptionalStringSchema,
                 cooldown: z.number().optional(),
@@ -9643,7 +9630,32 @@ export async function gameRoutes(app: FastifyInstance) {
         )
         .optional(),
     });
-    const { chatId, combatants, round, playerAction, mechanics } = schema.parse(req.body);
+    const parsed = schema
+      .extend({
+        partyActions: z
+          .record(
+            z
+              .string()
+              .min(1)
+              .max(256)
+              .refine((id) => !["__proto__", "constructor", "prototype"].includes(id)),
+            schema.shape.playerAction.unwrap(),
+          )
+          .refine((value) => Object.keys(value).length <= 20)
+          .optional(),
+        controlledId: z.string().min(1).optional(),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
+    const { chatId, combatants, round, playerAction, mechanics, partyActions, controlledId } = parsed.data;
+    if (controlledId && !combatants.some((c) => c.id === controlledId && c.hp > 0 && c.side === "player"))
+      return reply.code(400).send({ error: "Controlled combatant must be a living party member." });
+    if (
+      Object.keys(partyActions ?? {}).some(
+        (id) => !combatants.some((c) => c.id === id && c.hp > 0 && c.side === "player"),
+      )
+    )
+      return reply.code(400).send({ error: "Party commands must name living party members." });
     const chats = createChatsStorage(app.db);
     const chat = await chats.getById(chatId);
     if (!chat) throw new Error("Chat not found");
@@ -9658,6 +9670,8 @@ export async function gameRoutes(app: FastifyInstance) {
       elementPreset,
       playerAction,
       mechanics,
+      partyActions,
+      controlledId,
     );
 
     return { result, combatants };
@@ -9672,6 +9686,16 @@ export async function gameRoutes(app: FastifyInstance) {
   // A combatant blob from the client. The engine reads a fixed set of numeric
   // fields; everything else (mp/skills/statusEffects/element/sprite/side) passes
   // through untouched so hydration stays lossless.
+  const tacticalSkillSchema = z
+    .object({
+      id: z.string(),
+      name: z.string().min(1),
+      type: z.enum(["attack", "heal", "buff", "debuff"]),
+      mpCost: z.number().min(0),
+      power: z.number().min(0),
+      cooldown: z.number().min(0).optional(),
+    })
+    .passthrough();
   const tacticalCombatantSchema = z
     .object({
       id: z.string().min(1),
@@ -9682,12 +9706,20 @@ export async function gameRoutes(app: FastifyInstance) {
       defense: z.number(),
       speed: z.number(),
       level: z.number(),
+      skills: z.array(tacticalSkillSchema).max(128).optional(),
+      tactics: combatTacticsSchema.optional(),
+      aiHints: combatAiHintsSchema.optional(),
+      controller: z.enum(["manual", "ai"]).optional(),
       movementMode: z.enum(["walk", "fly", "teleport"]).optional(),
     })
     .passthrough();
 
   const tacticalStateUnitSchema = z
     .object({
+      skills: z.array(tacticalSkillSchema).max(128).optional(),
+      tactics: combatTacticsSchema.optional(),
+      aiHints: combatAiHintsSchema.optional(),
+      controller: z.enum(["manual", "ai"]).optional(),
       movementMode: z.enum(["walk", "fly", "teleport"]).optional(),
     })
     .passthrough();
@@ -9760,7 +9792,8 @@ export async function gameRoutes(app: FastifyInstance) {
   // returns `{ ok: false, error }` for illegal input.
   const tacticalActionSchema = z
     .object({
-      type: z.enum(["move", "attack", "skill", "item", "defend", "wait", "endTurn", "flee"]),
+      type: z.enum(["move", "attack", "skill", "item", "defend", "wait", "endTurn", "flee", "control"]),
+      controller: z.enum(["manual", "ai"]).optional(),
     })
     .passthrough();
 
@@ -9857,24 +9890,14 @@ export async function gameRoutes(app: FastifyInstance) {
     // violate. Guard against that so a malformed request fails cleanly with a
     // 400 instead of an unhandled 500.
     try {
-      const applied = applyTacticalAction(state as unknown as TacticalCombatState, action as unknown as TacticalAction);
+      if (action.type === "control" && (!action.controller || typeof action.unitId !== "string"))
+        return reply.status(400).send({ error: "Choose a unit and its controller." });
+      const applied = applyTacticalTurn(state as unknown as TacticalCombatState, action as unknown as TacticalAction);
       if (!applied.ok) {
         return reply.status(400).send({ error: applied.error });
       }
 
-      let nextState = applied.state;
-      const events = [...applied.events];
-
-      // The player action auto-advances the phase once every party unit has acted.
-      // Resolve the enemy phase in the same round-trip and append its events after
-      // the player's, so the client animates one continuous sequence.
-      if (nextState.phase === "enemy" && !isTacticalTerminal(nextState)) {
-        const enemyResult = runTacticalEnemyPhase(nextState);
-        nextState = enemyResult.state;
-        events.push(...enemyResult.events);
-      }
-
-      return { state: nextState, events };
+      return { state: applied.state, events: applied.events };
     } catch (err) {
       logger.warn(err, "Tactical action failed on round-tripped state for chat %s", chatId);
       return reply.status(400).send({ error: "Invalid tactical combat state" });
