@@ -655,6 +655,7 @@ function createLorebookEntryWriter(
 ) {
   const writableLorebookId = resolveAgentWritableLorebookId(agentSettings);
   if (!writableLorebookId) return undefined;
+  const writtenEntryIds = new Set<string>();
 
   return async (entry: {
     name: string;
@@ -738,6 +739,7 @@ function createLorebookEntryWriter(
         sourceMessageRefs: options.sourceMessageRefs(),
       });
       options.onWrite(created);
+      if (created?.id) writtenEntryIds.add(created.id);
       return {
         applied: true,
         action: "created",
@@ -767,8 +769,10 @@ function createLorebookEntryWriter(
       enabled: true,
       sourceAgentId: agent.id,
       sourceMessageRefs: options.sourceMessageRefs(),
+      preserveProvenanceSnapshot: writtenEntryIds.has(existing.id),
     });
     options.onWrite(updated);
+    if (updated?.id) writtenEntryIds.add(updated.id);
     return {
       applied: true,
       action: entry.mode === "append" ? "appended" : "replaced",
