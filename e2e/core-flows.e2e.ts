@@ -5307,6 +5307,16 @@ test("character schedules export the live draft and import safely", async ({ pag
     await activity.fill("Unsaved export draft");
     await dialog.getByText("Tuning", { exact: true }).click();
     await dialog.getByText("Advanced timing", { exact: true }).click();
+    const capInput = dialog.getByRole("spinbutton", { name: /^Daily safety limit/i });
+    await capInput.fill("1.5");
+    await dialog.getByRole("button", { name: "Export schedule", exact: true }).click();
+    await expect(
+      page.getByText("Daily safety limit must be a whole number of at least 1, or blank for Default.").first(),
+    ).toBeVisible();
+    await capInput.fill("0");
+    await dialog.getByRole("button", { name: "Save schedule", exact: true }).click();
+    await expect(dialog).toBeVisible();
+    expect((await storedSchedule())!.autonomousDailyCapOverride).toBeNull();
     await dialog.getByRole("spinbutton", { name: /^Daily safety limit/i }).fill("1000");
 
     const downloadPromise = page.waitForEvent("download");
