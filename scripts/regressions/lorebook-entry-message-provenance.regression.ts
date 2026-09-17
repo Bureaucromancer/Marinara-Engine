@@ -718,6 +718,54 @@ try {
     assert.equal(await lorebooks.getEntry(entry.id), null);
   }
 
+  // A later chunk failure still cleans up lore from chunks already committed.
+  {
+    const chat = (await chats.create({ name: "Partial deletion", mode: "roleplay", characterIds: [] }))!;
+    const entries = [];
+    const messageIds = [];
+    for (const content of ["Committed", "Failed"]) {
+      const message = (await chats.createMessage({ chatId: chat.id, role: "assistant", content }))!;
+      messageIds.push(message.id);
+      entries.push(
+        (await lorebooks.createEntry({
+          lorebookId: book.id,
+          name: content,
+          content,
+          sourceAgentId: "keeper",
+          sourceMessageRefs: [{ id: message.id, swipeIndex: 0 }],
+        }))!,
+      );
+    }
+    await chats.patchMetadata(chat.id, {
+      entryStateOverrides: Object.fromEntries(entries.map((entry) => [entry.id, { enabled: false }])),
+    });
+    const originalTransaction = db.transaction;
+    const failure = new Error("Second deletion chunk failed");
+    let transactions = 0;
+    db.transaction = ((operation: any) => {
+      if (++transactions === 2) return Promise.reject(failure);
+      return originalTransaction.call(db, operation);
+    }) as typeof db.transaction;
+    try {
+      await assert.rejects(
+        chats.removeMessages(
+          [messageIds[0], ...Array.from({ length: 499 }, (_, i) => `absent-${i}`), messageIds[1]],
+          chat.id,
+        ),
+        (error) => error === failure,
+      );
+    } finally {
+      db.transaction = originalTransaction;
+    }
+    assert.equal(await chats.getMessage(messageIds[0]), null);
+    assert.ok(await chats.getMessage(messageIds[1]));
+    assert.equal(await lorebooks.getEntry(entries[0].id), null, "committed deletion cascades despite a later failure");
+    assert.ok(await lorebooks.getEntry(entries[1].id), "failed deletion preserves its lore");
+    assert.deepEqual(JSON.parse((await chats.getById(chat.id))!.metadata).entryStateOverrides, {
+      [entries[1].id]: { enabled: false },
+    });
+  }
+
   // Mari treats provenance arrays as JSON, including their stored undo references.
   {
     const mari = new MariDbService(db);

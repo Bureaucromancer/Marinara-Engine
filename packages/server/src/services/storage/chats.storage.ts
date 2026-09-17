@@ -2806,46 +2806,63 @@ export function createChatsStorage(db: DB) {
       if (ids.length === 0) return;
       const earliestByChat = new Map<string, string>();
       const removedMessageIds: string[] = [];
+      const finishDeletion = async () => {
+        if (removedMessageIds.length === 0) return;
+        const removedEntries = await db.transaction(() => cascadeAgentLorebookEntriesForMessages(removedMessageIds));
+        if (removedEntries.length > 0) await this.pruneLorebookChatMetadata(async () => removedEntries);
+        for (const [affectedChatId, createdAt] of earliestByChat) {
+          await invalidateMemoryChunksFrom(db, affectedChatId, createdAt);
+          await refreshChatLastMessageAt(affectedChatId);
+        }
+      };
       const CHUNK = 500;
-      for (let i = 0; i < ids.length; i += CHUNK) {
-        const chunk = ids.slice(i, i + CHUNK);
-        // Per-chunk queue acquisition (#5599): each message's delete is
-        // ordered against its in-flight edits; cross-chunk atomicity was
-        // never promised by this bulk path.
-        await withInterruptionQueue(chunk, async (locked) => {
-          const condition = chatId
-            ? and(inArray(messages.id, chunk), eq(messages.chatId, chatId))
-            : inArray(messages.id, chunk);
-          const existingRows = await db
-            .select({ id: messages.id, chatId: messages.chatId, createdAt: messages.createdAt, extra: messages.extra })
-            .from(messages)
-            .where(condition);
-          for (const row of existingRows) {
+      try {
+        for (let i = 0; i < ids.length; i += CHUNK) {
+          const chunk = ids.slice(i, i + CHUNK);
+          // Per-chunk queue acquisition (#5599): each message's delete is
+          // ordered against its in-flight edits; cross-chunk atomicity was
+          // never promised by this bulk path.
+          const removedRows = await withInterruptionQueue(chunk, async (locked) => {
+            const condition = chatId
+              ? and(inArray(messages.id, chunk), eq(messages.chatId, chatId))
+              : inArray(messages.id, chunk);
+            const existingRows = await db
+              .select({
+                id: messages.id,
+                chatId: messages.chatId,
+                createdAt: messages.createdAt,
+                extra: messages.extra,
+              })
+              .from(messages)
+              .where(condition);
+            // Undo newest effects first when a whole interrupted exchange is removed.
+            for (const row of existingRows
+              .filter((row) => receipts(row.extra).some((receipt) => !receipt.restored))
+              .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)))
+              await reconcileEffects(await readMessage(row.id), true, locked);
+            await deleteGameStateForMessages(
+              existingRows.map((row) => row.id),
+              existingRows.map((row) => row.chatId),
+            );
+            await db.delete(messages).where(condition);
+            // Cascade only the ids this scoped deletion actually removed — a
+            // requested id excluded by the chatId filter (or nonexistent) keeps
+            // its message, so its lore must keep its anchors too.
+            return existingRows;
+          });
+          for (const row of removedRows) {
+            removedMessageIds.push(row.id);
             const current = earliestByChat.get(row.chatId);
             if (!current || row.createdAt < current) earliestByChat.set(row.chatId, row.createdAt);
           }
-          // Undo newest effects first when a whole interrupted exchange is removed.
-          for (const row of existingRows
-            .filter((row) => receipts(row.extra).some((receipt) => !receipt.restored))
-            .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)))
-            await reconcileEffects(await readMessage(row.id), true, locked);
-          await deleteGameStateForMessages(
-            existingRows.map((row) => row.id),
-            existingRows.map((row) => row.chatId),
-          );
-          await db.delete(messages).where(condition);
-          // Cascade only the ids this scoped deletion actually removed — a
-          // requested id excluded by the chatId filter (or nonexistent) keeps
-          // its message, so its lore must keep its anchors too.
-          removedMessageIds.push(...existingRows.map((row) => row.id));
+        }
+      } catch (error) {
+        await finishDeletion().catch((cleanupError) => {
+          logger.error(cleanupError, "Failed to clean up lore after partial message deletion");
         });
+        throw error;
       }
-      const removedEntries = await db.transaction(() => cascadeAgentLorebookEntriesForMessages(removedMessageIds));
-      if (removedEntries.length > 0) await this.pruneLorebookChatMetadata(async () => removedEntries);
-      for (const [affectedChatId, createdAt] of earliestByChat) {
-        await invalidateMemoryChunksFrom(db, affectedChatId, createdAt);
-        await refreshChatLastMessageAt(affectedChatId);
-      }
+      await finishDeletion();
     },
 
     async getSwipes(messageId: string) {
