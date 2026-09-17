@@ -1,8 +1,8 @@
 # CLAUDE.md
 
-This file is a thin maintainer note for coding agents. Canonical workflow, validation, and release guidance lives in `CONTRIBUTING.md`.
+This file is a thin maintainer note for Claude. Canonical workflow, validation, and release guidance lives in `CONTRIBUTING.md`.
 
-`CLAUDE.md` is the canonical agent guide; `AGENTS.md` links here. Skills live in `.claude/skills`, with `.agents/skills` linking to that directory.
+`AGENTS.md` is the separate OpenAI Codex guide adapted from this file. Skills live in `.claude/skills`, with `.agents/skills` linking to that directory for Codex.
 
 ## Agent Workflow Overlay
 

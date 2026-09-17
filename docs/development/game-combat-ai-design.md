@@ -686,7 +686,7 @@ Final verification after all review fixes: `pnpm check` passes, including locali
 
 ### PR preparation review
 
-Implementation ownership and scope are tracked in [#6299](https://github.com/Pasta-Devs/Marinara-Engine/issues/6299); translation parity for these two development handoffs is tracked in [#6300](https://github.com/Pasta-Devs/Marinara-Engine/issues/6300). The requested instruction/skill symlinks resolve, and all 52 skill files were compared byte-for-byte with their previous Git contents. `pnpm check` passes after moving them.
+Implementation ownership and scope are tracked in [#6299](https://github.com/Pasta-Devs/Marinara-Engine/issues/6299); translation parity for these two development handoffs is tracked in [#6300](https://github.com/Pasta-Devs/Marinara-Engine/issues/6300). The shared skill symlink resolves, and all 52 skill files were compared byte-for-byte with their previous Git contents. `pnpm check` passes after moving them. `AGENTS.md` is a separate Codex adaptation of `CLAUDE.md`, with an explicit transition from draft to ready when implementation, required local validation and local review are complete.
 
 Publication-round review dispositions:
 
