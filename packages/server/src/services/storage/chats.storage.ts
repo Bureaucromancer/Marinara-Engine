@@ -2805,11 +2805,9 @@ export function createChatsStorage(db: DB) {
     async removeMessages(ids: string[], chatId?: string) {
       if (ids.length === 0) return;
       const earliestByChat = new Map<string, string>();
-      const removedMessageIds: string[] = [];
+      const removedEntryIds: string[] = [];
       const finishDeletion = async () => {
-        if (removedMessageIds.length === 0) return;
-        const removedEntries = await db.transaction(() => cascadeAgentLorebookEntriesForMessages(removedMessageIds));
-        if (removedEntries.length > 0) await this.pruneLorebookChatMetadata(async () => removedEntries);
+        if (removedEntryIds.length > 0) await this.pruneLorebookChatMetadata(async () => removedEntryIds);
         for (const [affectedChatId, createdAt] of earliestByChat) {
           await invalidateMemoryChunksFrom(db, affectedChatId, createdAt);
           await refreshChatLastMessageAt(affectedChatId);
@@ -2822,7 +2820,7 @@ export function createChatsStorage(db: DB) {
           // Per-chunk queue acquisition (#5599): each message's delete is
           // ordered against its in-flight edits; cross-chunk atomicity was
           // never promised by this bulk path.
-          const removedRows = await withInterruptionQueue(chunk, async (locked) => {
+          const removed = await withInterruptionQueue(chunk, async (locked) => {
             const condition = chatId
               ? and(inArray(messages.id, chunk), eq(messages.chatId, chatId))
               : inArray(messages.id, chunk);
@@ -2848,10 +2846,15 @@ export function createChatsStorage(db: DB) {
             // Cascade only the ids this scoped deletion actually removed — a
             // requested id excluded by the chatId filter (or nonexistent) keeps
             // its message, so its lore must keep its anchors too.
-            return existingRows;
+            return {
+              rows: existingRows,
+              // ponytail: one lore scan per 500-message chunk keeps deletion atomic;
+              // index source refs if large history deletions outgrow this path.
+              entryIds: await cascadeAgentLorebookEntriesForMessages(existingRows.map((row) => row.id)),
+            };
           });
-          for (const row of removedRows) {
-            removedMessageIds.push(row.id);
+          removedEntryIds.push(...removed.entryIds);
+          for (const row of removed.rows) {
             const current = earliestByChat.get(row.chatId);
             if (!current || row.createdAt < current) earliestByChat.set(row.chatId, row.createdAt);
           }
