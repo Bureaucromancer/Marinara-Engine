@@ -186,7 +186,7 @@ function parseOptionalCap(value: string): number | null {
   if (!value.trim()) return null;
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return null;
-  return Math.max(1, Math.min(8, Math.floor(parsed)));
+  return Math.max(1, Math.floor(parsed));
 }
 
 function parseClock(value: string | undefined): number | null {
@@ -827,18 +827,15 @@ export function CharacterScheduleEditorModal({
                   <span className="font-medium">
                     {localizeUi("ui.chat.characterscheduleeditormodal.dailySafetyLimit")}
                   </span>
-                  <select
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
                     value={draft.autonomousDailyCapOverride}
+                    placeholder={localizeUi("ui.noodle.noodlehome.default")}
                     onChange={(event) => updateSetting("autonomousDailyCapOverride", event.target.value)}
                     className="w-full rounded-md bg-[var(--secondary)] px-3 py-2 outline-none ring-1 ring-[var(--border)] focus:ring-[var(--primary)]/50"
-                  >
-                    <option value="">{localizeUi("ui.noodle.noodlehome.default")}</option>
-                    {[1, 2, 3, 4, 5, 6, 7, 8].map((cap) => (
-                      <option key={cap} value={cap}>
-                        {cap} {localizeUi("ui.chat.characterscheduleeditormodal.day")}
-                      </option>
-                    ))}
-                  </select>
+                  />
                   <div className="text-[0.6875rem] text-[var(--muted-foreground)]">
                     {localizeUi("ui.chat.characterscheduleeditormodal.hardMaximumPerDayUsuallyLeaveThisOnDefault")}
                   </div>

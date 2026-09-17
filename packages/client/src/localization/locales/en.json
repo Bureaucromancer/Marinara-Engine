@@ -3147,7 +3147,7 @@
   "ui.chat.characterscheduleeditormodal.failedToSaveSchedule": "Failed to save schedule",
   "ui.chat.characterscheduleeditormodal.generateSummary": "Generate summary",
   "ui.chat.characterscheduleeditormodal.guidanceSet": "· Guidance set",
-  "ui.chat.characterscheduleeditormodal.hardMaximumPerDayUsuallyLeaveThisOnDefault": "Hard maximum per day. Usually leave this on Default.",
+  "ui.chat.characterscheduleeditormodal.hardMaximumPerDayUsuallyLeaveThisOnDefault": "Enter a whole number or leave blank for Default. The chat check-in cap still applies.",
   "ui.chat.characterscheduleeditormodal.importSchedule": "Import schedule",
   "ui.chat.characterscheduleeditormodal.invalidScheduleFile": "That file does not contain a valid character schedule.",
   "ui.chat.characterscheduleeditormodal.letThisCharacterUseTheseRoutineMomentsAsReasons": "Let this character use these routine moments as reasons to reach out.",

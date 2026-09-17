@@ -5176,6 +5176,16 @@ assert.equal(
   "per-character safety limits should still be able to lower a numeric chat ceiling",
 );
 const autonomousChatId = "regression-autonomous-candidates";
+assert.equal(
+  dailyCapForCharacter(autonomousSchedule(90, 1000)),
+  1000,
+  "custom character limits are not capped at eight",
+);
+assert.equal(
+  dailyCapForCharacter(autonomousSchedule(90, 1000), { autonomousDailyCapOverride: 75 }),
+  75,
+  "the chat-wide safety cap still limits a larger custom character cap",
+);
 initializeActivityFromMessages(autonomousChatId, [
   { role: "user", createdAt: new Date(Date.now() - 5 * 60_000).toISOString() },
 ]);
