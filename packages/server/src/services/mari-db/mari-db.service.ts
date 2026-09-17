@@ -391,6 +391,8 @@ const JSON_COLUMNS: Record<string, readonly string[]> = {
     "activationConditions",
     "schedule",
     "embedding",
+    "sourceMessageRefs",
+    "previousSourceMessageRefs",
   ],
   prompt_presets: ["sectionOrder", "groupOrder", "variableGroups", "variableValues", "parameters", "defaultChoices"],
   prompt_sections: ["markerConfig"],

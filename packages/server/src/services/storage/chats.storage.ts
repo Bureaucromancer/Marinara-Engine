@@ -970,12 +970,11 @@ export function createChatsStorage(db: DB) {
    * Entries that never mention a removed message — and manual entries
    * (sourceAgentId NULL; a human edit takes ownership) — are untouched.
    *
-   * Removed entries' per-chat metadata (entryStateOverrides / timing
-   * states) is pruned in the same breath, matching removeEntry's cleanup.
+   * Return removed IDs so callers can prune metadata after releasing the transaction.
    */
-  async function cascadeAgentLorebookEntriesForMessages(messageIds: string[]): Promise<void> {
+  async function cascadeAgentLorebookEntriesForMessages(messageIds: string[]): Promise<string[]> {
     const deletedIds = new Set(messageIds.filter(Boolean));
-    if (deletedIds.size === 0) return;
+    if (deletedIds.size === 0) return [];
     const candidates = await db
       .select({
         id: lorebookEntries.id,
@@ -1012,7 +1011,7 @@ export function createChatsStorage(db: DB) {
               content: entry.previousContent as string,
               embedding: null,
               embeddingSpaceId: null,
-              sourceMessageRefs: entry.previousSourceMessageRefs ?? "[]",
+              sourceMessageRefs: entry.previousSourceAgentId ? (entry.previousSourceMessageRefs ?? "[]") : "[]",
               sourceAgentId: entry.previousSourceAgentId ?? null,
               previousSourceAgentId: null,
               previousContent: null,
@@ -1026,11 +1025,7 @@ export function createChatsStorage(db: DB) {
         }
       }
     }
-    if (removed.length > 0) {
-      // Same cleanup pattern as lorebooks.storage's removeEntry: a fresh
-      // store instance shares this module's db and metadata queues.
-      await createChatsStorage(db).pruneLorebookChatMetadata(async () => removed);
-    }
+    return removed;
   }
 
   async function readLatestMessageAt(chatId: string): Promise<string | null> {
@@ -2791,22 +2786,26 @@ export function createChatsStorage(db: DB) {
       // mutation (#5599): an in-flight edit either completes before the
       // delete or starts after it and sees a consistent world, instead of
       // having its writes silently vanish mid-flight into a 404.
-      return withInterruptionQueue([id], async (locked) => {
+      const removedEntries = await withInterruptionQueue([id], async (locked) => {
         const existing = await this.getMessage(id);
         await reconcileEffects(existing, true, locked);
         if (existing) await deleteGameStateForMessages([id], [existing.chatId]);
         await db.delete(messages).where(eq(messages.id, id));
         if (existing) {
-          await cascadeAgentLorebookEntriesForMessages([id]);
+          const removed = await cascadeAgentLorebookEntriesForMessages([id]);
           await invalidateMemoryChunksFrom(db, existing.chatId, existing.createdAt);
           await refreshChatLastMessageAt(existing.chatId);
+          return removed;
         }
+        return [];
       });
+      if (removedEntries.length > 0) await this.pruneLorebookChatMetadata(async () => removedEntries);
     },
 
     async removeMessages(ids: string[], chatId?: string) {
       if (ids.length === 0) return;
       const earliestByChat = new Map<string, string>();
+      const removedMessageIds: string[] = [];
       const CHUNK = 500;
       for (let i = 0; i < ids.length; i += CHUNK) {
         const chunk = ids.slice(i, i + CHUNK);
@@ -2838,9 +2837,11 @@ export function createChatsStorage(db: DB) {
           // Cascade only the ids this scoped deletion actually removed — a
           // requested id excluded by the chatId filter (or nonexistent) keeps
           // its message, so its lore must keep its anchors too.
-          await cascadeAgentLorebookEntriesForMessages(existingRows.map((row) => row.id));
+          removedMessageIds.push(...existingRows.map((row) => row.id));
         });
       }
+      const removedEntries = await db.transaction(() => cascadeAgentLorebookEntriesForMessages(removedMessageIds));
+      if (removedEntries.length > 0) await this.pruneLorebookChatMetadata(async () => removedEntries);
       for (const [affectedChatId, createdAt] of earliestByChat) {
         await invalidateMemoryChunksFrom(db, affectedChatId, createdAt);
         await refreshChatLastMessageAt(affectedChatId);
