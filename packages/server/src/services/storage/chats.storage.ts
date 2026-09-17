@@ -1009,6 +1009,8 @@ export function createChatsStorage(db: DB) {
             .update(lorebookEntries)
             .set({
               content: entry.previousContent as string,
+              embedding: null,
+              embeddingSpaceId: null,
               sourceMessageRefs: entry.previousSourceMessageRefs ?? "[]",
               previousContent: null,
               previousSourceMessageRefs: null,

@@ -28,6 +28,7 @@ import {
   shouldSuppressUnknownModelParameters,
   type AgentCallDebugEvent,
   type AgentContext,
+  type SourceMessageRef,
   type AgentResult,
   type APIProvider,
   type ChatMode,
@@ -175,6 +176,7 @@ import {
   agentWriteApprovalRequired,
   buildLorebookWriteApprovalProposal,
   isAgentWriteApprovalEnvelope,
+  stampLorebookWriteApprovalSource,
 } from "./agent-write-approval.js";
 import {
   filterGameInternalAgentIds,
@@ -336,8 +338,12 @@ function markRetryLorebookResultForApproval(args: {
   chatName: string | null | undefined;
   agentContext: AgentContext;
   resolvedAgents: ResolvedRetryAgent[];
+  sourceMessageRefs: SourceMessageRef[];
 }): AgentResult {
   const { result, chatId, chatName, agentContext, resolvedAgents } = args;
+  if (result.type === "lorebook_update" && isAgentWriteApprovalEnvelope(result.data)) {
+    return { ...result, data: stampLorebookWriteApprovalSource(result.data, result.agentId, args.sourceMessageRefs) };
+  }
   if (
     !result.success ||
     result.type !== "lorebook_update" ||
@@ -406,6 +412,8 @@ function markRetryLorebookResultForApproval(args: {
         lorebookNamingScheme: getLorebookNamingScheme(resultAgent?.settings),
         worldName: agentContext.characters[0]?.world ?? chatName,
         existingEntries,
+        sourceAgentId: result.agentId,
+        sourceMessageRefs: args.sourceMessageRefs,
       }),
     },
   };
@@ -2641,6 +2649,7 @@ async function executeLorebookKeeperRetries(args: {
             chatName,
             agentContext: retryContext,
             resolvedAgents: [lorebookKeeperAgent],
+            sourceMessageRefs: [{ id: target.id, swipeIndex: target.activeSwipeIndex ?? 0 }],
           })
         : rawResult;
 
@@ -2716,6 +2725,7 @@ async function applyRetryResultEffects(args: {
   mainResponseRaw: string;
   lorebooksStore: ReturnType<typeof createLorebooksStorage>;
   gameStateStore: ReturnType<typeof createGameStateStorage>;
+  lorebookSourceMessageRefsByAgent?: ReadonlyMap<string, SourceMessageRef[]>;
   conns: ReturnType<typeof createConnectionsStorage>;
   chars: ReturnType<typeof createCharactersStorage>;
   resolvedAgents: ResolvedRetryAgent[];
@@ -3248,7 +3258,9 @@ async function applyRetryResultEffects(args: {
             // Anchor retried lore to the regenerated turn so message deletion
             // can cascade it.
             sourceAgentId: isBuiltInLorebookAgent || !resultAgent?.id ? "lorebook-keeper" : resultAgent.id,
-            sourceMessageRefs: retryMessageId ? [{ id: retryMessageId, swipeIndex: retrySwipeIndex ?? 0 }] : undefined,
+            sourceMessageRefs:
+              args.lorebookSourceMessageRefsByAgent?.get(result.agentId) ??
+              (retryMessageId ? [{ id: retryMessageId, swipeIndex: retrySwipeIndex ?? 0 }] : undefined),
             updates: retryUpdates,
             signal,
           });
@@ -4685,6 +4697,14 @@ export async function registerRetryAgentsRoute(
           gameState: context.gameState,
           gameSpotifyMusicEnabled: activeMusicPlayerSource !== null,
           agentContext: context,
+          getLorebookSourceMessageRefs: (agent) => {
+            const historical = customLorebookReadBehindTargets.get(agent.id);
+            return historical
+              ? [{ id: historical.messageId, swipeIndex: historical.swipeIndex }]
+              : retryMessageId
+                ? [{ id: retryMessageId, swipeIndex: retrySwipeIndex }]
+                : [];
+          },
           emitMetadataPatch: (patch) => {
             assertRetrySetupActive();
             sendSseEvent(reply, { type: "metadata_patch", data: patch });
@@ -4925,6 +4945,16 @@ export async function registerRetryAgentsRoute(
               chatName: (chat as any).name,
               agentContext,
               resolvedAgents: nonLorebookAgents,
+              sourceMessageRefs: customLorebookReadBehindTargets.has(result.agentId)
+                ? [
+                    {
+                      id: customLorebookReadBehindTargets.get(result.agentId)!.messageId,
+                      swipeIndex: customLorebookReadBehindTargets.get(result.agentId)!.swipeIndex,
+                    },
+                  ]
+                : retryMessageId
+                  ? [{ id: retryMessageId, swipeIndex: retrySwipeIndex }]
+                  : [],
             })
           : result,
       );
@@ -5135,6 +5165,12 @@ export async function registerRetryAgentsRoute(
         conns,
         chars,
         resolvedAgents: nonLorebookAgents,
+        lorebookSourceMessageRefsByAgent: new Map(
+          [...customLorebookReadBehindTargets].map(([agentId, target]) => [
+            agentId,
+            [{ id: target.messageId, swipeIndex: target.swipeIndex }],
+          ]),
+        ),
         queueImageGenerationRequests,
         reviewImagePromptsBeforeSend,
         illustratorPromptReviewOverride,

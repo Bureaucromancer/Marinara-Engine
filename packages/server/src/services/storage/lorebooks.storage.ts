@@ -908,7 +908,16 @@ export function createLorebooksStorage(db: DB) {
       return this.getEntry(id);
     },
 
-    async updateEntry(id: string, input: UpdateLorebookEntryInput & EntryProvenanceInput) {
+    async updateEntry(
+      id: string,
+      input: UpdateLorebookEntryInput & EntryProvenanceInput,
+      expectedProvenance?: {
+        sourceAgentId: string;
+        sourceMessageRefs: SourceMessageRef[];
+        updatedAt: string;
+        content: string;
+      },
+    ) {
       const updates: Record<string, unknown> = { updatedAt: now() };
       // Must cover EXACTLY the fields buildLorebookEntryEmbeddingText embeds
       // (name, description, keys, secondary keys, content) — description was
@@ -1005,7 +1014,12 @@ export function createLorebooksStorage(db: DB) {
         // mirroring addSwipe's outgoing-swipe backfill) and take the new refs.
         if (input.content !== undefined) {
           const current = (await db.select().from(lorebookEntries).where(eq(lorebookEntries.id, id)))[0];
-          if (current) {
+          if (
+            current &&
+            (!input.sourceMessageRefs?.length ||
+              current.sourceAgentId !== input.sourceAgentId ||
+              current.sourceMessageRefs !== serializeMessageRefs(input.sourceMessageRefs))
+          ) {
             updates.previousContent = current.content;
             updates.previousSourceMessageRefs = current.sourceMessageRefs ?? "[]";
           }
@@ -1022,7 +1036,20 @@ export function createLorebooksStorage(db: DB) {
         updates.previousSourceMessageRefs = null;
       }
 
-      await db.update(lorebookEntries).set(updates).where(eq(lorebookEntries.id, id));
+      await db
+        .update(lorebookEntries)
+        .set(updates)
+        .where(
+          expectedProvenance
+            ? and(
+                eq(lorebookEntries.id, id),
+                eq(lorebookEntries.sourceAgentId, expectedProvenance.sourceAgentId),
+                eq(lorebookEntries.sourceMessageRefs, serializeMessageRefs(expectedProvenance.sourceMessageRefs)),
+                eq(lorebookEntries.updatedAt, expectedProvenance.updatedAt),
+                eq(lorebookEntries.content, expectedProvenance.content),
+              )
+            : eq(lorebookEntries.id, id),
+        );
       return this.getEntry(id);
     },
 

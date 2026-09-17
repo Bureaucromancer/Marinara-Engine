@@ -66,7 +66,16 @@ type LorebooksStore = {
   getById(id: string): Promise<any | null>;
   listEntries(lorebookId: string): Promise<any[]>;
   createEntry(entry: Record<string, unknown>): Promise<any>;
-  updateEntry(id: string, entry: Record<string, unknown>): Promise<any>;
+  updateEntry(
+    id: string,
+    entry: Record<string, unknown>,
+    expectedProvenance?: {
+      sourceAgentId: string;
+      sourceMessageRefs: SourceMessageRef[];
+      updatedAt: string;
+      content: string;
+    },
+  ): Promise<any>;
 };
 
 type AgentsStore = unknown;
@@ -99,6 +108,7 @@ export type ResolveGenerationToolsArgs = {
    */
   autoAttachToolNames?: readonly string[];
   nativeToolsAvailable?: boolean;
+  getLorebookSourceMessageRefs?: (agent: ResolvedAgent) => SourceMessageRef[];
   lorebookEmbeddingOptions?: LorebookEmbeddingOptions;
 };
 
@@ -118,6 +128,7 @@ export type ResolvedGenerationTools = {
   toolDefs: LLMToolDefinition[] | undefined;
   baseToolExecutionContext: ToolExecutionContext;
   updateChatMetadataForTools: (patchOrUpdater: MetadataPatchInput) => Promise<MetadataPatch>;
+  finalizeLorebookWrites: () => Promise<void>;
 };
 
 export function resolveToolLorebookCharacterIds(
@@ -566,12 +577,8 @@ function resolveAgentWritableLorebookId(agentSettings: Record<string, unknown>):
 }
 
 /**
- * The turn's user-message ref as of tool-resolution time: the assistant
- * message being generated does not exist yet, so tool-path writes anchor to
- * the user turn alone (deleting that user message cascades them; the keeper
- * post-phase adds the assistant anchor on top).
- * ponytail: known ceiling — deleting the later assistant message will not
- * cascade tool-path entries; upgrade path is a post-save ref backfill.
+ * Fallback for callers without a generation target. Main generation and retries
+ * supply their captured source refs, including the assistant's immutable swipe.
  */
 function resolveLorebookWriterSourceRefs(agentContext: AgentContext): SourceMessageRef[] {
   for (let i = agentContext.recentMessages.length - 1; i >= 0; i--) {
@@ -586,7 +593,12 @@ function createLorebookEntryWriter(
   lorebooksStore: LorebooksStore,
   agent: ResolvedAgent,
   agentSettings: Record<string, unknown>,
-  options: { requireApproval: boolean; chatId: string; sourceMessageRefs: SourceMessageRef[] },
+  options: {
+    requireApproval: boolean;
+    chatId: string;
+    sourceMessageRefs: () => SourceMessageRef[];
+    onWrite: (entry: any) => void;
+  },
 ) {
   const writableLorebookId = resolveAgentWritableLorebookId(agentSettings);
   if (!writableLorebookId) return undefined;
@@ -625,7 +637,7 @@ function createLorebookEntryWriter(
           writableLorebookIds: [writableLorebookId],
           existingEntries,
           sourceAgentId: agent.id,
-          sourceMessageRefs: options.sourceMessageRefs,
+          sourceMessageRefs: options.sourceMessageRefs(),
         }),
       };
     }
@@ -670,8 +682,9 @@ function createLorebookEntryWriter(
         depth: 4,
         role: "system",
         sourceAgentId: agent.id,
-        sourceMessageRefs: options.sourceMessageRefs,
+        sourceMessageRefs: options.sourceMessageRefs(),
       });
+      options.onWrite(created);
       return {
         applied: true,
         action: "created",
@@ -700,8 +713,9 @@ function createLorebookEntryWriter(
       ...(entry.tag !== undefined ? { tag: entry.tag } : {}),
       enabled: true,
       sourceAgentId: agent.id,
-      sourceMessageRefs: options.sourceMessageRefs,
+      sourceMessageRefs: options.sourceMessageRefs(),
     });
+    options.onWrite(updated);
     return {
       applied: true,
       action: entry.mode === "append" ? "appended" : "replaced",
@@ -784,6 +798,7 @@ async function resolveToolRuntime(
     emitMetadataPatch,
     observeSpotifyPlaybackBeforePlay,
     lorebookEmbeddingOptions,
+    getLorebookSourceMessageRefs,
   }: ResolveAgentGenerationToolsArgs,
   options: {
     enableChatTools: boolean;
@@ -1012,6 +1027,7 @@ async function resolveToolRuntime(
     });
   }
 
+  const pendingLorebookWrites = new Map<string, () => Promise<unknown>>();
   for (const agent of resolvedAgents) {
     if (agent.toolContext) continue;
 
@@ -1029,10 +1045,30 @@ async function resolveToolRuntime(
     if (agentTools.length === 0) continue;
 
     const allowedToolNames = new Set(agentTools.map((toolDef) => toolDef.function.name));
+    const sourceMessageRefs = () =>
+      getLorebookSourceMessageRefs?.(agent) ?? resolveLorebookWriterSourceRefs(agentContext);
     const saveLorebookEntry = createLorebookEntryWriter(lorebooksStore, agent, agentSettings, {
       requireApproval: agentWriteApprovalRequired(chatMetadata),
       chatId,
-      sourceMessageRefs: resolveLorebookWriterSourceRefs(agentContext),
+      sourceMessageRefs,
+      onWrite: (entry) => {
+        if (!entry?.id || typeof entry.updatedAt !== "string") return;
+        pendingLorebookWrites.set(entry.id, () =>
+          lorebooksStore.updateEntry(
+            entry.id,
+            {
+              sourceAgentId: agent.id,
+              sourceMessageRefs: sourceMessageRefs(),
+            },
+            {
+              sourceAgentId: agent.id,
+              sourceMessageRefs: entry.sourceMessageRefs,
+              updatedAt: entry.updatedAt,
+              content: entry.content,
+            },
+          ),
+        );
+      },
     });
     const replaceChatMessageContentForAgent = customAgentHasCapability(agentSettings, "edit_messages")
       ? replaceChatMessageContent
@@ -1127,6 +1163,12 @@ async function resolveToolRuntime(
     toolDefs,
     baseToolExecutionContext,
     updateChatMetadataForTools,
+    async finalizeLorebookWrites() {
+      // Pre/parallel tools can write before the assistant exists. Bind them after save,
+      // conditionally, so a later human edit or another agent's write keeps ownership.
+      for (const write of pendingLorebookWrites.values()) await write();
+      pendingLorebookWrites.clear();
+    },
   };
 }
 

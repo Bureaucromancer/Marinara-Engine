@@ -72,6 +72,7 @@ import {
 } from "@marinara-engine/shared";
 import type {
   AgentContext,
+  SourceMessageRef,
   AgentCallDebugEvent,
   AgentResult,
   HapticDeviceCommand,
@@ -671,6 +672,7 @@ import {
   buildLorebookWriteApprovalProposal,
   buildSummaryWriteApprovalProposal,
   isAgentWriteApprovalEnvelope,
+  stampLorebookWriteApprovalSource,
 } from "./generate/agent-write-approval.js";
 
 function scopeLorebookPromptMessagesForCharacter(
@@ -5108,7 +5110,31 @@ export async function generateRoutes(app: FastifyInstance) {
             ? [...resolvedAgents, directorSecretPlotAgent]
             : resolvedAgents;
         const requireAgentWriteApproval = agentWriteApprovalRequired(chatMeta);
+        const customLorebookReadBehindTargets = new Map<
+          string,
+          { context: AgentContext; messageId: string; swipeIndex: number }
+        >();
+        let lorebookKeeperProcessedMessageRef: SourceMessageRef | null = null;
+        const getLorebookSourceMessageRefs = (agent: { id: string; type: string }): SourceMessageRef[] => {
+          const historical = customLorebookReadBehindTargets.get(agent.id);
+          if (historical) return [{ id: historical.messageId, swipeIndex: historical.swipeIndex }];
+          if (agent.type === "lorebook-keeper" && lorebookKeeperProcessedMessageRef)
+            return [lorebookKeeperProcessedMessageRef];
+          return [
+            ...(currentTurnUserMessageId ? [{ id: currentTurnUserMessageId, swipeIndex: null }] : []),
+            ...(currentIterationSavedMsg?.id
+              ? [{ id: currentIterationSavedMsg.id, swipeIndex: lastSavedSwipeIndex ?? 0 }]
+              : []),
+          ];
+        };
         const markLorebookResultForApproval = (result: AgentResult): AgentResult => {
+          const sourceMessageRefs = getLorebookSourceMessageRefs({ id: result.agentId, type: result.agentType });
+          if (result.type === "lorebook_update" && isAgentWriteApprovalEnvelope(result.data)) {
+            return {
+              ...result,
+              data: stampLorebookWriteApprovalSource(result.data, result.agentId, sourceMessageRefs),
+            };
+          }
           if (
             !requireAgentWriteApproval ||
             !result.success ||
@@ -5181,14 +5207,12 @@ export async function generateRoutes(app: FastifyInstance) {
                 lorebookNamingScheme: getLorebookNamingScheme(resultAgent?.settings),
                 worldName: agentContext.characters[0]?.world ?? chat.name,
                 existingEntries,
+                sourceAgentId: result.agentId,
+                sourceMessageRefs,
               }),
             },
           };
         };
-        const customLorebookReadBehindTargets = new Map<
-          string,
-          { context: AgentContext; messageId: string; swipeIndex: number }
-        >();
         const { sendAgentEvent: sendRawAgentEvent, sendAgentResultEvent: sendRawAgentResultEvent } =
           createAgentEventDispatcher({
             resolvedAgents: agentEventResolvedAgents,
@@ -5296,6 +5320,7 @@ export async function generateRoutes(app: FastifyInstance) {
           toolDefs,
           baseToolExecutionContext,
           updateChatMetadataForTools,
+          finalizeLorebookWrites,
         } = await resolveGenerationTools({
           requestBody: input as Record<string, unknown>,
           nativeToolsAvailable: supportsNativeToolCalls((gameToolConnection ?? conn).provider),
@@ -5317,6 +5342,7 @@ export async function generateRoutes(app: FastifyInstance) {
           gameState,
           gameSpotifyMusicEnabled,
           agentContext,
+          getLorebookSourceMessageRefs,
           emitMetadataPatch: (patch) => sendSseEvent(reply, { type: "metadata_patch", data: patch }),
           // Game Mode rolls its dice for real. This does not turn the chat's tool toggle on —
           // only roll_dice is attached, and everything keyed on enableChatTools stays quiet.
@@ -9347,6 +9373,7 @@ export async function generateRoutes(app: FastifyInstance) {
           }
         }
 
+        await finalizeLorebookWrites();
         const hasPostProcessingAgents = resolvedAgents.some((a) => a.phase === "post_processing");
         agentContext.mainResponseSegments = shouldPrefixGroupHistorySpeakers ? allResponseSegments : undefined;
         let lorebookKeeperProcessedMessageId = "";
@@ -9740,6 +9767,10 @@ export async function generateRoutes(app: FastifyInstance) {
 
             if (lorebookKeeperContext && processedMessageId) {
               lorebookKeeperProcessedMessageId = processedMessageId;
+              lorebookKeeperProcessedMessageRef = {
+                id: processedMessageId,
+                swipeIndex: historicalLorebookTarget?.activeSwipeIndex ?? lastSavedSwipeIndex ?? 0,
+              };
               const lorebookKeeperResult = await executeAgent(
                 lorebookKeeperAgent,
                 lorebookKeeperContext,
@@ -10977,10 +11008,7 @@ export async function generateRoutes(app: FastifyInstance) {
                       isBuiltInLorebookAgent || !resultAgent?.id
                         ? "lorebook-keeper"
                         : (resultAgent as { id: string }).id,
-                    sourceMessageRefs: [
-                      ...(currentTurnUserMessageId ? [{ id: currentTurnUserMessageId, swipeIndex: null }] : []),
-                      ...(resultMessageId ? [{ id: resultMessageId, swipeIndex: targetSwipeIndex ?? null }] : []),
-                    ],
+                    sourceMessageRefs: getLorebookSourceMessageRefs({ id: result.agentId, type: result.agentType }),
                     updates,
                     revectorizeEntry: memoryRecallVectorizerAvailable
                       ? async (entry) => {

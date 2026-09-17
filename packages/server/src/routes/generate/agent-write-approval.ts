@@ -94,6 +94,19 @@ export function isAgentWriteApprovalEnvelope(value: unknown): value is AgentWrit
   return isRecord(value) && value.requiresApproval === true && isRecord(value.approval);
 }
 
+/** Refresh tool proposals after the assistant has been saved, before final delivery. */
+export function stampLorebookWriteApprovalSource(
+  envelope: AgentWriteApprovalEnvelope,
+  sourceAgentId: string,
+  sourceMessageRefs: SourceMessageRef[],
+): AgentWriteApprovalEnvelope {
+  if (envelope.approval.kind !== "lorebook_update") return envelope;
+  return {
+    ...envelope,
+    approval: { ...envelope.approval, payload: { ...envelope.approval.payload, sourceAgentId, sourceMessageRefs } },
+  };
+}
+
 function normalizeEntryName(value: string): string {
   return value.trim().toLocaleLowerCase();
 }

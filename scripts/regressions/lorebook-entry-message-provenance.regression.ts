@@ -193,6 +193,7 @@ try {
       sourceAgentId: "lorebook-keeper",
       sourceMessageRefs: [{ id: mN10, swipeIndex: 0 }],
     });
+    await lorebooks.updateEntryEmbedding(revertMe!.id, [1, 0], "discarded-turn");
 
     // Keeper create whose only source dies → removed outright.
     const dieAlone = await lorebooks.createEntry({
@@ -250,6 +251,8 @@ try {
     assert.ok(reverted, "revertable entry survives its deleted rewrite turn");
     assert.equal(reverted.content, "Kael is rumored to have defaced a shrine.", "content reverted to snapshot");
     assert.deepEqual(reverted.sourceMessageRefs, [{ id: mN, swipeIndex: null }], "refs reverted to snapshot refs");
+    assert.equal(reverted.embedding, null, "restored content must not retain the discarded turn's vector");
+    assert.equal(reverted.embeddingSpaceId, null);
 
     const dead = await lorebooks.getEntry(dieAlone!.id);
     assert.equal(dead, null, "keeper create whose only turn died is removed");
@@ -436,6 +439,125 @@ try {
       await db.select().from((await import("../../packages/server/src/db/schema/lorebooks.js")).lorebookEntries)
     ).find((candidate: { id: string }) => candidate.id === entry.id);
     assert.equal(row.previousContent, "First state.", "empty-refs rewrite still snapshots");
+  }
+
+  // Tools can run before the assistant exists; bind their writes after save without
+  // overwriting a human edit, and preserve the pre-turn snapshot across repeated calls.
+  {
+    const { resolveGenerationTools } =
+      await import("../../packages/server/src/services/generation/tool-resolution-runtime.js");
+    const { stampLorebookWriteApprovalSource, buildLorebookWriteApprovalProposal } =
+      await import("../../packages/server/src/routes/generate/agent-write-approval.js");
+    const chat = (await chats.create({ name: "Tool provenance", mode: "roleplay", characterIds: [] }))!;
+    const user = (await chats.createMessage({ chatId: chat.id, role: "user", content: "Inspect the ledger" }))!;
+    const toolBook = (await lorebooks.create({ name: "Tool lore" }))!;
+    let refs: Array<{ id: string; swipeIndex: number | null }> = [{ id: user.id, swipeIndex: null }];
+    const agent = {
+      id: "tool-keeper",
+      type: "tool-keeper",
+      name: "Tool keeper",
+      phase: "parallel",
+      promptTemplate: "Save facts",
+      connectionId: null,
+      settings: { enabledTools: ["save_lorebook_entry"], writableLorebookId: toolBook.id },
+      isCustomAgent: true,
+      provider: {},
+      model: "fixture",
+    } as any;
+    const runtime = await resolveGenerationTools({
+      requestBody: {},
+      chatId: chat.id,
+      chatMetadata: {},
+      chats,
+      agentsStore: {},
+      customToolsStore: { listEnabled: async () => [] },
+      lorebooksStore: lorebooks,
+      resolvedAgents: [agent],
+      enabledConfigs: [],
+      promptCharacterIds: [],
+      personaId: null,
+      activeLorebookIds: [],
+      excludedLorebookIds: [],
+      excludedSourceAgentIds: [],
+      gameState: null,
+      gameSpotifyMusicEnabled: false,
+      agentContext: {
+        chatId: chat.id,
+        chatMode: "roleplay",
+        recentMessages: [{ id: user.id, role: "user", content: user.content }],
+        mainResponse: null,
+        gameState: null,
+        characters: [],
+        persona: null,
+        memory: {},
+        writableLorebookIds: [toolBook.id],
+        chatSummary: null,
+      },
+      emitMetadataPatch() {},
+      getLorebookSourceMessageRefs: () => refs,
+    });
+    const save = async (name: string, content: string, mode: string) => {
+      const result = JSON.parse(
+        await agent.toolContext.executeToolCall({
+          id: name,
+          type: "function",
+          function: {
+            name: "save_lorebook_entry",
+            arguments: JSON.stringify({ name, content, keys: ["ledger"], mode }),
+          },
+        }),
+      );
+      assert.equal(result.applied, true, JSON.stringify(result));
+      return result.entryId as string;
+    };
+    const createdId = await save("New fact", "Invented claim", "create");
+    await save("New fact", "Second invented claim", "append");
+    const original = (await lorebooks.createEntry({
+      lorebookId: toolBook.id,
+      name: "Old fact",
+      content: "Original handwritten fact",
+      keys: ["ledger"],
+    }))!;
+    await save("Old fact", "Invented replacement", "replace");
+    await save("Old fact", "Extra invented detail", "append");
+    const humanId = await save("Human owned", "Agent draft", "create");
+    await lorebooks.updateEntry(humanId, { content: "Human correction" });
+    const assistant = (await chats.createMessage({
+      chatId: chat.id,
+      role: "assistant",
+      content: "The invented events",
+    }))!;
+    refs = [...refs, { id: assistant.id, swipeIndex: 0 }];
+    await runtime.finalizeLorebookWrites();
+    assert.deepEqual((await lorebooks.getEntry(createdId))?.sourceMessageRefs, refs);
+    assert.equal((await lorebooks.getEntry(humanId))?.sourceAgentId, null, "late binding cannot reclaim a human edit");
+    const proposal = buildLorebookWriteApprovalProposal({
+      chatId: chat.id,
+      agentType: agent.type,
+      agentName: agent.name,
+      updates: [{ name: "Approved fact", content: "Claim" }],
+      sourceAgentId: agent.id,
+      sourceMessageRefs: [{ id: user.id, swipeIndex: null }],
+    });
+    const stamped = stampLorebookWriteApprovalSource({ requiresApproval: true, approval: proposal }, agent.id, refs);
+    assert.deepEqual(
+      stamped.approval.payload?.sourceMessageRefs,
+      refs,
+      "final proposals include the saved assistant and its swipe",
+    );
+    assert.equal(stamped.approval.text, proposal.text, "adding provenance preserves the user's approval text");
+    await chats.removeMessage(assistant.id);
+    assert.equal(
+      await lorebooks.getEntry(createdId),
+      null,
+      "deleting only the assistant cascades repeated pre-save tool writes",
+    );
+    assert.equal(
+      (await lorebooks.getEntry(original.id))?.content,
+      "Original handwritten fact",
+      "same-turn writes retain the original undo snapshot",
+    );
+    assert.equal((await lorebooks.getEntry(humanId))?.content, "Human correction");
   }
 
   console.log("Lorebook entry message provenance regressions passed.");
