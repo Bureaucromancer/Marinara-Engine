@@ -646,7 +646,7 @@ try {
   }
 
   // Message deletion must release its transaction before waiting on metadata queues.
-  // A bulk call scans agent lore once even when its message IDs span multiple chunks.
+  // Each nonempty chunk commits message and lore deletion together, with one lore scan.
   for (const bulk of [false, true]) {
     const chat = (await chats.create({ name: "Queued lore cleanup", mode: "roleplay", characterIds: [] }))!;
     const first = (await chats.createMessage({ chatId: chat.id, role: "assistant", content: "First" }))!;
@@ -705,7 +705,7 @@ try {
       await entered;
       releaseMetadata();
       await Promise.all([edit, deletion]);
-      assert.equal(loreScans, 1, "one agent-lore scan per deletion call");
+      assert.equal(loreScans, bulk ? 2 : 1, "one agent-lore scan per nonempty deletion chunk");
     } finally {
       clearTimeout(watchdog);
       releaseMetadata();
@@ -764,6 +764,32 @@ try {
     assert.deepEqual(JSON.parse((await chats.getById(chat.id))!.metadata).entryStateOverrides, {
       [entries[1].id]: { enabled: false },
     });
+  }
+
+  // A lore-write failure rolls back the message deletion in the same chunk.
+  {
+    const chat = (await chats.create({ name: "Atomic lore cleanup", mode: "roleplay", characterIds: [] }))!;
+    const message = (await chats.createMessage({ chatId: chat.id, role: "assistant", content: "Retained" }))!;
+    const entry = (await lorebooks.createEntry({
+      lorebookId: book.id,
+      name: "Retained fact",
+      content: "Retained",
+      sourceAgentId: "keeper",
+      sourceMessageRefs: [{ id: message.id, swipeIndex: 0 }],
+    }))!;
+    const originalDelete = db.delete;
+    const failure = new Error("Lore deletion failed");
+    db.delete = ((table: any) => {
+      if (table === lorebookEntries) throw failure;
+      return originalDelete.call(db, table);
+    }) as typeof db.delete;
+    try {
+      await assert.rejects(chats.removeMessages([message.id], chat.id), (error) => error === failure);
+    } finally {
+      db.delete = originalDelete;
+    }
+    assert.ok(await chats.getMessage(message.id), "failed lore cleanup rolls back its message deletion");
+    assert.ok(await lorebooks.getEntry(entry.id), "failed chunk preserves both sides of the source link");
   }
 
   // Mari treats provenance arrays as JSON, including their stored undo references.
