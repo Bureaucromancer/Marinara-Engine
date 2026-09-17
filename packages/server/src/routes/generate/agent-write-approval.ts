@@ -1,4 +1,4 @@
-import type { AgentWriteApprovalEnvelope, AgentWriteApprovalProposal } from "@marinara-engine/shared";
+import type { AgentWriteApprovalEnvelope, AgentWriteApprovalProposal, SourceMessageRef } from "@marinara-engine/shared";
 import {
   mergeLorebookKeeperUpdateContent,
   readKeeperUpdateName as readUpdateName,
@@ -240,6 +240,9 @@ export function buildLorebookWriteApprovalProposal(args: {
   lorebookNamingScheme?: Record<string, string>;
   worldName?: string | null;
   existingEntries?: Array<{ name?: string | null; content?: string | null }>;
+  /** Round-trips through the approval payload so the later apply can stamp provenance. */
+  sourceAgentId?: string;
+  sourceMessageRefs?: SourceMessageRef[];
 }): AgentWriteApprovalProposal {
   return {
     kind: "lorebook_update",
@@ -256,6 +259,8 @@ export function buildLorebookWriteApprovalProposal(args: {
       lorebookNamingScheme: args.lorebookNamingScheme,
       worldName: args.worldName,
       updates: args.updates,
+      sourceAgentId: args.sourceAgentId,
+      sourceMessageRefs: args.sourceMessageRefs,
     },
     canRegenerate: !!args.agentType,
     createdAt: new Date().toISOString(),

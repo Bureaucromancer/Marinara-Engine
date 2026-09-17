@@ -1664,6 +1664,17 @@ export async function chatsRoutes(app: FastifyInstance) {
           })
         : undefined;
       const lorebooksStore = createLorebooksStorage(app.db);
+      // The proposal payload round-trips the turn provenance captured at
+      // proposal time; entries applied here are anchored to the same turn so
+      // message deletion can cascade them. Older clients that dropped the
+      // unknown payload keys degrade to unstamped (cascade-ineligible) writes.
+      const approvalRefs = Array.isArray(payload.sourceMessageRefs)
+        ? payload.sourceMessageRefs.flatMap((ref) => {
+            if (!isRecord(ref) || typeof ref.id !== "string" || !ref.id.trim()) return [];
+            const swipeIndex = (ref as { swipeIndex?: unknown }).swipeIndex;
+            return [{ id: ref.id, swipeIndex: typeof swipeIndex === "number" ? swipeIndex : null }];
+          })
+        : undefined;
       const targetLorebookId = await persistLorebookKeeperUpdates({
         lorebooksStore,
         chatId: req.params.id,
@@ -1678,6 +1689,11 @@ export async function chatsRoutes(app: FastifyInstance) {
           typeof payload.worldName === "string" && payload.worldName.trim()
             ? payload.worldName.trim()
             : (chat as { name?: string | null }).name,
+        sourceAgentId:
+          typeof payload.sourceAgentId === "string" && payload.sourceAgentId.trim()
+            ? payload.sourceAgentId
+            : "lorebook-keeper",
+        sourceMessageRefs: approvalRefs,
         updates,
       });
       return { ok: true, targetLorebookId };
