@@ -9,6 +9,10 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 - Deleting a chat message (or bulk-deleting messages) now cleans up lore that agents extracted from the deleted turns. The Lorebook Keeper's entries remember which messages they came from: rewriting an entry in place is undone when the turn that rewrote it is deleted, entries whose whole source turn is gone are removed, and hand-written entries are never touched.
 - Regenerating a message no longer keeps lore written from the discarded swipe active in the prompt. Swiping back to the original response brings its lore back.
 - Lorebook entries expose the messages they were extracted from, and the entries list can be filtered by source message, so lore left behind by a deleted message can be found and purged explicitly.
+- Character schedules accept custom daily safety limits above eight, preserve them through schedule imports, and still respect the chat check-in cap (#6291).
+- Local embedding launches raise the logical batch when needed so physical batches above 2,048 tokens are not silently capped by llama.cpp (#6293).
+- Professor Mari validates edits and undo without scanning unrelated chat history, preserving lazy storage and avoiding repeated unrelated-error warnings. Plain-text agent memory no longer produces false JSON errors; explicit database validation still reports existing broken references without deleting data (#6294).
+
 - Refresh compatible dependency and CI-action versions while preserving the supported Node, schema and native-runtime compatibility pins. The sandbox regression fixture also resolves macOS temporary-directory aliases before comparing canonical store links, and restart-test failures retain startup-stage diagnostics.
 
 - Starting a Conversation or Roleplay chat from a character card keeps that character selected when saved wizard defaults are applied (#6284).
