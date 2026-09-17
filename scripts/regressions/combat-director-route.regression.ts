@@ -258,6 +258,21 @@ try {
     400,
     "Malformed imported saves return a recoverable client error",
   );
+  for (const corrupt of ["{truncated", "null"]) {
+    await store.create({
+      chatId: chat.id,
+      messageId: message.id,
+      swipeIndex: 0,
+      gameType: COMBAT_DIRECTOR_NAMESPACE,
+      schemaVersion: 1,
+      state: corrupt,
+      committed: true,
+    });
+    const response = await app.inject({ url: `/combat/state?chatId=${chat.id}&anchor=${message.id}` });
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json().error, "Unsupported combat save.");
+    assert.equal((await post("/combat/start", input)).json().error, "Unsupported combat save.");
+  }
   console.log(
     "Combat director route: authority, idempotency, terrain, atomic item costs, late GM output, restore identity and branch isolation passed.",
   );

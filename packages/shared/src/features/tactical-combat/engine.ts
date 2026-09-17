@@ -401,6 +401,14 @@ function resolveHit(
     events.push({
       kind: "miss",
       text: `${label} ${verb} ${defender.name} — but misses!`,
+      message: {
+        key: opts.isCounter
+          ? "game.combat.event.missCounter"
+          : opts.skillName
+            ? "game.combat.event.missSkill"
+            : "game.combat.event.miss",
+        params: { actor: attacker.name, target: defender.name, skill: opts.skillName ?? "" },
+      },
       actorId: attacker.id,
       targetId: defender.id,
       isMiss: true,
@@ -432,6 +440,15 @@ function resolveHit(
     events.push({
       kind: "crit",
       text: `Critical hit! ${label} ${verb} ${defender.name} for ${damage}${elementNote}`,
+      message: {
+        key: opts.isCounter
+          ? "game.combat.event.criticalCounter"
+          : opts.skillName
+            ? "game.combat.event.criticalSkill"
+            : "game.combat.event.critical",
+        params: { actor: attacker.name, target: defender.name, amount: damage, skill: opts.skillName ?? "" },
+        suffixKey: mult > 1 ? "game.combat.event.effective" : mult < 1 ? "game.combat.event.resisted" : undefined,
+      },
       actorId: attacker.id,
       targetId: defender.id,
       amount: damage,
@@ -443,6 +460,15 @@ function resolveHit(
     events.push({
       kind: opts.isCounter ? "counter" : "damage",
       text: `${label} ${verb} ${defender.name} for ${damage} damage${elementNote}`,
+      message: {
+        key: opts.isCounter
+          ? "game.combat.event.damageCounter"
+          : opts.skillName
+            ? "game.combat.event.damageSkill"
+            : "game.combat.event.damage",
+        params: { actor: attacker.name, target: defender.name, amount: damage, skill: opts.skillName ?? "" },
+        suffixKey: mult > 1 ? "game.combat.event.effective" : mult < 1 ? "game.combat.event.resisted" : undefined,
+      },
       actorId: attacker.id,
       targetId: defender.id,
       amount: damage,
@@ -462,6 +488,7 @@ function resolveHit(
     events.push({
       kind: "status",
       text: `${defender.name} is afflicted with ${opts.statusEffect}!`,
+      message: { key: "game.combat.event.afflicted", params: { target: defender.name, effect: opts.statusEffect } },
       targetId: defender.id,
       statusName: opts.statusEffect,
     });
@@ -472,6 +499,7 @@ function resolveHit(
     events.push({
       kind: "defeat",
       text: `${defender.name} is defeated!`,
+      message: { key: "game.combat.event.defeated", params: { target: defender.name } },
       targetId: defender.id,
     });
   }
@@ -521,6 +549,7 @@ function performUnitAction(
       events.push({
         kind: "move",
         text: `${unit.name} moves to (${dest.x}, ${dest.y}).`,
+        message: { key: "game.combat.event.move", params: { actor: unit.name, x: dest.x, y: dest.y } },
         actorId: unit.id,
         from,
         to: dest,
@@ -535,13 +564,23 @@ function performUnitAction(
 
     case "wait":
       unit.hasActed = true;
-      events.push({ kind: "status", text: `${unit.name} waits.`, actorId: unit.id });
+      events.push({
+        kind: "status",
+        text: `${unit.name} waits.`,
+        message: { key: "game.combat.event.wait", params: { actor: unit.name } },
+        actorId: unit.id,
+      });
       return;
 
     case "defend":
       unit.defending = true;
       unit.hasActed = true;
-      events.push({ kind: "status", text: `${unit.name} braces for impact (defending).`, actorId: unit.id });
+      events.push({
+        kind: "status",
+        text: `${unit.name} braces for impact (defending).`,
+        message: { key: "game.combat.event.defend", params: { actor: unit.name } },
+        actorId: unit.id,
+      });
       return;
 
     case "attack": {
@@ -566,6 +605,10 @@ function performUnitAction(
       events.push({
         kind: "heal",
         text: `${unit.name} uses ${action.itemName} on ${target.name}, restoring ${target.hp - before} HP.`,
+        message: {
+          key: "game.combat.event.itemHeal",
+          params: { actor: unit.name, item: action.itemName, target: target.name, amount: target.hp - before },
+        },
         actorId: unit.id,
         targetId: target.id,
         amount: target.hp - before,
@@ -595,6 +638,10 @@ function performUnitAction(
         events.push({
           kind: "heal",
           text: `${unit.name} casts ${skill.name}, healing ${target.name} for ${target.hp - before} HP.`,
+          message: {
+            key: "game.combat.event.heal",
+            params: { actor: unit.name, skill: skill.name, target: target.name, amount: target.hp - before },
+          },
           actorId: unit.id,
           targetId: target.id,
           amount: target.hp - before,
@@ -616,6 +663,10 @@ function performUnitAction(
         events.push({
           kind: "status",
           text: `${unit.name} casts ${skill.name} on ${target.name} (${isBuff ? "buff" : "debuff"}: ${status.name}).`,
+          message: {
+            key: "game.combat.event.statusCast",
+            params: { actor: unit.name, skill: skill.name, target: target.name, effect: status.name },
+          },
           actorId: unit.id,
           targetId: target.id,
           skillName: skill.name,
@@ -690,6 +741,16 @@ function tickRound(state: TacticalCombatState, events: TacticalEvent[]): void {
           events.push({
             kind: e.modifier < 0 ? "damage" : "heal",
             text: `${u.name} ${e.modifier < 0 ? "takes" : "recovers"} ${Math.abs(u.hp - before)} from ${e.name}.`,
+            message:
+              e.modifier < 0
+                ? {
+                    key: "game.combat.event.statusDamage",
+                    params: { target: u.name, amount: Math.abs(u.hp - before), effect: e.name },
+                  }
+                : {
+                    key: "game.combat.event.statusHeal",
+                    params: { target: u.name, amount: Math.abs(u.hp - before), effect: e.name },
+                  },
             targetId: u.id,
             amount: Math.abs(u.hp - before),
             statusName: e.name,

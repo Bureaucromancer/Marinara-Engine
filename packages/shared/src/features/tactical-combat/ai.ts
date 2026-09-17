@@ -94,7 +94,7 @@ function buildAttackOptions(state: TacticalCombatState, unit: TacticalUnit): Att
           element: skill.element,
           skillName: skill.name,
           rangeMin: 1,
-          rangeMax: Math.max(unit.attackRange.max, 2),
+          rangeMax: skill.range ?? Math.max(unit.attackRange.max, 2),
         });
       }
     }

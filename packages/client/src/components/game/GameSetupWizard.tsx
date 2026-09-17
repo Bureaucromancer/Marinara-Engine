@@ -1946,7 +1946,7 @@ export function GameSetupWizard({
                             {localizeUi("ui.game.gamesetupwizard.tactical")}
                           </div>
                           <div className="mt-1 text-[var(--muted-foreground)]">
-                            {localizeUi("ui.game.gamesetupwizard.fireEmblemStyleGridBattlesMovementTerrainForecasts")}
+                            {localizeUi("game.combat.preference.tacticalDescription")}
                           </div>
                         </button>
                       </div>

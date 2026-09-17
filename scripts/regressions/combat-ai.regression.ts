@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { assignCombatTactics, combatTacticsSchema } from "../../packages/shared/src/features/combat-ai.js";
+import {
+  assignCombatTactics,
+  chooseCombatCandidate,
+  combatTacticsSchema,
+} from "../../packages/shared/src/features/combat-ai.js";
 import {
   applyTacticalTurn,
   decideTacticalAction,
@@ -356,4 +360,56 @@ for (let seed = 0; seed < 1000; seed++) {
 assert.ok(
   masterFit > noviceFit && masterRare > 0,
   "Training favors role-suited personalities without eliminating unusual veterans",
+);
+
+// A new Methodical profile favors actual damage over an untargeted hold; then retains a real target.
+const methodical = {
+  ...actor("methodical"),
+  tactics: {
+    ...assignCombatTactics(actor("methodical"), 9),
+    adjective: "methodical" as const,
+    proficiency: "master" as const,
+  },
+};
+assert.equal(
+  chooseCombatCandidate(
+    methodical,
+    [
+      { action: "hold", hold: true },
+      { action: "attack", targetId: "foe", damage: 0.2 },
+    ],
+    1,
+  ),
+  "attack",
+);
+assert.equal(
+  chooseCombatCandidate(
+    methodical,
+    [
+      { action: "new", targetId: "other", damage: 0.3 },
+      { action: "focused", targetId: "foe", damage: 0.2 },
+    ],
+    2,
+  ),
+  "focused",
+);
+// Legacy units must respect authored attack-skill range, too.
+const legacyRange = arena();
+legacyRange.units = legacyRange.units.slice(0, 2);
+const [legacyCaster, legacyTarget] = legacyRange.units;
+legacyCaster!.side = "enemy";
+legacyCaster!.x = 1;
+legacyCaster!.y = 1;
+legacyCaster!.hasMoved = true;
+delete legacyCaster!.tactics;
+legacyCaster!.skills = [{ id: "touch", name: "Touch", type: "attack", power: 100, mpCost: 0, range: 1 }];
+legacyTarget!.x = 3;
+legacyTarget!.y = 1;
+const rangedChoice = decideTacticalAction(legacyRange, legacyCaster!);
+assert.notEqual(rangedChoice.type, "skill", "Legacy AI cannot cast a range-one skill at distance two");
+legacyCaster!.skills[0]!.range = 2;
+assert.equal(
+  decideTacticalAction(legacyRange, legacyCaster!).type,
+  "skill",
+  "The same skill is available at its declared range",
 );

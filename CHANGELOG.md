@@ -4,6 +4,10 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 
 ## [Unreleased]
 
+- Linux sandbox regressions probe the actual host process instead of Bubblewrap’s isolated supervisor and accept explicit denial when reading a masked secret file, avoiding false failures without weakening the isolation checks.
+
+- Combat AI review fixes keep Methodical units focused on real opponents, respect legacy skill ranges, and report invalid enemy MP and corrupt saves clearly. Combat events can be translated, item prompts match their targets, and mobile terrain inspection leaves battle controls accessible. Battlefield reload checks no longer depend on browser resource-timing history (#6303).
+
 - Codex has a dedicated `AGENTS.md` with OpenAI model and tool guidance; skills remain shared through `.agents/skills → .claude/skills`. Completed, locally validated and reviewed PRs now proceed to ready for review without a separate confirmation.
 
 - New Game Mode battles use saved combat temperaments in Classic and Tactical, including Patient, Methodical and Coordinated. Explicit Mindless hints also work for other creature types. Companion control can be chosen per member; generated enemies retain usable MP, and Classic support skills target the correct side with saved cooldowns.

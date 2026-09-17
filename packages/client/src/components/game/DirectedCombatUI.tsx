@@ -231,7 +231,8 @@ export function DirectedCombatUI(props: Props) {
             <ol className="mt-1 space-y-1 text-xs text-[var(--muted-foreground)]">
               {s.log.slice(-12).map((e) => (
                 <li key={e.id}>
-                  {e.text}
+                  {e.message ? t(e.message.key, { ...e.message.params, defaultValue: e.text }) : e.text}
+                  {e.message?.suffixKey && ` ${t(e.message.suffixKey)}`}
                   {e.source === "fallback" && ` (${t("game.combat.director.fallbackUsed")})`}
                 </li>
               ))}

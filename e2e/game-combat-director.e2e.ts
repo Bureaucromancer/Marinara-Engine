@@ -150,6 +150,20 @@ for (const mode of ["classic", "tactical"] as const) {
       await page.reload();
       await expect(react).toBeVisible({ timeout: 40000 });
       await expect(react).toBeFocused();
+      // Change a catalog entry to prove saved events are localized at render time after reload.
+      await page.evaluate(async () => {
+        const { i18n } = (await import("/src/localization/i18n.ts" as string)) as PageI18nModule;
+        i18n.addResource(
+          "en",
+          "translation",
+          "game.combat.event.beginSkill",
+          "Translated event: {{actor}} begins {{skill}}.",
+        );
+        await i18n.changeLanguage("en");
+      });
+      await choices.getByText("Recent combat events", { exact: true }).click();
+      await expect(choices.getByText(/^Translated event: .*Fireball\.$/)).toBeVisible();
+
       await react.click({ trial: true });
       await page.screenshot({ path: testInfo.outputPath(`${mode}-reaction.png`), fullPage: true });
       const response = page.waitForResponse(

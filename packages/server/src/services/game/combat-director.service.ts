@@ -91,8 +91,15 @@ const manual = (s: CombatDirectorState, u: Unit) =>
   side(u) === "party" &&
   (living(s).find((c) => side(c) === "party")?.id === u.id ||
     (u.controller ?? (s.style === "classic" ? "ai" : "manual")) === "manual");
-function log(s: CombatDirectorState, text: string, kind: string, actorId?: string, source?: Source) {
-  s.log.push({ id: ++s.serial, text, kind, actorId, source });
+function log(
+  s: CombatDirectorState,
+  text: string,
+  kind: string,
+  actorId?: string,
+  source?: Source,
+  message?: DirectedCombatView["log"][number]["message"],
+) {
+  s.log.push({ id: ++s.serial, text, kind, actorId, source, message });
   s.log = s.log.slice(-240);
 }
 function sync(s: CombatDirectorState) {
@@ -100,7 +107,7 @@ function sync(s: CombatDirectorState) {
     const convert = (u: TacticalUnit): Combatant => ({ ...u, side: side(u) === "party" ? "player" : "enemy" });
     s.party = s.tactical.units.filter((u) => u.side === "party").map(convert);
     s.enemies = s.tactical.units.filter((u) => u.side === "enemy").map(convert);
-    s.tactical.log = s.log.map((e) => ({ kind: "status", text: e.text, actorId: e.actorId }));
+    s.tactical.log = s.log.map((e) => ({ kind: "status", text: e.text, actorId: e.actorId, message: e.message }));
   }
   if (!living(s).some((u) => side(u) === "enemy")) s.outcome = "victory";
   else if (!living(s).some((u) => side(u) === "party")) s.outcome = "defeat";
@@ -496,7 +503,16 @@ function declare(s: CombatDirectorState, action: Action, source: Source, reactio
           .filter((r) => r.id !== u.id && (s.budgets[r.id]?.reaction ?? 0) > 0)
           .map((r) => ({ kind: "react", unitId: r.id, pendingId: id }));
   s.tasks.unshift(...reacts, { kind: "effect", pendingId: id });
-  log(s, skill ? `${u.name} begins ${skill.name}.` : `${u.name} prepares an action.`, "declaration", u.id, source);
+  log(
+    s,
+    skill ? `${u.name} begins ${skill.name}.` : `${u.name} prepares an action.`,
+    "declaration",
+    u.id,
+    source,
+    skill
+      ? { key: "game.combat.event.beginSkill", params: { actor: u.name, skill: skill.name } }
+      : { key: "game.combat.event.prepare", params: { actor: u.name } },
+  );
 }
 function threatenedTargets(s: CombatDirectorState, p: Pending): Unit[] {
   const caster = get(s, p.action.unitId)!;
@@ -645,7 +661,10 @@ function takeChoice(s: CombatDirectorState, id: string, source: Source) {
   s.choices = [];
   s.stage = "select";
   if (c.kind === "pass") {
-    log(s, `${u.name} holds its response.`, w.kind, u.id, source);
+    log(s, `${u.name} holds its response.`, w.kind, u.id, source, {
+      key: "game.combat.event.hold",
+      params: { actor: u.name },
+    });
     return;
   }
   if (c.reaction) {
@@ -670,7 +689,10 @@ function takeChoice(s: CombatDirectorState, id: string, source: Source) {
     declare(s, c.action!, source);
     const pending = Object.values(s.pending).at(-1)!;
     pending.flags = tu ? [moved!, acted!] : undefined;
-    log(s, `${u.name} spends ${c.legendaryCost} legendary point(s).`, w.kind, u.id, source);
+    log(s, `${u.name} spends ${c.legendaryCost} legendary point(s).`, w.kind, u.id, source, {
+      key: "game.combat.event.legendary",
+      params: { actor: u.name, count: c.legendaryCost },
+    });
   }
 }
 function effect(s: CombatDirectorState, p: Pending) {
@@ -684,7 +706,16 @@ function effect(s: CombatDirectorState, p: Pending) {
           const chance = Math.max(0.2, Math.min(0.95, 0.65 + (u.level - caster.level) * 0.03));
           const success = combatAiHash(`${s.seed}:counter:${++s.serial}`) / 0x100000000 < chance;
           parent.cancelled = success;
-          log(s, `${u.name}'s counter ${success ? "interrupts the spell" : "fails"}.`, "reaction", u.id, p.source);
+          log(
+            s,
+            `${u.name}'s counter ${success ? "interrupts the spell" : "fails"}.`,
+            "reaction",
+            u.id,
+            p.source,
+            success
+              ? { key: "game.combat.event.counterSuccess", params: { actor: u.name } }
+              : { key: "game.combat.event.counterFailure", params: { actor: u.name } },
+          );
         } else {
           const a = p.action;
           const target =
@@ -694,7 +725,10 @@ function effect(s: CombatDirectorState, p: Pending) {
                 ? a.tactical.targetId
                 : undefined;
           if (target) (parent.guarded ??= []).push(target);
-          log(s, `${u.name} guards an ally.`, "reaction", u.id, p.source);
+          log(s, `${u.name} guards an ally.`, "reaction", u.id, p.source, {
+            key: "game.combat.event.guard",
+            params: { actor: u.name },
+          });
         }
       }
     } else if (s.tactical && p.action.tactical?.type === "item") {
@@ -718,7 +752,10 @@ function effect(s: CombatDirectorState, p: Pending) {
         target.hp = c.hp;
         target.statusEffects = c.statusEffects;
       }
-      log(s, `${u.name} uses ${action.itemName}.`, "item", u.id, p.source);
+      log(s, `${u.name} uses ${action.itemName}.`, "item", u.id, p.source, {
+        key: "game.combat.event.item",
+        params: { actor: u.name, item: action.itemName },
+      });
     } else if (s.tactical && p.action.tactical) {
       const guarded = (p.guarded ?? []).map((id) => get(s, id) as TacticalUnit).filter(Boolean);
       const prior = guarded.map((x) => x.defending);
@@ -726,7 +763,7 @@ function effect(s: CombatDirectorState, p: Pending) {
       const events: TacticalCombatState["log"] = [];
       performTacticalUnitAction(s.tactical, u as TacticalUnit, p.action.tactical, events, !!p.skillId);
       guarded.forEach((x, i) => (x.defending = prior[i]!));
-      for (const e of events) log(s, e.text, e.kind, e.actorId, p.source);
+      for (const e of events) log(s, e.text, e.kind, e.actorId, p.source, e.message);
     } else if (p.action.classic) {
       const defended = new Set([...s.defending, ...(p.guarded ?? [])]);
       const skill = u.skills?.find((k) => k.id === p.skillId);
@@ -758,7 +795,10 @@ function effect(s: CombatDirectorState, p: Pending) {
       const result = { actions: results.flatMap((r) => r.actions) };
       if (p.action.classic.type === "defend") {
         if (!s.defending.includes(u.id)) s.defending.push(u.id);
-        log(s, `${u.name} braces for impact.`, "defend", u.id, p.source);
+        log(s, `${u.name} braces for impact.`, "defend", u.id, p.source, {
+          key: "game.combat.event.defend",
+          params: { actor: u.name },
+        });
       }
       for (const a of result.actions)
         log(
@@ -767,9 +807,22 @@ function effect(s: CombatDirectorState, p: Pending) {
           "action",
           u.id,
           p.source,
+          {
+            key: a.skillName ? "game.combat.event.action" : "game.combat.event.attack",
+            params: {
+              actor: u.name,
+              skill: a.skillName ?? "",
+              target: get(s, a.defenderId)?.name ?? a.defenderId,
+              amount: `${a.isHeal ? "+" : "−"}${a.finalDamage}`,
+            },
+          },
         );
     }
-  } else log(s, `${u.name}'s action is interrupted.`, "interrupted", u.id, p.source);
+  } else
+    log(s, `${u.name}'s action is interrupted.`, "interrupted", u.id, p.source, {
+      key: "game.combat.event.interrupted",
+      params: { actor: u.name },
+    });
   if (s.tactical && !p.reaction) {
     const flags = p.flags;
     if (flags) {
@@ -804,7 +857,7 @@ export function advanceCombatDirector(s: CombatDirectorState) {
         }
         const events: TacticalCombatState["log"] = [];
         tickTacticalRound(s.tactical, events);
-        for (const e of events) log(s, e.text, e.kind, e.actorId);
+        for (const e of events) log(s, e.text, e.kind, e.actorId, undefined, e.message);
         s.tactical.round++;
         s.round++;
         s.skipParty = false;
@@ -832,6 +885,16 @@ export function advanceCombatDirector(s: CombatDirectorState) {
             `${get(s, action.attackerId)?.name ?? action.attackerId}: ${action.skillName ?? "round effect"} → ${get(s, action.defenderId)?.name ?? action.defenderId} (${action.finalDamage} HP).`,
             "mechanic",
             action.attackerId,
+            undefined,
+            {
+              key: "game.combat.event.roundEffect",
+              params: {
+                actor: get(s, action.attackerId)?.name ?? action.attackerId,
+                effect: action.skillName ?? "",
+                target: get(s, action.defenderId)?.name ?? action.defenderId,
+                amount: action.finalDamage,
+              },
+            },
           );
         for (const tick of roundResult.statusTicks)
           log(
@@ -839,6 +902,16 @@ export function advanceCombatDirector(s: CombatDirectorState) {
             `${get(s, tick.id)?.name ?? tick.id}: ${tick.effect} ${tick.expired ? "ends" : "continues"}.`,
             "status",
             tick.id,
+            undefined,
+            tick.expired
+              ? {
+                  key: "game.combat.event.statusEnds",
+                  params: { actor: get(s, tick.id)?.name ?? tick.id, effect: tick.effect },
+                }
+              : {
+                  key: "game.combat.event.statusContinues",
+                  params: { actor: get(s, tick.id)?.name ?? tick.id, effect: tick.effect },
+                },
           );
         s.round++;
         s.defending = [];

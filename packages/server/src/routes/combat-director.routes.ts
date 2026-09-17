@@ -153,8 +153,13 @@ export async function combatDirectorRoutes(
   const load = async (chatId: string, anchor: string) => {
     const row = await store.getByChatAndMessage(chatId, anchor, 0, COMBAT_DIRECTOR_NAMESPACE);
     if (!row) return null;
-    const state = JSON.parse(row.state) as CombatDirectorState;
-    if (state.schemaVersion !== 1 || !Array.isArray(state.tasks) || !Array.isArray(state.requests))
+    let state: CombatDirectorState;
+    try {
+      state = JSON.parse(row.state) as CombatDirectorState;
+    } catch {
+      throw new Error("Unsupported combat save.");
+    }
+    if (!state || state.schemaVersion !== 1 || !Array.isArray(state.tasks) || !Array.isArray(state.requests))
       throw new Error("Unsupported combat save.");
     // Saved blobs can arrive through imports as well as this route. Bound structural data before resuming.
     z.object({

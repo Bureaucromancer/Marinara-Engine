@@ -92,6 +92,22 @@ try {
     });
     assert.equal(invalidControl.statusCode, 400, "Invalid controlled units must be rejected");
   }
+  for (const commands of [
+    {},
+    { controlledId: "hero", playerAction: { type: "defend" } },
+    { partyActions: { hero: { type: "defend" } } },
+  ]) {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/game/combat/round",
+      payload: { chatId: session.id, round: 1, combatants: [...party, ...enemies], ...commands },
+    });
+    assert.equal(
+      response.statusCode,
+      Object.keys(commands).length ? 400 : 200,
+      "Omitted-side legacy rounds remain accepted, but new party commands require an explicit player side",
+    );
+  }
   const metadata = JSON.parse(session.metadata);
   for (const id of ["missing", "guard", "constructor", "__proto__"]) {
     const invalidOrders = await app.inject({

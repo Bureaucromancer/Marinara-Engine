@@ -51,6 +51,12 @@ export interface CombatDecisionWindow {
   options: CombatDecisionOption[];
   requestedAt?: number;
 }
+/** Optional on old snapshots; text remains the fallback and GM narration source. */
+export interface CombatLogMessage {
+  key: string;
+  suffixKey?: string;
+  params?: Record<string, string | number>;
+}
 export interface DirectedCombatView {
   id: string;
   /** Storage row identity changes when a checkpoint is restored or a battle is branched. */
@@ -71,6 +77,7 @@ export interface DirectedCombatView {
     actorId?: string;
     kind: string;
     text: string;
+    message?: CombatLogMessage;
     source?: "gm" | "ai" | "manual" | "fallback";
   }>;
   outcome?: "victory" | "defeat" | "flee";

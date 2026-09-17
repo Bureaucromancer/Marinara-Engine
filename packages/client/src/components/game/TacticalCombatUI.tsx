@@ -775,6 +775,8 @@ export function TacticalCombatUI({
     return new Set<string>();
   }, [stagedState, ui, selectedUnit, stagedMove]);
 
+  const itemScope = ui.kind === "target" && ui.action === "item" ? (ui.itemEffect?.target ?? "ally") : null;
+
   // Forecast for a hovered/selected target (attack + attack-skills only).
   const [forecastTargetId, setForecastTargetId] = useState<string | null>(null);
   const forecast = useMemo(() => {
@@ -1815,7 +1817,7 @@ export function TacticalCombatUI({
                   className="min-h-11 text-sm text-white/70"
                   onClick={() => setUi({ kind: "unit", unitId: selectedUnit.id })}
                 >
-                  {localizeUi("ui.game.gamecombatui.back")}
+                  {localizeUi("ui.game.tacticalcombatui.back")}
                 </button>
               </div>
             )}
@@ -1881,7 +1883,13 @@ export function TacticalCombatUI({
                   {ui.action === "attack"
                     ? localizeUi("ui.game.tacticalcombatui.selectATarget")
                     : ui.action === "item"
-                      ? localizeUi("ui.game.tacticalcombatui.selectAnAlly")
+                      ? itemScope === "enemy"
+                        ? localizeUi("ui.game.tacticalcombatui.selectAnEnemy")
+                        : itemScope === "self"
+                          ? localizeUi("game.combat.target.selectSelf")
+                          : itemScope === "any"
+                            ? localizeUi("ui.game.tacticalcombatui.selectATarget")
+                            : localizeUi("ui.game.tacticalcombatui.selectAnAlly")
                       : ui.skill?.type === "attack"
                         ? localizeUi("ui.game.tacticalcombatui.selectATarget")
                         : ui.skill?.type === "debuff"
@@ -1891,6 +1899,12 @@ export function TacticalCombatUI({
                 {targetIds.size === 0 && (
                   <p className="text-xs italic text-white/50">
                     {(() => {
+                      if (ui.action === "item") {
+                        if (itemScope === "enemy") return localizeUi("game.combat.target.noEnemies");
+                        if (itemScope === "self") return localizeUi("game.combat.target.selfUnavailable");
+                        if (itemScope === "any") return localizeUi("game.combat.target.noTargets");
+                        return localizeUi("game.combat.target.noAllies");
+                      }
                       const isAttack = ui.action === "attack" || (ui.action === "skill" && ui.skill?.type === "attack");
                       if (isAttack) {
                         const range = selectedUnit.attackRange;
@@ -1973,7 +1987,8 @@ export function TacticalCombatUI({
                     ev.kind === "miss" && "italic text-white/50",
                   )}
                 >
-                  {ev.text}
+                  {ev.message ? localizeUi(ev.message.key, { ...ev.message.params, defaultValue: ev.text }) : ev.text}
+                  {ev.message?.suffixKey && ` ${localizeUi(ev.message.suffixKey)}`}
                 </p>
               ))}
             </div>
@@ -2388,7 +2403,7 @@ function TileInspect({
       dragMomentum={false}
       dragElastic={0}
       dragConstraints={constraintsRef}
-      className="pointer-events-auto absolute left-2 top-2 z-20 w-44 rounded-xl border border-[var(--border)] bg-slate-900/95 p-2.5 text-xs shadow-xl backdrop-blur sm:left-4 sm:top-16"
+      className="pointer-events-auto absolute left-2 top-24 z-20 w-44 rounded-xl border border-[var(--border)] bg-slate-900/95 p-2.5 text-xs shadow-xl backdrop-blur sm:left-4 sm:top-16"
     >
       <div className="mb-1 flex cursor-grab items-center justify-between active:cursor-grabbing">
         <span className="flex items-center gap-1 font-bold text-white">

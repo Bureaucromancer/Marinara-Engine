@@ -169,7 +169,8 @@ export function chooseCombatCandidate<T>(unit: AiCombatant, candidates: CombatAi
         (candidate.cost ?? 0) * weights.cost +
         (candidate.protection ?? 0) * weights.protection +
         (candidate.coordination ?? 0) * weights.coordination;
-      if (candidate.targetId === profile.targetId && adjective === "methodical") score += 0.35;
+      if (adjective === "methodical" && profile.targetId !== undefined && candidate.targetId === profile.targetId)
+        score += 0.35;
       if (candidate.hold && (profile.holds ?? 0) < 1) {
         if (adjective === "patient") score += 0.65;
         if (adjective === "cowardly" && wounded) score += 0.8;

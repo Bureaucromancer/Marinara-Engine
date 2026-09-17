@@ -102,6 +102,26 @@ try {
   await assert.rejects(chooseGmCombatOption(db, chat.id, state, false, AbortSignal.timeout(3000)));
   replyText = '```json\n{"candidateId":"pass"}\n```';
   assert.equal(await chooseGmCombatOption(db, chat.id, state, false, AbortSignal.timeout(3000)), "pass");
+  const { default: Fastify } = await import("../../packages/server/node_modules/fastify/fastify.js");
+  const { encounterRoutes } = await import("../../packages/server/src/routes/encounter.routes.js");
+  const app = Fastify();
+  app.decorate("db", db);
+  await app.register(encounterRoutes, { prefix: "/encounter" });
+  try {
+    for (const pool of [{ mp: 11, maxMp: 10 }, { mp: 0, maxMp: 10 }, { mp: 10 }, { maxMp: 10 }, {}]) {
+      replyText = JSON.stringify({ party: [{ name: "Hero" }], enemies: [{ name: "Caster", ...pool }] });
+      const response = await app.inject({
+        method: "POST",
+        url: "/encounter/init",
+        payload: { chatId: chat.id, settings: {} },
+      });
+      const invalid = "mp" in pool && "maxMp" in pool && pool.mp! > pool.maxMp!;
+      assert.equal(response.statusCode, invalid ? 502 : 200, response.body);
+      if (invalid) assert.match(response.json().error, /Invalid resource pool/);
+    }
+  } finally {
+    await app.close();
+  }
   console.log(
     "GM provider adapter: configured connection, actual outbound context, legal candidate parsing and malformed-output rejection passed against a local HTTP fixture.",
   );

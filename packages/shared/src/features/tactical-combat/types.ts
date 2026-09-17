@@ -220,6 +220,7 @@ export type TacticalEventKind =
   | "flee";
 
 export interface TacticalEvent {
+  message?: import("../combat-director.js").CombatLogMessage;
   kind: TacticalEventKind;
   /** Human-readable line — drives the combat log, damage popups, and the GM's post-battle report. */
   text: string;

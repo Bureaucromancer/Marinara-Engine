@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   createCombatDirector,
   commandCombatDirector,
@@ -321,3 +322,52 @@ s = createCombatDirector({
 commandCombatDirector(s, { type: "classic", action: { type: "defend" } });
 assert.equal(s.round, 2);
 assert.ok(s.log.some((e) => e.kind === "mechanic" && e.text.includes("Pulse")));
+
+const english = JSON.parse(
+  readFileSync(new URL("../../packages/client/src/localization/locales/en.json", import.meta.url), "utf8"),
+);
+for (const event of s.log) {
+  assert.ok(event.message, `New event ${event.kind} must retain a localizable message`);
+  const template = english[event.message.key] ?? english[`${event.message.key}_other`];
+  assert.equal(typeof template, "string", `Missing event key ${event.message.key}`);
+  for (const [, param] of template.matchAll(/{{(\w+)}}/g))
+    assert.ok(param in (event.message.params ?? {}), `Missing ${param}`);
+}
+// Default skills are ready on the next ordinary activation in both engines: legacy cooldown 1 ticks to 0 at round end.
+for (const style of ["classic", "tactical"] as const) {
+  const repeat = createCombatDirector({
+    id: "repeat",
+    anchor: "a",
+    party: [
+      { ...unit("hero", "player"), speed: 10000, skills: [{ ...fire, cooldown: undefined, spell: false, power: 0.1 }] },
+    ],
+    enemies: [{ ...unit("target", "enemy"), hp: 10000, maxHp: 10000 }],
+    style,
+    gm: false,
+    difficulty: "normal",
+    seed: 4,
+  });
+  if (repeat.tactical) {
+    repeat.tactical.units[0]!.x = 1;
+    repeat.tactical.units[0]!.y = 1;
+    repeat.tactical.units[1]!.x = 2;
+    repeat.tactical.units[1]!.y = 1;
+    commandCombatDirector(repeat, { type: "begin", unitId: "hero" });
+  }
+  const cast =
+    style === "classic"
+      ? { type: "classic" as const, action: { type: "skill" as const, skillId: "fire", targetId: "target" } }
+      : {
+          type: "tactical" as const,
+          action: { type: "skill" as const, unitId: "hero", skillName: "Fireball", targetId: "target" },
+        };
+  commandCombatDirector(repeat, cast);
+  assert.equal(repeat.round, 2);
+  if (repeat.tactical) commandCombatDirector(repeat, { type: "begin", unitId: "hero" });
+  commandCombatDirector(repeat, cast);
+  assert.equal(repeat.party[0]!.mp, 14, "Default skill can be used on consecutive rounds and pays once each time");
+  assert.ok(
+    repeat.log.every((event) => event.message),
+    "Tactical and Classic resolver events keep localization metadata",
+  );
+}

@@ -715,7 +715,11 @@ export async function encounterRoutes(app: FastifyInstance) {
                   )
                   .optional(),
               })
-              .passthrough(),
+              .passthrough()
+              .refine(
+                ({ mp, maxMp }) => mp === undefined || maxMp === undefined || mp <= maxMp,
+                "Invalid resource pool.",
+              ),
           ),
         })
         .passthrough();
