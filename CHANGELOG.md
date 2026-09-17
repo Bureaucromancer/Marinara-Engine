@@ -4,6 +4,8 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 
 ## [Unreleased]
 
+- Capability packages can now offer tools the model calls during a turn, so a package that owns live state receives structured, validated data instead of parsing it back out of the reply. Narration still streams while the call happens. See `docs/development/optional-agent-packages.md` for the package-author API.
+
 - Refresh compatible dependency and CI-action versions while preserving the supported Node, schema and native-runtime compatibility pins. The sandbox regression fixture also resolves macOS temporary-directory aliases before comparing canonical store links, and restart-test failures retain startup-stage diagnostics.
 
 - Starting a Conversation or Roleplay chat from a character card keeps that character selected when saved wizard defaults are applied (#6284).
