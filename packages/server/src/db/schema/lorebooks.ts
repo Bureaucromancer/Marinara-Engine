@@ -193,6 +193,8 @@ export const lorebookEntries = fileTable("lorebook_entries", {
   previousContent: text("previous_content"),
   /** JSON array of the snapshot's source refs, or NULL when there is no snapshot. */
   previousSourceMessageRefs: text("previous_source_message_refs"),
+  /** The snapshot's own author (agent id or NULL for human content), restored on revert. */
+  previousSourceAgentId: text("previous_source_agent_id"),
 
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
