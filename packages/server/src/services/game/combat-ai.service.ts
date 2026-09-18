@@ -1,3 +1,11 @@
+import {
+  normalizeGameDifficulty,
+  ENEMY_DAMAGE_MULTIPLIERS,
+  weatherDamageMultiplier,
+  classicHitProbability,
+  type CombatSkill,
+  type CombatWeather,
+} from "@marinara-engine/shared";
 import { chooseCombatCandidate, combatAiHash, type CombatAiCandidate } from "@marinara-engine/shared";
 import type { CombatantStats, PlayerAction } from "./combat.service.js";
 
@@ -6,6 +14,8 @@ export function chooseClassicAction(
   allies: CombatantStats[],
   enemies: CombatantStats[],
   round: number,
+  difficulty: string = "normal",
+  weather?: CombatWeather,
 ): PlayerAction {
   if (!enemies.length) return { type: "defend" };
   if (!unit.tactics) return { type: "attack", targetId: enemies[0]!.id };
@@ -32,26 +42,18 @@ export function chooseClassicAction(
           (unit.skillCooldowns?.[s.id] ?? 0) <= 0,
       ),
     ]) {
-      // Estimate uses current public stats; it never rolls dice or reads player orders.
-      const damage = Math.max(
-        1,
-        unit.attack * Math.max(1, skill?.power ?? 1) * (1 + unit.level * 0.1) +
-          Math.max(1, Math.floor(unit.level / 2)) * 3.5 -
-          target.defense * 0.4,
-      );
+      const estimate = (foe: CombatantStats) => estimateClassicAttack(unit, foe, skill, difficulty, weather);
+      const { damage, hitProbability } = estimate(target);
       candidates.push({
         action: skill
           ? { type: "skill", skillId: skill.id, targetId: target.id }
           : { type: "attack", targetId: target.id },
         targetId: target.id,
-        damage:
-          skill?.targetScope === "all-enemies"
-            ? enemies.reduce(
-                (sum, foe) => sum + Math.max(1, damage + (target.defense - foe.defense) * 0.4) / Math.max(1, foe.maxHp),
-                0,
-              )
-            : damage / Math.max(1, target.maxHp),
-        finish: damage >= target.hp ? 0.7 : 0,
+        damage: (skill?.targetScope === "all-enemies" ? enemies : [target]).reduce((sum, foe) => {
+          const result = estimate(foe);
+          return sum + (result.damage * result.hitProbability) / Math.max(1, foe.maxHp);
+        }, 0),
+        finish: damage >= target.hp ? 0.7 * hitProbability : 0,
         cost: skill?.slotLevel
           ? 1 / Math.max(1, unit.spellSlots?.[String(skill.slotLevel)] ?? 0)
           : (skill?.mpCost ?? 0) / Math.max(1, unit.maxMp ?? unit.mp ?? 0),
@@ -98,5 +100,33 @@ export function chooseClassicAction(
     (unit.tactics!.adjective !== "patient" || Object.values(unit.skillCooldowns ?? {}).some((cd) => cd === 1))
   )
     candidates.push({ action: { type: "defend" }, hold: true });
-  return chooseCombatCandidate(unit, candidates, round);
+  return chooseCombatCandidate(
+    unit,
+    candidates,
+    round,
+    unit.side === "enemy" ? normalizeGameDifficulty(difficulty) : "normal",
+  );
+}
+
+/** Mean non-critical damage; hit probability uses the resolver's opposed-roll rule. */
+export function estimateClassicAttack(
+  unit: CombatantStats,
+  target: CombatantStats,
+  skill?: CombatSkill,
+  difficulty = "normal",
+  weather?: CombatWeather,
+) {
+  const attack = skill ? Math.max(1, Math.floor(unit.attack * Math.max(1, skill.power))) : unit.attack;
+  const base = Math.max(
+    0,
+    Math.max(1, Math.floor(attack * (1 + unit.level * 0.1))) +
+      Math.max(1, Math.floor(unit.level / 2)) * 3.5 -
+      Math.floor(target.defense * 0.4),
+  );
+  const scaled =
+    unit.side === "enemy" ? Math.floor(base * ENEMY_DAMAGE_MULTIPLIERS[normalizeGameDifficulty(difficulty)]) : base;
+  return {
+    damage: Math.floor(scaled * weatherDamageMultiplier(weather, skill?.element ?? unit.element)),
+    hitProbability: classicHitProbability(attack, target.defense, weather, skill ?? unit),
+  };
 }

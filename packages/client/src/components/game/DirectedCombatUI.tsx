@@ -1,3 +1,4 @@
+import { CombatWeatherSummary } from "./CombatWeatherSummary";
 import { useEffect, useRef, type ComponentProps } from "react";
 import type { CombatDecisionOption, TacticalBattlefieldBrief } from "@marinara-engine/shared";
 import { useTranslation } from "react-i18next";
@@ -109,6 +110,7 @@ export function DirectedCombatUI(props: Props) {
           />
         )}
       </div>
+      <CombatWeatherSummary weather={s.weather} tactical={s.style === "tactical"} />
       <section
         aria-label={t("game.combat.director.title")}
         className="max-h-[42svh] shrink-0 overflow-y-auto border-t border-[var(--border)] bg-[var(--background)] p-3 text-sm text-[var(--foreground)]"

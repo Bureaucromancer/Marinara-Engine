@@ -359,15 +359,15 @@ function buildInitPrompt(
   inst += `    "timeOfDay": "dawn|day|dusk|night|twilight",\n`;
   inst += `    "weather": "clear|rainy|snowy|windy|stormy|overcast"\n`;
   inst += `  },\n`;
+  inst += `  "battlefield": {\n`;
+  if (tactical) inst += `    "formation": "line|ambush|surrounded|skirmish|defense",\n`;
+  inst += `    "terrainBrief": {\n`;
+  inst += `      "exposure": "exposed|sheltered|unknown"`;
   if (tactical) {
-    inst += `  "battlefield": {\n`;
-    inst += `    "formation": "line|ambush|surrounded|skirmish|defense",\n`;
-    inst += `    "terrainBrief": {\n`;
-    inst += `      "size": "small|medium|large",\n`;
-    inst += `      "features": [{"terrain":"plains|forest|mountain|ruin|water|wall","placement":"center|north|south|east|west","shape":"patch|barrier"}]\n`;
-    inst += `    }\n`;
-    inst += `  },\n`;
+    inst += `,\n      "size": "small|medium|large",\n`;
+    inst += `      "features": [{"terrain":"plains|forest|mountain|ruin|water|wall","placement":"center|north|south|east|west","shape":"patch|barrier"}]`;
   }
+  inst += `\n    }\n  },\n`;
   inst += `  "itemEffects": [\n`;
   inst += `    {"name":"Inventory item name","target":"self|ally|enemy|any","type":"heal|damage|buff|debuff|status|utility","description":"what this item does in this fight","power":0.3,"element":"optional","status":{"name":"Wet","emoji":"💧","duration":2,"modifier":-2,"stat":"defense"},"consumes":true}\n`;
   inst += `  ],\n`;
@@ -384,6 +384,8 @@ function buildInitPrompt(
   inst += `- For every attack include kind: "attack|heal|buff|debuff" and a nonnegative mpCost. For every enemy include numeric mp and maxMp, preserving established resources. Otherwise give a finite pool appropriate to its skills. Class hints (fighter|knight|rogue|archer|mage|healer) may be supplied in either combat mode. Do not invent abilities to fit a temperament.\n`;
   inst += `- Explicitly identify each actual boss enemy with boss: {points: 3, anticipation: true, attackCost: 1, defendCost: 1, moveCost: 1}; omit boss for ordinary enemies and elites. This also applies to a solo boss. Do not infer boss status from HP alone. Boss skills may have legendaryCost: 1..3 when they are appropriate additional actions.\n`;
   inst += `- Mark actual spellcasting abilities with spell: true. For an established area attack, supply areaRadius: 1..3 and friendlyFire: true/false for Tactical; targetScope: "all-enemies" supplies explicit non-spatial group damage in Classic. Omit these for single-target spells. Only when the established kit includes one, represent an interrupting spell with reaction: "counterspell", spell: true, range: 3, and its real mpCost/cooldown. A defensive ward/interception can use reaction: "guard" with its real cost/range. Reaction-only abilities are not ordinary turn attacks. Do not give every caster Counterspell. You may supply range: 1..12 tiles for Tactical abilities. Spell slots may be supplied as spellSlots: {"3": 2} and slotLevel: 3 ONLY when established; otherwise use finite MP and omit slot fields. These are generic Engine rules, not a claim of 5e compliance.\n`;
+  inst += `- battlefield.terrainBrief.exposure: exposed only when the actual combat site is open to outdoor weather; sheltered for enclosed/covered sites; unknown if context cannot establish either. Apply this in both Classic and Tactical. Do not invent current weather.\n`;
+  inst += `- On each combatant, projectile and requiresSight are optional boolean traits of their BASIC attack. On each attack/skill, supply its own projectile/requiresSight booleans when grounded in its actual mechanics (arrows are projectiles; sight-aimed attacks require sight). These flags control weather penalties. Do not infer traits from translated names or grant weather immunity. Omitted flags receive no weather accuracy modifier.\n`;
   inst += `- Describe the environment at THIS encounter's current location, using current scene details. Do not reuse a world-creation terrain template.\n`;
   inst += `- attacks: each has "name" and "type" (single-target, AoE, or both). Add cooldown/status/element only when useful.\n`;
   inst += `- allies: include ${personaName} and any party members or nearby NPCs clearly fighting on ${personaName}'s side. Give allies battle-specific attacks inspired by their cards/context.\n`;
@@ -679,6 +681,8 @@ export async function encounterRoutes(app: FastifyInstance) {
           party: z.array(
             z
               .object({
+                projectile: z.boolean().optional(),
+                requiresSight: z.boolean().optional(),
                 aiHints: combatAiHintsSchema.optional(),
                 spellSlots: z.record(z.string().regex(/^[1-9]$/), z.number().int().min(0).max(100)).optional(),
                 attacks: z
@@ -698,6 +702,8 @@ export async function encounterRoutes(app: FastifyInstance) {
           enemies: z.array(
             z
               .object({
+                projectile: z.boolean().optional(),
+                requiresSight: z.boolean().optional(),
                 aiHints: combatAiHintsSchema.optional(),
                 spellSlots: z.record(z.string().regex(/^[1-9]$/), z.number().int().min(0).max(100)).optional(),
                 boss: combatBossSchema.optional(),

@@ -13,6 +13,7 @@ export {
   getMovementRange,
   getTargetsInRange,
   forecastAttack,
+  forecastFrom as forecastTacticalAttack,
   applyAction,
   isTerminal,
   buildTacticalSummary,

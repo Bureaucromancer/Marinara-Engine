@@ -13,6 +13,8 @@ import type { TacticalMovementMode } from "../features/tactical-combat/types.js"
 
 /** Attack definition for party members and enemies. */
 export interface CombatAttack {
+  projectile?: boolean;
+  requiresSight?: boolean;
   areaRadius?: number;
   friendlyFire?: boolean;
   targetScope?: "single" | "all-enemies";
@@ -108,6 +110,8 @@ export interface CombatVisualRequest {
 
 /** A member of the player's party. */
 export interface CombatPartyMember {
+  projectile?: boolean;
+  requiresSight?: boolean;
   spellSlots?: Record<string, number>;
   aiHints?: CombatAiHints;
   name: string;
@@ -125,6 +129,8 @@ export interface CombatPartyMember {
 
 /** An enemy in the encounter. */
 export interface CombatEnemy {
+  projectile?: boolean;
+  requiresSight?: boolean;
   boss?: import("../features/combat-director.js").CombatBoss;
   spellSlots?: Record<string, number>;
   aiHints?: CombatAiHints;

@@ -1,3 +1,4 @@
+import { combatWeatherEffects, normalizeGameDifficulty } from "../combat-conditions.js";
 import { chooseCombatCandidate, type CombatAiCandidate } from "../combat-ai.js";
 import { aliveUnits, canTraverseTile, forecastFrom, getMovementRange, occupantAt, skillReady } from "./engine.js";
 import { computeHeal, manhattan, terrainInfoAt } from "./math.js";
@@ -59,7 +60,7 @@ export function pursueOpponent(
     budget -=
       unit.movementMode === "fly" || unit.movementMode === "teleport"
         ? manhattan(previous, tile)
-        : terrainInfoAt(state.grid, tile.x, tile.y).moveCost;
+        : terrainInfoAt(state.grid, tile.x, tile.y).moveCost + combatWeatherEffects(state.weather).walkingCost;
     if (budget < 0) break;
     previous = tile;
     if (!occupantAt(state, tile.x, tile.y, unit.id)) to = tile;
@@ -116,6 +117,7 @@ export function decideProfileAction(
         const fc = forecastFrom(state, unit, target, tile, {
           power: skill ? Math.max(1, skill.power) : undefined,
           element: skill?.element,
+          traits: skill ?? unit,
         });
         const counter = forecastFrom(state, target, { ...unit, ...tile }, target, { hitPenalty: 10 });
         const counterRisk =
@@ -133,6 +135,7 @@ export function decideProfileAction(
           const hit = forecastFrom(state, unit, t, tile, {
             power: skill ? Math.max(1, skill.power) : undefined,
             element: skill?.element,
+            traits: skill ?? unit,
           });
           return sum + ((t.side === unit.side ? -2 : 1) * hit.damage * hit.hitChance) / 100 / Math.max(1, t.maxHp);
         }, 0);
@@ -195,5 +198,10 @@ export function decideProfileAction(
   }
   const progressing =
     (unit.tactics.holds ?? 0) >= 1 && candidates.some((c) => !c.hold) ? candidates.filter((c) => !c.hold) : candidates;
-  return chooseCombatCandidate(unit, progressing, state.round);
+  return chooseCombatCandidate(
+    unit,
+    progressing,
+    state.round,
+    unit.side === "enemy" ? normalizeGameDifficulty(state.difficulty) : "normal",
+  );
 }

@@ -527,7 +527,7 @@ test("an ordinary setup import keeps the prefilled seed", async ({ page }, testI
   await expect(wizard.getByRole("alert")).toHaveCount(0);
 });
 
-test("Tactical setup keeps seed and size without global terrain guidance", async ({ page }, testInfo) => {
+test("Tactical setup keeps size and retires battlefield seed and terrain guidance", async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   await page.route("**/api/capability-packages/installed", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/capability-packages/agents", (route) => route.fulfill({ json: [] }));
@@ -564,35 +564,27 @@ test("Tactical setup keeps seed and size without global terrain guidance", async
       ),
     });
   await expect(wizard.getByPlaceholder("Name your adventure...", { exact: true })).toHaveValue("River crossing");
-  const { next, back } = stepNavigation(wizard);
+  const { next } = stepNavigation(wizard);
   await next();
-  const seed = wizard.getByLabel("Battlefield seed", { exact: true });
-  await expect(seed).toHaveValue("0");
-  await expect(wizard.getByLabel("Battlefield size", { exact: true })).toHaveValue("large");
+  await expect(wizard.getByLabel("Battlefield seed", { exact: true })).toHaveCount(0);
+  const size = wizard.getByLabel("Battlefield size", { exact: true });
+  await expect(size).toHaveValue("large");
   await expect(wizard.getByLabel("Terrain guidance", { exact: true })).toHaveCount(0);
-  await expect(wizard.getByText(/Fire Emblem/)).toHaveCount(0);
-  await seed.fill("1.5");
-  await expect(wizard.getByRole("alert")).toContainText(/whole number/i);
-  for (let step = 0; step < 5; step++) await next();
-  await expect(wizard.getByRole("button", { name: "Download setup", exact: true })).toBeDisabled();
-  await expect(wizard.getByRole("button", { name: /Start/u })).toBeDisabled();
-  for (let step = 0; step < 5; step++) await back();
-  await expect(wizard.getByRole("heading", { name: "World", exact: true })).toBeVisible();
-  await seed.fill("0");
-  await expect(wizard.getByRole("alert")).toHaveCount(0);
+  await expect(wizard.getByText(/Fire Emblem|current style/)).toHaveCount(0);
   await wizard.getByRole("button", { name: /^Classic/ }).click();
-  await expect(seed).toHaveCount(0);
+  await expect(size).toHaveCount(0);
+  await expect(wizard.getByText("Cinematic menu battles", { exact: true })).toBeVisible();
   await wizard.getByRole("button", { name: /^Tactical/ }).click();
-  await expect(seed).toHaveValue("0");
-  await seed.scrollIntoViewIfNeeded();
+  await expect(size).toHaveValue("large");
+  await size.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("hybrid-terrain-setup.png") });
   for (let step = 0; step < 5; step++) await next();
   await expect(wizard.getByRole("button", { name: "Download setup", exact: true })).toBeEnabled();
   await wizard.getByRole("button", { name: /Start/u }).click();
   const result = JSON.parse((await page.getByTestId("wizard-result").textContent()) ?? "{}");
   expect(result.config.combatStyle).toBe("tactical");
+  expect(result.config.difficulty).toBe("normal");
   expect(result.config.tacticalBattlefield).toEqual({
-    seed: 0,
     size: "large",
   });
 });

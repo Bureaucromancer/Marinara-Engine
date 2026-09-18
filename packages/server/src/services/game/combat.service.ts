@@ -1,3 +1,11 @@
+import {
+  normalizeGameDifficulty,
+  ENEMY_DAMAGE_MULTIPLIERS,
+  weatherDamageMultiplier,
+  classicAttackModifier,
+  type CombatWeather,
+  type CombatAttackTraits,
+} from "@marinara-engine/shared";
 import { chooseClassicAction } from "./combat-ai.service.js";
 import type { CombatController, CombatTactics } from "@marinara-engine/shared";
 // ──────────────────────────────────────────────
@@ -15,7 +23,8 @@ import { resolveElementApplication, applyReactionDamage } from "./element-reacti
 
 // ── Types ──
 
-export interface CombatantStats {
+export interface CombatantStats extends CombatAttackTraits {
+  side?: "player" | "party" | "enemy";
   tactics?: CombatTactics;
   controller?: CombatController;
   skillCooldowns?: Record<string, number>;
@@ -153,6 +162,7 @@ function resolveSkillAction(
   difficulty: string = "normal",
   elementPreset?: string,
   prepaid = false,
+  weather?: CombatWeather,
 ): AttackResult {
   const currentMp = attacker.mp ?? 0;
   if (
@@ -234,10 +244,12 @@ function resolveSkillAction(
 
   const skilledAttacker: CombatantStats = {
     ...attacker,
+    projectile: skill.projectile,
+    requiresSight: skill.requiresSight,
     attack: Math.max(1, Math.floor(attacker.attack * Math.max(skill.power, 1))),
     element: skill.element || attacker.element,
   };
-  const result = resolveAttack(skilledAttacker, target, difficulty, elementPreset);
+  const result = resolveAttack(skilledAttacker, target, difficulty, elementPreset, weather);
   if (!result.isMiss && skill.statusEffect) {
     applyNamedStatus(target, {
       name: skill.statusEffect,
@@ -255,6 +267,7 @@ function resolveItemAction(
   itemId?: string,
   itemEffect?: CombatItemEffect,
   elementPreset?: string,
+  weather?: CombatWeather,
 ): AttackResult {
   const itemName = itemId?.trim() || "Item";
   const effectType = itemEffect?.type;
@@ -264,7 +277,12 @@ function resolveItemAction(
 
     if (effectType === "damage" || effectType === "status" || effectType === "debuff") {
       const finalDamage =
-        effectType === "damage" ? Math.max(1, Math.floor(Math.max(attacker.attack, target.maxHp) * power)) : 0;
+        effectType === "damage"
+          ? Math.max(
+              1,
+              Math.floor(Math.max(attacker.attack, target.maxHp) * power * weatherDamageMultiplier(weather, element)),
+            )
+          : 0;
       const remainingHp = Math.max(0, target.hp - finalDamage);
 
       if (itemEffect.status || effectType === "status" || effectType === "debuff") {
@@ -420,9 +438,10 @@ export function resolveAttack(
   defender: CombatantStats,
   difficulty: string = "normal",
   elementPreset?: string,
+  weather?: CombatWeather,
 ): AttackResult {
   // Attack roll: 1d20 + attack stat modifier
-  const attackMod = Math.floor(attacker.attack / 3);
+  const attackMod = classicAttackModifier(attacker.attack, weather, attacker);
   const rawAttackD20 = rollDice("1d20").total;
   const attackRoll = rawAttackD20 + attackMod;
 
@@ -454,13 +473,9 @@ export function resolveAttack(
   let finalDamage = Math.max(0, rawDamage - mitigated);
 
   // Difficulty scaling
-  const difficultyMult: Record<string, number> = {
-    casual: 0.6,
-    normal: 1.0,
-    hard: 1.3,
-    brutal: 1.6,
-  };
-  finalDamage = Math.floor(finalDamage * (difficultyMult[difficulty] ?? 1.0));
+  if (attacker.side === "enemy")
+    finalDamage = Math.floor(finalDamage * ENEMY_DAMAGE_MULTIPLIERS[normalizeGameDifficulty(difficulty)]);
+  finalDamage = Math.floor(finalDamage * weatherDamageMultiplier(weather, attacker.element));
 
   // Apply status effect modifiers
   if (attacker.statusEffects) {
@@ -668,6 +683,7 @@ export function resolveCombatRound(
   partyActions?: Record<string, PlayerAction>,
   controlledId?: string,
   directed?: {
+    weather?: CombatWeather;
     actorId: string;
     action: PlayerAction;
     defendingIds: Set<string>;
@@ -675,6 +691,7 @@ export function resolveCombatRound(
     finishRound?: boolean;
   },
 ): CombatRoundResult {
+  const weather = directed?.weather;
   const alive = combatants.filter((c) => c.hp > 0);
   const initiative: InitiativeEntry[] = directed
     ? alive
@@ -710,7 +727,7 @@ export function resolveCombatRound(
         command ??
         (isPlayerSide && attacker.controller === "manual"
           ? { type: "defend" as const }
-          : chooseClassicAction(attacker, allies, opponents, round));
+          : chooseClassicAction(attacker, allies, opponents, round, difficulty, weather));
       if (choice.type === "defend") {
         defendingIds.add(attacker.id);
         continue;
@@ -748,10 +765,10 @@ export function resolveCombatRound(
         target.defense = Math.floor(target.defense * 1.5);
       const result =
         choice.type === "item"
-          ? resolveItemAction(attacker, target, choice.itemId, choice.itemEffect, elementPreset)
+          ? resolveItemAction(attacker, target, choice.itemId, choice.itemEffect, elementPreset, weather)
           : skill
-            ? resolveSkillAction(attacker, target, skill, difficulty, elementPreset, directed?.prepaid)
-            : resolveAttack(attacker, target, difficulty, elementPreset);
+            ? resolveSkillAction(attacker, target, skill, difficulty, elementPreset, directed?.prepaid, weather)
+            : resolveAttack(attacker, target, difficulty, elementPreset, weather);
       target.defense = originalDefense;
       target.hp = result.remainingHp;
       actions.push(result);
@@ -792,7 +809,7 @@ export function resolveCombatRound(
         if (playerAction.type === "attack") {
           let target = opposingSide.find((c) => c.id === playerAction.targetId);
           if (!target) target = opposingSide[Math.floor(Math.random() * opposingSide.length)]!;
-          pushResult(target, resolveAttack(attacker, target, difficulty, elementPreset));
+          pushResult(target, resolveAttack(attacker, target, difficulty, elementPreset, weather));
           continue;
         }
 
@@ -803,8 +820,8 @@ export function resolveCombatRound(
           let target = playerAction.targetId ? targetPool.find((c) => c.id === playerAction.targetId) : undefined;
           if (!target) target = targetPool[Math.floor(Math.random() * targetPool.length)]!;
           const result = skill
-            ? resolveSkillAction(attacker, target, skill, difficulty, elementPreset)
-            : resolveAttack(attacker, target, difficulty, elementPreset);
+            ? resolveSkillAction(attacker, target, skill, difficulty, elementPreset, false, weather)
+            : resolveAttack(attacker, target, difficulty, elementPreset, weather);
           pushResult(target, result);
           continue;
         }
@@ -824,6 +841,7 @@ export function resolveCombatRound(
             playerAction.itemId,
             playerAction.itemEffect,
             elementPreset,
+            weather,
           );
           pushResult(target, result);
           continue;
@@ -836,13 +854,13 @@ export function resolveCombatRound(
       if (autoSkill) {
         pushResult(
           autoSkill.target,
-          resolveSkillAction(attacker, autoSkill.target, autoSkill.skill, difficulty, elementPreset),
+          resolveSkillAction(attacker, autoSkill.target, autoSkill.skill, difficulty, elementPreset, false, weather),
         );
         continue;
       }
 
       const target = opposingSide[Math.floor(Math.random() * opposingSide.length)]!;
-      pushResult(target, resolveAttack(attacker, target, difficulty, elementPreset));
+      pushResult(target, resolveAttack(attacker, target, difficulty, elementPreset, weather));
       continue;
     }
 
@@ -864,8 +882,16 @@ export function resolveCombatRound(
     }
 
     const result = enemyAutoSkill
-      ? resolveSkillAction(attacker, enemyAutoSkill.target, enemyAutoSkill.skill, difficulty, elementPreset)
-      : resolveAttack(attacker, target, difficulty, elementPreset);
+      ? resolveSkillAction(
+          attacker,
+          enemyAutoSkill.target,
+          enemyAutoSkill.skill,
+          difficulty,
+          elementPreset,
+          false,
+          weather,
+        )
+      : resolveAttack(attacker, target, difficulty, elementPreset, weather);
     actions.push(result);
 
     // Restore original defense after calculation

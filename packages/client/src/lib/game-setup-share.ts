@@ -1,3 +1,4 @@
+import { normalizeGameDifficulty } from "@marinara-engine/shared";
 import {
   ANIME_GAME_PROMPT_TEMPLATE_ID,
   COMIC_PAGE_GAME_VIDEO_PROMPT_TEMPLATE_ID,
@@ -356,7 +357,7 @@ function parseShareConfig(value: unknown): GameSetupConfig {
 }
 
 function normalizeShareConfig(config: GameSetupConfig): GameSetupConfig {
-  let normalized = config;
+  let normalized = { ...config, difficulty: normalizeGameDifficulty(config.difficulty) };
   if (config.spatialMapDraftSize !== undefined || config.spatialMapTargetLocationCount !== undefined) {
     const options = resolveGameSpatialMapDraftOptions(config.spatialMapDraftSize, config.spatialMapTargetLocationCount);
     normalized = {
@@ -366,11 +367,8 @@ function normalizeShareConfig(config: GameSetupConfig): GameSetupConfig {
     };
   }
   if (normalized.combatStyle === "tactical" && normalized.tacticalBattlefield) {
-    const instructions = normalized.tacticalBattlefield.instructions?.trim();
     const tacticalBattlefield = {
-      ...(normalized.tacticalBattlefield.seed !== undefined ? { seed: normalized.tacticalBattlefield.seed } : {}),
       ...(normalized.tacticalBattlefield.size ? { size: normalized.tacticalBattlefield.size } : {}),
-      ...(instructions ? { instructions } : {}),
     };
     const { tacticalBattlefield: _unused, ...rest } = normalized;
     normalized = {
@@ -744,10 +742,6 @@ function tacticalBattlefieldRows(config: GameSetupConfig): GameSetupSummaryRow[]
   if (config.combatStyle !== "tactical") return [];
   const settings = config.tacticalBattlefield;
   return [
-    {
-      label: translate("ui.game.gamesetupsummary.battlefieldSeed"),
-      value: settings?.seed !== undefined ? String(settings.seed) : translate("ui.game.gamesetupsummary.random"),
-    },
     {
       label: translate("ui.game.gamesetupsummary.battlefieldSize"),
       value:

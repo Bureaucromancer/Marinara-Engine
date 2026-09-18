@@ -1,3 +1,4 @@
+import type { CombatWeather } from "./combat-conditions.js";
 import { z } from "zod";
 import type { Combatant, CombatPlayerAction, CombatSummary } from "../types/game.js";
 import type { TacticalAction, TacticalCombatState } from "./tactical-combat/types.js";
@@ -12,6 +13,8 @@ export const combatBossSchema = z.object({
 });
 export type CombatBoss = z.infer<typeof combatBossSchema>;
 export const combatInterruptFields = {
+  projectile: z.boolean().optional(),
+  requiresSight: z.boolean().optional(),
   spell: z.boolean().optional(),
   areaRadius: z.number().int().min(0).max(3).optional(),
   friendlyFire: z.boolean().optional(),
@@ -58,6 +61,7 @@ export interface CombatLogMessage {
   params?: Record<string, string | number>;
 }
 export interface DirectedCombatView {
+  weather?: CombatWeather;
   id: string;
   /** Storage row identity changes when a checkpoint is restored or a battle is branched. */
   instanceId?: string;

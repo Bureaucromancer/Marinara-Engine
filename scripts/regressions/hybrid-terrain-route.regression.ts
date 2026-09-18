@@ -108,6 +108,36 @@ try {
       "Omitted-side legacy rounds remain accepted, but new party commands require an explicit player side",
     );
   }
+  const setWeather = (type: string) =>
+    app.inject({
+      method: "POST",
+      url: "/api/game/weather/update",
+      payload: { chatId: session.id, action: "set", location: "forest", type },
+    });
+  const rainy = await setWeather("rainy");
+  assert.equal(rainy.statusCode, 200, rainy.body);
+  assert.equal(rainy.json().weather.type, "rain");
+  assert.equal(rainy.json().weather.visibility, "reduced");
+  const storm = await setWeather("stormy");
+  assert.equal(storm.json().weather.type, "storm");
+  assert.equal(storm.json().weather.visibility, "poor");
+  assert.equal((await setWeather("constructor")).json().changed, false);
+  for (const weather of [
+    null,
+    { version: 1, type: "rain", wind: "windy", visibility: "reduced", exposure: "exposed" },
+  ]) {
+    const restart = await app.inject({
+      method: "POST",
+      url: "/api/game/combat/tactical/start",
+      payload: { chatId: session.id, party, enemies, seed: 12, weather },
+    });
+    assert.equal(restart.statusCode, 200, restart.body);
+    assert.deepEqual(
+      restart.json().state.weather,
+      weather ?? undefined,
+      "Restart accepts saved weather or neutral legacy absence instead of changed campaign weather",
+    );
+  }
   const metadata = JSON.parse(session.metadata);
   for (const id of ["missing", "guard", "constructor", "__proto__"]) {
     const invalidOrders = await app.inject({
@@ -144,7 +174,7 @@ try {
   });
   assert.equal(started.statusCode, 200, started.body);
   const state = started.json().state;
-  assert.equal(state.seed, 0, "A configured zero seed overrides a request seed");
+  assert.equal(state.seed, 99, "Obsolete setup seeds never override an encounter or restart seed");
   assert.equal(state.grid.width, 14, "Configured size overrides the encounter brief");
   assert.equal(state.grid.height, 10);
   assert.equal(state.units[0].movementMode, "fly");

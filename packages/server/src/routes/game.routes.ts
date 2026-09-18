@@ -1,3 +1,5 @@
+import { normalizeGameDifficulty, normalizeWeatherType, combatWeatherSchema } from "@marinara-engine/shared";
+import { resolveCombatWeather } from "../services/game/weather.service.js";
 import { resolveGameConnection } from "../services/game/connection.service.js";
 import { combatAiHintsSchema, combatTacticsSchema, combatInterruptFields } from "@marinara-engine/shared";
 // ──────────────────────────────────────────────
@@ -1789,7 +1791,7 @@ const gameSetupConfigSchema = z.object({
   genre: z.string().min(1).max(200),
   setting: z.string().min(1),
   tone: z.string().min(1).max(200),
-  difficulty: z.string().min(1).max(100),
+  difficulty: z.string().min(1).max(100).transform(normalizeGameDifficulty),
   combatStyle: z.enum(["classic", "tactical"]).optional(),
   combatDirector: z.boolean().optional(),
   gmBossControl: z.boolean().optional(),
@@ -9661,7 +9663,7 @@ export async function gameRoutes(app: FastifyInstance) {
     if (!chat) throw new Error("Chat not found");
 
     const meta = parseMeta(chat.metadata);
-    const difficulty = ((meta.gameSetupConfig as Record<string, unknown>)?.difficulty as string) ?? "normal";
+    const difficulty = normalizeGameDifficulty((meta.gameSetupConfig as Record<string, unknown>)?.difficulty);
     const elementPreset = ((meta.gameSetupConfig as Record<string, unknown>)?.elementPreset as string) ?? "default";
     const result = resolveCombatRound(
       combatants as (CombatantStats & { side?: "player" | "enemy" })[],
@@ -9688,6 +9690,8 @@ export async function gameRoutes(app: FastifyInstance) {
   // through untouched so hydration stays lossless.
   const tacticalSkillSchema = z
     .object({
+      projectile: z.boolean().optional(),
+      requiresSight: z.boolean().optional(),
       id: z.string(),
       name: z.string().min(1),
       type: z.enum(["attack", "heal", "buff", "debuff"]),
@@ -9698,6 +9702,8 @@ export async function gameRoutes(app: FastifyInstance) {
     .passthrough();
   const tacticalCombatantSchema = z
     .object({
+      projectile: z.boolean().optional(),
+      requiresSight: z.boolean().optional(),
       id: z.string().min(1),
       name: z.string().min(1),
       hp: z.number(),
@@ -9716,6 +9722,8 @@ export async function gameRoutes(app: FastifyInstance) {
 
   const tacticalStateUnitSchema = z
     .object({
+      projectile: z.boolean().optional(),
+      requiresSight: z.boolean().optional(),
       skills: z.array(tacticalSkillSchema).max(128).optional(),
       tactics: combatTacticsSchema.optional(),
       aiHints: combatAiHintsSchema.optional(),
@@ -9738,6 +9746,7 @@ export async function gameRoutes(app: FastifyInstance) {
   const tacticalStateSchema = z
     .object({
       schemaVersion: z.literal(1),
+      weather: combatWeatherSchema.optional(),
       grid: z
         .object({
           width: z.number().int().min(1).max(64),
@@ -9806,6 +9815,7 @@ export async function gameRoutes(app: FastifyInstance) {
       party: z.array(tacticalCombatantSchema).min(1).max(20),
       enemies: z.array(tacticalCombatantSchema).min(1).max(20),
       seed: tacticalBattlefieldSeedSchema.optional(),
+      weather: combatWeatherSchema.nullable().optional(),
       // Scene-derived battlefield theming (Round 2). Unknown strings normalize
       // in the engine (environment → default, formation → "line").
       environment: z.string().optional(),
@@ -9820,7 +9830,7 @@ export async function gameRoutes(app: FastifyInstance) {
         .status(400)
         .send({ error: `Invalid tactical battle request: ${field}${issue?.message ?? "invalid input"}` });
     }
-    const { chatId, party, enemies, seed, environment, formation, battlefield } = parsed.data;
+    const { chatId, party, enemies, seed, environment, formation, battlefield, weather } = parsed.data;
 
     const chats = createChatsStorage(app.db);
     const chat = await chats.getById(chatId);
@@ -9828,7 +9838,7 @@ export async function gameRoutes(app: FastifyInstance) {
 
     const meta = parseMeta(chat.metadata);
     const setupConfig = meta.gameSetupConfig as Record<string, unknown> | undefined;
-    const difficulty = (setupConfig?.difficulty as string) ?? "normal";
+    const difficulty = normalizeGameDifficulty(setupConfig?.difficulty);
     const preferences = resolveTacticalStartPreferences({
       setup: setupConfig?.tacticalBattlefield,
       requestSeed: seed,
@@ -9841,6 +9851,15 @@ export async function gameRoutes(app: FastifyInstance) {
     try {
       state = createTacticalCombat(party as unknown as Combatant[], enemies as unknown as Combatant[], {
         seed: preferences.seed,
+        weather:
+          weather === null
+            ? undefined
+            : (weather ??
+              resolveCombatWeather(
+                meta.gameWeather ?? (await createGameStateStorage(app.db).getLatestCommitted(chatId))?.weather,
+                environment,
+                preferences.battlefield?.exposure,
+              )),
         difficulty,
         environment,
         formation,
@@ -9916,7 +9935,7 @@ export async function gameRoutes(app: FastifyInstance) {
     if (!chat) throw new Error("Chat not found");
 
     const meta = parseMeta(chat.metadata);
-    const difficulty = ((meta.gameSetupConfig as Record<string, unknown>)?.difficulty as string) ?? "normal";
+    const difficulty = normalizeGameDifficulty((meta.gameSetupConfig as Record<string, unknown>)?.difficulty);
     const drops = generateCombatLoot(enemyCount, difficulty);
     return { drops };
   });
@@ -9933,7 +9952,7 @@ export async function gameRoutes(app: FastifyInstance) {
     if (!chat) throw new Error("Chat not found");
 
     const meta = parseMeta(chat.metadata);
-    const difficulty = ((meta.gameSetupConfig as Record<string, unknown>)?.difficulty as string) ?? "normal";
+    const difficulty = normalizeGameDifficulty((meta.gameSetupConfig as Record<string, unknown>)?.difficulty);
     const drops = generateLootTable(count, difficulty);
     return { drops };
   });
@@ -9990,10 +10009,9 @@ export async function gameRoutes(app: FastifyInstance) {
     // "set" action from scene analyzer — apply the exact weather type
     if (action === "set" && type) {
       const biome = inferBiome(location);
-      const weather = generateWeather(biome, season);
-      // Override the randomly generated type with the scene analyzer's value
-      weather.type = type as any;
-      weather.description = `The weather is ${type}.`;
+      const weatherType = normalizeWeatherType(type);
+      if (!weatherType) return { changed: false, weather: meta.gameWeather ?? null };
+      const weather = generateWeather(biome, season, weatherType);
 
       // #5076: narrow queued patch so a concurrent metadata write is merged, not clobbered.
       await chats.patchMetadata(chatId, { gameWeather: weather });
@@ -10038,7 +10056,7 @@ export async function gameRoutes(app: FastifyInstance) {
     if (!chat) throw new Error("Chat not found");
 
     const meta = parseMeta(chat.metadata);
-    const difficulty = ((meta.gameSetupConfig as Record<string, unknown>)?.difficulty as string) ?? "normal";
+    const difficulty = normalizeGameDifficulty((meta.gameSetupConfig as Record<string, unknown>)?.difficulty);
     const encounter = rollEncounter(action, difficulty, location);
 
     let enemyCount = 0;

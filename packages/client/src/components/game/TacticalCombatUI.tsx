@@ -1,3 +1,4 @@
+import { CombatWeatherSummary } from "./CombatWeatherSummary";
 import { CombatAiControls } from "./CombatAiControls";
 // ──────────────────────────────────────────────
 // Game: Tactical (grid) Combat UI
@@ -56,6 +57,7 @@ import {
   getTargetsInRange,
   forecastAttack,
   buildTacticalSummary,
+  type CombatWeather,
   type Combatant,
   type CombatSummary,
   type CombatSkill,
@@ -562,6 +564,7 @@ export function TacticalCombatUI({
   const launchBattle = useCallback(
     (options?: {
       omitBattlefield?: boolean;
+      weather?: CombatWeather | null;
       seed?: number;
       battlefieldOverride?: TacticalBattlefieldBrief | null;
       environmentOverride?: string | null;
@@ -587,11 +590,13 @@ export function TacticalCombatUI({
         chatId: string;
         party: Combatant[];
         enemies: Combatant[];
+        weather?: CombatWeather | null;
         seed?: number;
         environment?: string;
         formation?: string;
         battlefield?: TacticalBattlefieldBrief;
       } = { chatId, party, enemies };
+      if (options?.weather !== undefined) startPayload.weather = options.weather;
       if (options?.seed !== undefined) startPayload.seed = options.seed;
       if (requestEnvironment) startPayload.environment = requestEnvironment;
       if (requestFormation) startPayload.formation = requestFormation;
@@ -1024,6 +1029,7 @@ export function TacticalCombatUI({
     setState(null);
     launchBattle({
       seed: restartSeed,
+      weather: state?.weather ?? null,
       battlefieldOverride: restartBattlefield,
       environmentOverride: restartEnvironment,
       formationOverride: restartFormation,
@@ -1680,6 +1686,12 @@ export function TacticalCombatUI({
           )}
         </AnimatePresence>
       </div>
+
+      {!directed && (
+        <div className="relative z-10">
+          <CombatWeatherSummary weather={liveState.weather} tactical />
+        </div>
+      )}
 
       {ui.kind === "idle" && (
         <CombatAiControls

@@ -975,6 +975,8 @@ function combatSkillsFromGeneratedAttacks(
       friendlyFire: attack.friendlyFire,
       targetScope: attack.targetScope,
       spell: attack.spell,
+      projectile: attack.projectile,
+      requiresSight: attack.requiresSight,
       reaction: attack.reaction,
       range: attack.range,
       slotLevel: attack.slotLevel,
@@ -1050,6 +1052,8 @@ export function generatedPartyMemberToCombatant(
   const movementMode = normalizeCombatMovementMode(member.movementMode);
   return {
     aiHints: member.aiHints,
+    projectile: member.projectile,
+    requiresSight: member.requiresSight,
     spellSlots: member.spellSlots,
     id: matchedAvatar?.id ?? `generated-party-${index}-${slugifyCombatantId(member.name)}`,
     name: member.name || `Ally ${index + 1}`,
@@ -1102,6 +1106,8 @@ export function generatedEnemyToCombatant(enemy: CombatEnemy, index: number, fal
   const movementMode = normalizeCombatMovementMode(enemy.movementMode);
   return {
     aiHints: enemy.aiHints,
+    projectile: enemy.projectile,
+    requiresSight: enemy.requiresSight,
     boss: enemy.boss,
     spellSlots: enemy.spellSlots,
     mp: enemy.mp ?? enemy.maxMp ?? 20 + level * 3,
@@ -4975,6 +4981,7 @@ function GameSurfaceComponent({
     if (latestAssistantDirectAddressMode) return;
     if (weatherMsgRef.current === latestAssistantMsg.id) return;
     weatherMsgRef.current = latestAssistantMsg.id;
+    if (gameState === "combat") return;
     // Map game state to weather action for probabilistic change
     const action = gameState === "travel_rest" ? "travel" : gameState === "exploration" ? "explore" : "turn";
     updateWeather.mutate({ chatId: activeChatId, action, location: gameSnapshot?.location ?? "" });

@@ -1,3 +1,4 @@
+import { normalizeGameDifficulty } from "@marinara-engine/shared";
 // ──────────────────────────────────────────────
 // Game: Setup Wizard (initial game setup modal)
 // ──────────────────────────────────────────────
@@ -252,7 +253,6 @@ const SPATIAL_MAP_DRAFT_SIZE_OPTIONS: Array<{
   { value: "large", targetLocationCount: 28, label: "Large", detail: "About 28 places" },
 ];
 const SPATIAL_CUSTOM_TARGET_LOCATION_LIMIT = 40;
-const TACTICAL_BATTLEFIELD_SEED_MAX = 0xffffffff;
 const TACTICAL_BATTLEFIELD_SIZE_OPTIONS: Array<{
   value: "auto" | TacticalBattlefieldSize;
   labelKey: string;
@@ -267,15 +267,6 @@ function normalizeSpatialMapTargetLocationCount(value: string): number | null {
   const parsed = Number(value);
   if (!value.trim() || !Number.isInteger(parsed) || !Number.isFinite(parsed)) return null;
   return Math.max(1, Math.min(SPATIAL_CUSTOM_TARGET_LOCATION_LIMIT, parsed));
-}
-
-function parseTacticalBattlefieldSeed(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (!/^\d+$/.test(trimmed)) return Number.NaN;
-  const parsed = Number(trimmed);
-  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > TACTICAL_BATTLEFIELD_SEED_MAX) return Number.NaN;
-  return parsed;
 }
 
 const GAME_SETUP_FIELD_LABEL = "mb-1.5 block text-xs font-medium text-[var(--foreground)]";
@@ -525,7 +516,6 @@ export function GameSetupWizard({
   const [difficulty, setDifficulty] = useState("Normal");
   const [combatStyle, setCombatStyle] = useState<GameCombatStyle>("classic");
   const [gmBossControl, setGmBossControl] = useState(true);
-  const [tacticalBattlefieldSeed, setTacticalBattlefieldSeed] = useState("");
   const [tacticalBattlefieldSize, setTacticalBattlefieldSize] = useState<"auto" | TacticalBattlefieldSize>("auto");
   const [gmMode, setGmMode] = useState<GameGmMode>("standalone");
   const [gmCharacterId, setGmCharacterId] = useState<string | null>(null);
@@ -1024,32 +1014,22 @@ export function GameSetupWizard({
 
   const spatialMapTargetLocationCountValid =
     normalizeSpatialMapTargetLocationCount(spatialMapTargetLocationCountInput) !== null;
-  const parsedTacticalBattlefieldSeed = parseTacticalBattlefieldSeed(tacticalBattlefieldSeed);
-  const tacticalBattlefieldSeedValid =
-    combatStyle !== "tactical" ||
-    tacticalBattlefieldSeed.trim().length === 0 ||
-    !Number.isNaN(parsedTacticalBattlefieldSeed);
   const canStart =
     !experienceSeedInvalid &&
-    tacticalBattlefieldSeedValid &&
     (!activeLorebookEntryIds.length || Boolean(eligibleEntries)) &&
     !!gmConnectionId &&
     (!enableAgents || !hierarchicalMapsInstalled || !draftSpatialMap || spatialMapTargetLocationCountValid);
   const canStartMessage = experienceSeedInvalid
     ? localizeUi("game.experienceSetup.invalidSeed", { max: MAX_EXPERIENCE_SEED })
-    : !tacticalBattlefieldSeedValid
-      ? localizeUi("ui.game.gamesetupwizard.battlefieldSeedInvalid", {
-          value1: TACTICAL_BATTLEFIELD_SEED_MAX,
-        })
-      : activeLorebookEntryIds.length && !eligibleEntries
-        ? localizeUi(entryQuery.isError && !entryQuery.isFetching ? "game.setupLore.error" : "game.setupLore.loading")
-        : !gmConnectionId
-          ? localizeUi("ui.game.gamesetupwizard.selectAConnectionOnTheFirstStepBeforeStarting")
-          : !spatialMapTargetLocationCountValid && enableAgents && hierarchicalMapsInstalled && draftSpatialMap
-            ? localizeUi("ui.game.gamesetupwizard.chooseAnyWholeNumberFrom1ToValue1Places", {
-                value1: SPATIAL_CUSTOM_TARGET_LOCATION_LIMIT,
-              })
-            : null;
+    : activeLorebookEntryIds.length && !eligibleEntries
+      ? localizeUi(entryQuery.isError && !entryQuery.isFetching ? "game.setupLore.error" : "game.setupLore.loading")
+      : !gmConnectionId
+        ? localizeUi("ui.game.gamesetupwizard.selectAConnectionOnTheFirstStepBeforeStarting")
+        : !spatialMapTargetLocationCountValid && enableAgents && hierarchicalMapsInstalled && draftSpatialMap
+          ? localizeUi("ui.game.gamesetupwizard.chooseAnyWholeNumberFrom1ToValue1Places", {
+              value1: SPATIAL_CUSTOM_TARGET_LOCATION_LIMIT,
+            })
+          : null;
   const normalizedLanguage = normalizeGameLanguage(language);
   const illustratorEnabled = enableAgents && illustratorInstalled && enableSpriteGeneration;
   const musicDjEnabled = enableAgents && musicDjInstalled && enableSpotifyDj;
@@ -1144,12 +1124,11 @@ export function GameSetupWizard({
       setSetting(config.setting);
       setTones(importedTones.length > 0 ? importedTones : ["Heroic"]);
       setCustomTone("");
-      setDifficulty(config.difficulty);
+      setDifficulty(
+        DIFFICULTIES.find((d) => normalizeGameDifficulty(d) === normalizeGameDifficulty(config.difficulty)) ?? "Normal",
+      );
       setCombatStyle(config.combatStyle === "tactical" ? "tactical" : "classic");
       setGmBossControl(config.gmBossControl ?? true);
-      setTacticalBattlefieldSeed(
-        typeof config.tacticalBattlefield?.seed === "number" ? String(config.tacticalBattlefield.seed) : "",
-      );
       setTacticalBattlefieldSize(config.tacticalBattlefield?.size ?? "auto");
       setRating(config.rating);
       setLanguage(config.language?.trim() || "English");
@@ -1276,11 +1255,9 @@ export function GameSetupWizard({
         ? trimmedGameSystemPrompt
         : null;
     const trimmedGameSpecialInstructions = gameSpecialInstructions.trim();
-    const tacticalSeed = parseTacticalBattlefieldSeed(tacticalBattlefieldSeed);
     const tacticalBattlefield =
       combatStyle === "tactical"
         ? {
-            ...(typeof tacticalSeed === "number" && !Number.isNaN(tacticalSeed) ? { seed: tacticalSeed } : {}),
             ...(tacticalBattlefieldSize !== "auto" ? { size: tacticalBattlefieldSize } : {}),
           }
         : {};
@@ -1290,7 +1267,7 @@ export function GameSetupWizard({
       genre: genres.join(", ") || "Fantasy",
       setting: setting || `A ${(genres[0] ?? "fantasy").toLowerCase()} world`,
       tone: tones.join(", ") || "Heroic",
-      difficulty,
+      difficulty: normalizeGameDifficulty(difficulty),
       combatStyle,
       combatDirector: true,
       gmBossControl,
@@ -1929,7 +1906,7 @@ export function GameSetupWizard({
                             {localizeUi("ui.game.gamesetupwizard.classic")}
                           </div>
                           <div className="mt-1 text-[var(--muted-foreground)]">
-                            {localizeUi("ui.game.gamesetupwizard.cinematicMenuBattlesCurrentStyle")}
+                            {localizeUi("game.combat.preference.classicDescription")}
                           </div>
                         </button>
                         <button
@@ -1966,41 +1943,7 @@ export function GameSetupWizard({
                       </label>
                       {combatStyle === "tactical" && (
                         <div className="mt-3 space-y-3 rounded-xl border border-[var(--primary)]/20 bg-[var(--primary)]/5 p-3">
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            <div>
-                              <label htmlFor="game-setup-battlefield-seed" className={GAME_SETUP_FIELD_LABEL}>
-                                {localizeUi("ui.game.gamesetupwizard.battlefieldSeed")}
-                              </label>
-                              <input
-                                id="game-setup-battlefield-seed"
-                                type="text"
-                                inputMode="numeric"
-                                pattern="[0-9]*"
-                                value={tacticalBattlefieldSeed}
-                                onChange={(event) => setTacticalBattlefieldSeed(event.target.value)}
-                                aria-invalid={!tacticalBattlefieldSeedValid}
-                                aria-describedby={
-                                  !tacticalBattlefieldSeedValid ? "game-setup-battlefield-seed-error" : undefined
-                                }
-                                placeholder={localizeUi("ui.game.gamesetupwizard.random")}
-                                className={cn(
-                                  GAME_SETUP_INPUT_CLASS,
-                                  !tacticalBattlefieldSeedValid &&
-                                    "ring-[var(--destructive)] focus:ring-[var(--destructive)]",
-                                )}
-                              />
-                              {!tacticalBattlefieldSeedValid && (
-                                <p
-                                  id="game-setup-battlefield-seed-error"
-                                  role="alert"
-                                  className="mt-1 text-[0.68rem] text-[var(--destructive)]"
-                                >
-                                  {localizeUi("ui.game.gamesetupwizard.battlefieldSeedInvalid", {
-                                    value1: TACTICAL_BATTLEFIELD_SEED_MAX,
-                                  })}
-                                </p>
-                              )}
-                            </div>
+                          <div>
                             <div>
                               <label htmlFor="game-setup-battlefield-size" className={GAME_SETUP_FIELD_LABEL}>
                                 {localizeUi("ui.game.gamesetupwizard.battlefieldSize")}
@@ -4033,7 +3976,7 @@ export function GameSetupWizard({
                     <button
                       type="button"
                       onClick={handleExportSetup}
-                      disabled={isLoading || !tacticalBattlefieldSeedValid}
+                      disabled={isLoading}
                       className={cn(GAME_SETUP_GHOST_BUTTON_CLASS, "disabled:cursor-wait disabled:opacity-40")}
                     >
                       <Download size={14} />
