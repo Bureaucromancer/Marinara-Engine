@@ -1,6 +1,6 @@
 # Combat difficulty and weather
 
-Implementation plan for [#6305](https://github.com/Pasta-Devs/Marinara-Engine/issues/6305), following the combat director in #6302. This document describes the agreed scope; validation results will be recorded as implementation completes.
+Implementation record for [#6305](https://github.com/Pasta-Devs/Marinara-Engine/issues/6305), following the combat director in #6302. This document records the agreed scope and implementation boundaries.
 
 ## Setup and difficulty
 
@@ -32,10 +32,16 @@ Tuning values are initial game-design values, not proven balance. Automated fixt
 
 ## Implementation details
 
-Shared conditions live in `packages/shared/src/features/combat-conditions.ts`. Difficulty is normalized at setup import/create and at encounter, loot, Classic and Tactical consumers. Enemy decision variation is multiplied by 2.5 / 1 / 0.4 / 0.15 for Casual / Normal / Hard / Brutal; saved proficiency and personality remain in force. Classic estimates use the same opposed-d20 hit probability as resolution, while Tactical estimates use the shared attack forecast. Reactions consider expected threat and resource scarcity, with the same enemy-only variation policy.
+Shared conditions live in `packages/shared/src/features/combat-conditions.ts`. Difficulty is normalized at setup import/create and at encounter, loot, Classic and Tactical consumers. Enemy decision variation is multiplied by 2.5 / 1 / 0.4 / 0.15 for Casual / Normal / Hard / Brutal; saved proficiency and personality remain in force. Classic estimates use the same opposed-d20 hit probability as resolution, while Tactical estimates use the shared attack forecast. Tactical pursuit discovers routes using terrain and weather movement costs, matching its actual movement budget. Reactions consider expected threat and resource scarcity, with the same enemy-only variation policy.
 
 Exposed rain, heavy rain and storms multiply fire damage by 0.85 and lightning damage by 1.15. Explicit projectiles lose 10 accuracy points in strong wind and 15 in gales. Explicit sight-dependent attacks lose 5 points in reduced visibility and 15 in poor visibility. Combined penalties cap at 25 points. Classic converts these to opposed attack-roll modifiers (one point per five accuracy points), and its conditions display names those roll penalties. Tactical exposed snow/blizzards add one walking point per entered tile; flight and teleportation are unaffected. Elemental damage items also receive rain modifiers; healing and status durations do not.
 
-Encounter generation authors basic-attack and skill `projectile` / `requiresSight` booleans and `battlefield.terrainBrief.exposure`. Missing attack traits are neutral. Explicit exposure wins; recognized enclosed environments are sheltered, recognized outdoor environments exposed, and ambiguous environments unknown. Campaign weather comes from the persisted weather system, falling back to a committed scene weather value when absent. Accepted conditions are saved on the director and Tactical state; contradictory or malformed imports are refused. Existing saves lacking weather remain neutral. Legacy Tactical restarts pass accepted conditions (including neutral absence) rather than sampling changed campaign weather.
+Encounter generation authors basic-attack and skill `projectile` / `requiresSight` booleans and `battlefield.terrainBrief.exposure`. Missing attack traits are neutral. Explicit exposure wins; recognized enclosed environments are sheltered, recognized outdoor environments exposed, and ambiguous environments unknown. Campaign weather comes from the persisted weather system, falling back to a committed scene weather value when absent. Combat-start message tags suppress background weather progression before the rendered mode catches up. Accepted conditions are saved on the director and Tactical state; contradictory or malformed imports are refused. Existing saves lacking weather remain neutral. Legacy Tactical restarts pass accepted conditions (including neutral absence) rather than sampling changed campaign weather.
 
 The setup still validates obsolete fields on imports for compatibility and safety, but removes them from normalized setup exports. The engine retains explicit encounter seeds for restore/restart and regression reproduction. This does not remove Experience world seeds, which serve a different purpose.
+
+## Verification record
+
+Baseline `pnpm check` (including localization, types, lint and production builds) and `pnpm version:check` passed locally. The Node suite covered 295 regression files; five were rerun successfully after a concurrent build briefly removed generated files. Combat regressions were rerun after review fixes, including incoming combat tags, non-combat weather progression, weighted pursuit, difficulty consistency, reaction resources and boss context.
+
+Desktop Chromium in light theme and mobile Chromium in dark theme exercised setup/imports, both combat modes, weather with animations disabled, reactions, reloads, terrain fallback and restored-map isolation. Local mobile WebKit could not launch because the host lacks libicu74, libjpeg-turbo8, libmanette-0.2-0 and gstreamer1.0-libav; that browser remains a CI/manual verification item. The PR records the final review results and repeated random-map fixture checks.

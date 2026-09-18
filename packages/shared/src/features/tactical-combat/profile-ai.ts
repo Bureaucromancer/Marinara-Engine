@@ -19,8 +19,8 @@ export function pursueOpponent(
   const frontier: TacticalCoord[] = [{ x: unit.x, y: unit.y }];
   let goal: { target: TacticalUnit; tile: TacticalCoord } | undefined;
   while (frontier.length) {
-    // Teleport edges have spatial length rather than unit cost.
-    if (unit.movementMode === "teleport") frontier.sort((a, b) => distances.get(key(a))! - distances.get(key(b))!);
+    // Walking includes terrain/weather costs; flying and teleporting use spatial distance.
+    frontier.sort((a, b) => distances.get(key(a))! - distances.get(key(b))!);
     const tile = frontier.shift()!;
     if (!occupantAt(state, tile.x, tile.y, unit.id)) {
       const target = targets.find(
@@ -38,7 +38,11 @@ export function pursueOpponent(
         if (length === 0 || length > radius) continue;
         const next = { x: tile.x + dx, y: tile.y + dy };
         if (!canTraverseTile(state, unit, next)) continue;
-        const distance = distances.get(key(tile))! + length;
+        const stepCost =
+          unit.movementMode === "fly" || unit.movementMode === "teleport"
+            ? length
+            : terrainInfoAt(state.grid, next.x, next.y).moveCost + combatWeatherEffects(state.weather).walkingCost;
+        const distance = distances.get(key(tile))! + stepCost;
         if (distance >= (distances.get(key(next)) ?? Infinity)) continue;
         const seen = distances.has(key(next));
         distances.set(key(next), distance);

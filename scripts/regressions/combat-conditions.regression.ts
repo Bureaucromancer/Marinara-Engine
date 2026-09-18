@@ -1,3 +1,5 @@
+import { pursueOpponent } from "../../packages/shared/src/features/tactical-combat/profile-ai.js";
+import { resolveMessageWeatherAction } from "../../packages/client/src/lib/game-tag-parser.js";
 import assert from "node:assert/strict";
 import {
   normalizeGameDifficulty,
@@ -241,3 +243,24 @@ weatherChoice.weather = rain;
 const rainyChoice = decideTacticalAction(weatherChoice, weatherChoice.units[1]!);
 assert.ok(dryChoice.type === "skill" && dryChoice.skillName === "First");
 assert.ok(rainyChoice.type === "skill" && rainyChoice.skillName === "Second");
+
+// Check the incoming message while the UI still reports exploration, as well as an already-active fight.
+for (const content of ["An ambush. [state: combat]", '[combat: enemies="Goblin"]']) {
+  assert.equal(resolveMessageWeatherAction("exploration", content), null);
+  assert.equal(resolveMessageWeatherAction("dialogue", content), null);
+}
+assert.equal(resolveMessageWeatherAction("combat", "The fight continues."), null);
+assert.equal(resolveMessageWeatherAction("exploration", "A quiet path."), "explore");
+assert.equal(resolveMessageWeatherAction("travel_rest", "A quiet camp."), "travel");
+assert.equal(resolveMessageWeatherAction("dialogue", "A quiet greeting."), "turn");
+
+// Pursuit must route around expensive tiles, using the same snowy movement budget as actual moves.
+const pursuit = arena();
+pursuit.weather = snow;
+Object.assign(pursuit.units[0]!, { x: 1, y: 2, movementMode: "walk", attackRange: { min: 1, max: 1 } });
+Object.assign(pursuit.units[1]!, { x: 5, y: 2 });
+for (let x = 2; x <= 4; x++) pursuit.grid.tiles[2]![x] = "mountain";
+const pursued = pursueOpponent(pursuit, pursuit.units[0]!);
+assert.ok(pursued);
+assert.notDeepEqual(pursued.to, { x: 2, y: 2 }, "A short expensive route must not beat the cheaper detour");
+assert.ok(getMovementRange(pursuit, "hero").some((tile) => tile.x === pursued.to.x && tile.y === pursued.to.y));

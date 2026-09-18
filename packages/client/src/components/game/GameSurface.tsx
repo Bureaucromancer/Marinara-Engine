@@ -105,6 +105,7 @@ import { gameAssetFileUrl } from "../../lib/game-asset-urls";
 import { audioManager } from "../../lib/game-audio";
 import {
   parseGmTags,
+  resolveMessageWeatherAction,
   parseSegmentInventoryUpdates,
   type CombatEncounterTag,
   type ElementAttackTag,
@@ -4980,10 +4981,9 @@ function GameSurfaceComponent({
     if (!latestAssistantMsg?.content || isStreaming) return;
     if (latestAssistantDirectAddressMode) return;
     if (weatherMsgRef.current === latestAssistantMsg.id) return;
+    const action = resolveMessageWeatherAction(gameState, latestAssistantMsg.content);
+    if (!action) return;
     weatherMsgRef.current = latestAssistantMsg.id;
-    if (gameState === "combat") return;
-    // Map game state to weather action for probabilistic change
-    const action = gameState === "travel_rest" ? "travel" : gameState === "exploration" ? "explore" : "turn";
     updateWeather.mutate({ chatId: activeChatId, action, location: gameSnapshot?.location ?? "" });
   }, [
     latestAssistantMsg?.content,
