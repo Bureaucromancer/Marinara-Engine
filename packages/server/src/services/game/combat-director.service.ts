@@ -912,7 +912,13 @@ export function advanceCombatDirector(s: CombatDirectorState) {
           s.mechanics,
           undefined,
           undefined,
-          { actorId: "", action: { type: "defend" }, defendingIds: new Set(s.defending), finishRound: true },
+          {
+            actorId: "",
+            action: { type: "defend" },
+            defendingIds: new Set(s.defending),
+            finishRound: true,
+            weather: s.weather,
+          },
         );
         for (const action of roundResult.actions)
           log(

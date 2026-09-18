@@ -349,6 +349,19 @@ export async function combatDirectorRoutes(
           randomSeed: () => Math.floor(Math.random() * 0x100000000),
         });
         if (!battlefield.ok) throw new Error(battlefield.error);
+        let checkpointRestore = false;
+        try {
+          checkpointRestore =
+            anchor.role === "system" && JSON.parse(anchor.extra || "{}")?.gameStateAnchor === "checkpoint_restore";
+        } catch {
+          // Legacy malformed extras do not identify a checkpoint restore.
+        }
+        const committedWeather = (await createGameStateStorage(app.db).getLatestCommitted(input.chatId))?.weather;
+        // Restores rewind the committed scene without rewinding campaign metadata.
+        // Fresh starts still prefer metadata, which may be newer than the accepted scene.
+        const weatherSource = checkpointRestore
+          ? (committedWeather ?? meta.gameWeather)
+          : (meta.gameWeather ?? committedWeather);
         const state = createCombatDirector({
           ...input,
           inventory: Array.isArray(meta.gameInventory) ? meta.gameInventory : [],
@@ -357,11 +370,7 @@ export async function combatDirectorRoutes(
           id: randomUUID(),
           gm: setup.gmBossControl === true,
           difficulty: normalizeGameDifficulty(setup.difficulty),
-          weather: resolveCombatWeather(
-            meta.gameWeather ?? (await createGameStateStorage(app.db).getLatestCommitted(input.chatId))?.weather,
-            input.environment,
-            battlefield.battlefield?.exposure,
-          ),
+          weather: resolveCombatWeather(weatherSource, input.environment, battlefield.battlefield?.exposure),
           seed: battlefield.seed,
           battlefield: battlefield.battlefield,
         });

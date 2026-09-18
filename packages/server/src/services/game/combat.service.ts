@@ -585,6 +585,7 @@ function resolveMechanicActions(
   mechanics: CombatMechanic[] | undefined,
   elementPreset: string | undefined,
   defendingIds: Set<string>,
+  weather?: CombatWeather,
 ): { actions: AttackResult[]; reactions: CombatRoundResult["reactions"] } {
   if (!mechanics?.length) return { actions: [], reactions: [] };
 
@@ -620,7 +621,12 @@ function resolveMechanicActions(
       }
 
       let damage = mechanic.effectType?.startsWith("damage")
-        ? Math.max(1, Math.floor(Math.max(owner.attack, target.maxHp) * power))
+        ? Math.max(
+            1,
+            Math.floor(
+              Math.max(owner.attack, target.maxHp) * power * weatherDamageMultiplier(weather, mechanic.element),
+            ),
+          )
         : 0;
       if (defendingIds.has(target.id)) damage = Math.floor(damage * 0.45);
 
@@ -913,7 +919,7 @@ export function resolveCombatRound(
 
   if (directed && !directed.finishRound) return { round, initiative, actions, statusTicks, reactions };
 
-  const mechanicResult = resolveMechanicActions(combatants, round, mechanics, elementPreset, defendingIds);
+  const mechanicResult = resolveMechanicActions(combatants, round, mechanics, elementPreset, defendingIds, weather);
   actions.push(...mechanicResult.actions);
   reactions.push(...mechanicResult.reactions);
 

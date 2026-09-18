@@ -23,7 +23,10 @@ import { resolveAttack, resolveCombatRound } from "../../packages/server/src/ser
 import { chooseClassicAction } from "../../packages/server/src/services/game/combat-ai.service.js";
 import { resolveCombatWeather, generateWeather } from "../../packages/server/src/services/game/weather.service.js";
 import { resolveTacticalStartPreferences } from "../../packages/server/src/services/game/tactical-battlefield.service.js";
-import { createCombatDirector } from "../../packages/server/src/services/game/combat-director.service.js";
+import {
+  createCombatDirector,
+  commandCombatDirector,
+} from "../../packages/server/src/services/game/combat-director.service.js";
 import { buildCombatBossPrompt } from "../../packages/server/src/services/game/combat-boss.service.js";
 const unit = (id: string, side: Combatant["side"] = "player"): Combatant => ({
   id,
@@ -41,6 +44,47 @@ const unit = (id: string, side: Combatant["side"] = "player"): Combatant => ({
 const rain: CombatWeather = { version: 1, type: "rain", wind: "windy", visibility: "reduced", exposure: "exposed" };
 const storm: CombatWeather = { ...rain, type: "storm", wind: "gale", visibility: "poor" };
 const snow: CombatWeather = { ...rain, type: "snow" };
+// Exercise the director's actual round boundary so dropping weather en route to
+// scripted mechanics cannot silently bypass the shared elemental rules.
+const roundMechanicDamage = (weather?: CombatWeather, element?: string) => {
+  const state = createCombatDirector({
+    id: "weather-mechanic",
+    anchor: "a",
+    party: [{ ...unit("hero"), speed: 10000 }],
+    // Skip ordinary attacks so elemental auras cannot contaminate the mechanic proof.
+    enemies: [{ ...unit("foe", "enemy"), speed: 0, element: "fire" }],
+    style: "classic",
+    gm: false,
+    difficulty: "normal",
+    seed: 1,
+    weather,
+    mechanics: [
+      {
+        name: "Pulse",
+        description: "A periodic pulse",
+        ownerName: "foe",
+        trigger: "round_interval",
+        interval: 1,
+        effectType: "damage_all",
+        power: 0.08,
+        element,
+      },
+    ],
+  });
+  commandCombatDirector(state, { type: "classic", action: { type: "defend" } });
+  assert.equal(state.round, 2);
+  return state.log.find((event) => event.kind === "mechanic")?.message?.params?.amount;
+};
+assert.equal(roundMechanicDamage(rain, "fire"), 15, "Rain reduces fire mechanics before defending mitigation");
+assert.equal(roundMechanicDamage(storm, "lightning"), 20, "Storms increase lightning mechanics");
+for (const weather of [
+  undefined,
+  { ...rain, exposure: "sheltered" as const },
+  { ...rain, exposure: "unknown" as const },
+]) {
+  assert.equal(roundMechanicDamage(weather, "fire"), 18, "Old saves and unexposed encounters remain neutral");
+}
+assert.equal(roundMechanicDamage(rain), 18, "Non-elemental mechanics do not inherit their owner's fire element");
 for (const difficulty of Object.keys(ENEMY_DAMAGE_MULTIPLIERS)) {
   assert.equal(normalizeGameDifficulty(` ${difficulty.toUpperCase()} `), difficulty);
 }
