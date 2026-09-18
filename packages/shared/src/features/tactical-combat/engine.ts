@@ -1,3 +1,9 @@
+import {
+  normalizeGameDifficulty,
+  combatWeatherEffects,
+  type CombatWeather,
+  type CombatAttackTraits,
+} from "../combat-conditions.js";
 import { assignCombatTactics } from "../combat-ai.js";
 // ──────────────────────────────────────────────
 // Tactical Combat — pure engine
@@ -33,19 +39,12 @@ import type {
   TacticalBattlefieldBrief,
   TacticalCombatState,
   TacticalCoord,
-  TacticalDifficulty,
   TacticalEnvironment,
   TacticalEvent,
   TacticalForecast,
   TacticalFormation,
   TacticalUnit,
 } from "./types.js";
-
-const DIFFICULTIES: TacticalDifficulty[] = ["casual", "normal", "hard", "brutal"];
-
-function normalizeDifficulty(value: string): TacticalDifficulty {
-  return DIFFICULTIES.includes(value as TacticalDifficulty) ? (value as TacticalDifficulty) : "normal";
-}
 
 const ENVIRONMENTS: TacticalEnvironment[] = [
   "forest",
@@ -87,6 +86,8 @@ function combatantToUnit(c: Combatant, side: "party" | "enemy", isBoss: boolean)
   const unitClass = deriveClass(c);
   const profile = CLASS_PROFILES[unitClass];
   return {
+    projectile: c.projectile,
+    requiresSight: c.requiresSight,
     id: c.id,
     name: c.name,
     side,
@@ -131,12 +132,13 @@ export function createTacticalCombat(
   opts: {
     seed: number;
     difficulty: string;
+    weather?: CombatWeather;
     environment?: string;
     formation?: string;
     battlefield?: TacticalBattlefieldBrief;
   },
 ): TacticalCombatState {
-  const difficulty = normalizeDifficulty(opts.difficulty);
+  const difficulty = normalizeGameDifficulty(opts.difficulty);
   const environment = normalizeEnvironment(opts.environment);
   const formation = normalizeFormation(opts.formation);
   const seed = opts.seed >>> 0;
@@ -177,6 +179,7 @@ export function createTacticalCombat(
     actionCounter: 1,
     log: [{ kind: "phase", text: "Player Phase — Round 1", phase: "player" }],
     difficulty,
+    weather: opts.weather,
     formation,
     battlefield: generated.battlefield,
     ...(environment ? { environment } : {}),
@@ -262,7 +265,7 @@ export function getMovementRange(state: TacticalCombatState, unitId: string): Ta
       const nx = cx + dx;
       const ny = cy + dy;
       if (!canTraverseTile(state, unit, { x: nx, y: ny })) continue;
-      const enterCost = terrainInfoAt(grid, nx, ny).moveCost;
+      const enterCost = terrainInfoAt(grid, nx, ny).moveCost + combatWeatherEffects(state.weather).walkingCost;
       const newCost = bestCost + enterCost;
       if (newCost > unit.movement) continue;
       const key = `${nx},${ny}`;
@@ -312,12 +315,15 @@ function forecastFrom(
   attacker: TacticalUnit,
   defender: TacticalUnit,
   from: TacticalCoord,
-  opts: { power?: number; element?: string; hitPenalty?: number } = {},
+  opts: { power?: number; element?: string; hitPenalty?: number; traits?: CombatAttackTraits } = {},
 ): { damage: number; hitChance: number; critChance: number } {
   // Temporarily view the attacker as standing on `from` for terrain-independent math
   // (attacker terrain doesn't affect its own outgoing hit/damage, so position only
   // matters for range — computeDamage reads defender terrain from real coords).
-  const hc = Math.max(0, hitChance(state.grid, attacker, defender) - (opts.hitPenalty ?? 0));
+  const hc = Math.max(
+    0,
+    hitChance(state.grid, attacker, defender, state.weather, opts.traits ?? attacker) - (opts.hitPenalty ?? 0),
+  );
   const cc = critChance(attacker, defender);
   const dmg = computeDamage({
     grid: state.grid,
@@ -326,6 +332,7 @@ function forecastFrom(
     roll: 1,
     crit: false,
     difficulty: state.difficulty,
+    weather: state.weather,
     power: opts.power,
     element: opts.element,
   });
@@ -357,6 +364,7 @@ export function forecastAttack(state: TacticalCombatState, attackerId: string, d
 // ── Resolution (consumes rng) ──
 
 interface HitOptions {
+  traits?: CombatAttackTraits;
   power?: number;
   element?: string;
   hitPenalty?: number;
@@ -396,7 +404,10 @@ function resolveHit(
   const label = opts.skillName ? `${attacker.name}'s ${opts.skillName}` : `${attacker.name}`;
   const verb = opts.isCounter ? "counters" : opts.skillName ? "strikes" : "attacks";
 
-  const hc = Math.max(0, hitChance(state.grid, attacker, defender) - (opts.hitPenalty ?? 0));
+  const hc = Math.max(
+    0,
+    hitChance(state.grid, attacker, defender, state.weather, opts.traits ?? attacker) - (opts.hitPenalty ?? 0),
+  );
   if (rng() * 100 >= hc) {
     events.push({
       kind: "miss",
@@ -428,6 +439,7 @@ function resolveHit(
     roll,
     crit,
     difficulty: state.difficulty,
+    weather: state.weather,
     power: opts.power,
     element,
   });
@@ -690,6 +702,7 @@ function performUnitAction(
             other,
             {
               power: Math.max(1, skill.power),
+              traits: skill,
               element: skill.element,
               skillName: skill.name,
               statusEffect: skill.statusEffect,
@@ -705,6 +718,7 @@ function performUnitAction(
         target,
         {
           power: Math.max(1, skill.power),
+          traits: skill,
           element: skill.element,
           skillName: skill.name,
           statusEffect: skill.statusEffect,

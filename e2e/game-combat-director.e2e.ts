@@ -1,3 +1,4 @@
+import { getMovementRange } from "../packages/shared/src/index.js";
 import { expect, test } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { seedUIState } from "./ui-state-fixture.js";
@@ -21,6 +22,7 @@ for (const mode of ["classic", "tactical"] as const) {
       slotLevel: 3,
     };
     const hero = {
+      movementMode: "fly",
       id: "Hero",
       name: "Hero",
       side: "player",
@@ -76,7 +78,19 @@ for (const mode of ["classic", "tactical"] as const) {
         data: { role: "assistant", content: "A mage faces the boss. [state: combat]" },
       });
       const anchor = (await message.json()).id;
-      const input = { chatId, anchor, style: mode, party: [hero], enemies: [boss] };
+      const weatherPatch = await request.patch(`/api/chats/${chatId}/metadata`, {
+        data: { gameWeather: { type: "storm", wind: "gale", visibility: "poor" } },
+      });
+      expect(weatherPatch.ok(), await weatherPatch.text()).toBeTruthy();
+      const input = {
+        chatId,
+        anchor,
+        style: mode,
+        party: [hero],
+        enemies: [boss],
+        battlefield: { exposure: "exposed" },
+        formation: "surrounded",
+      };
       const start = await request.post("/api/game/combat/director/start", { data: input });
       expect(start.ok(), await start.text()).toBeTruthy();
       let s: DirectedCombatView = (await start.json()).session;
@@ -95,7 +109,20 @@ for (const mode of ["classic", "tactical"] as const) {
         expect(result.ok(), await result.text()).toBeTruthy();
         s = (await result.json()).session;
       };
-      if (mode === "tactical") await command({ type: "begin", unitId: "Hero" });
+      if (mode === "tactical") {
+        await command({ type: "begin", unitId: "Hero" });
+        const caster = s.tactical!.units.find((u) => u.id === "Hero")!;
+        const target = s.tactical!.units.find((u) => u.id === "Boss")!;
+        // New encounters have individual seeds. Move beside the boss so this
+        // reaction fixture does not depend on random walls blocking the initial ray.
+        if (Math.abs(caster.x - target.x) + Math.abs(caster.y - target.y) > 1) {
+          const to = getMovementRange(s.tactical!, "Hero").find(
+            (tile) => Math.abs(tile.x - target.x) + Math.abs(tile.y - target.y) === 1,
+          );
+          expect(to, "A flying caster can approach the surrounded encounter's nearby boss").toBeDefined();
+          await command({ type: "tactical", action: { type: "move", unitId: "Hero", to: to! } });
+        }
+      }
       await command(
         mode === "classic"
           ? { type: "classic", action: { type: "skill", skillId: "fire", targetId: "Boss" } }
@@ -132,6 +159,7 @@ for (const mode of ["classic", "tactical"] as const) {
         rightPanelOpen: false,
         chatHelpSeenModes: ["game"],
         gameInstantTextReveal: true,
+        weatherEffects: false,
         theme: testInfo.project.name.includes("desktop") ? "light" : "dark",
       });
       await page.addInitScript(
@@ -142,6 +170,12 @@ for (const mode of ["classic", "tactical"] as const) {
         { id: chatId, version },
       );
       await page.goto("/");
+      const conditions = page.getByLabel("Combat conditions", { exact: true });
+      await expect(conditions).toContainText("Storm");
+      await expect(conditions).toContainText("Fire damage −15%; lightning damage +15%");
+      await expect(conditions).toContainText(
+        mode === "tactical" ? "Projectile accuracy −15 points" : "Projectile attack rolls −3",
+      );
       const choices = page.getByRole("region", { name: "Combat decisions" });
       await expect(choices).toBeVisible({ timeout: 40000 });
       const react = choices.getByRole("button", { name: /Unweave.*Level 3 slot/ });
@@ -150,6 +184,7 @@ for (const mode of ["classic", "tactical"] as const) {
       await page.reload();
       await expect(react).toBeVisible({ timeout: 40000 });
       await expect(react).toBeFocused();
+      await expect(conditions).toContainText("Storm");
       // Change a catalog entry to prove saved events are localized at render time after reload.
       await page.evaluate(async () => {
         const { i18n } = (await import("/src/localization/i18n.ts" as string)) as PageI18nModule;

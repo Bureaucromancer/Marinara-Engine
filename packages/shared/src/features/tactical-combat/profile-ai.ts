@@ -1,3 +1,4 @@
+import { combatWeatherEffects, normalizeGameDifficulty } from "../combat-conditions.js";
 import { chooseCombatCandidate, type CombatAiCandidate } from "../combat-ai.js";
 import { aliveUnits, canTraverseTile, forecastFrom, getMovementRange, occupantAt, skillReady } from "./engine.js";
 import { computeHeal, manhattan, terrainInfoAt } from "./math.js";
@@ -18,8 +19,8 @@ export function pursueOpponent(
   const frontier: TacticalCoord[] = [{ x: unit.x, y: unit.y }];
   let goal: { target: TacticalUnit; tile: TacticalCoord } | undefined;
   while (frontier.length) {
-    // Teleport edges have spatial length rather than unit cost.
-    if (unit.movementMode === "teleport") frontier.sort((a, b) => distances.get(key(a))! - distances.get(key(b))!);
+    // Walking includes terrain/weather costs; flying and teleporting use spatial distance.
+    frontier.sort((a, b) => distances.get(key(a))! - distances.get(key(b))!);
     const tile = frontier.shift()!;
     if (!occupantAt(state, tile.x, tile.y, unit.id)) {
       const target = targets.find(
@@ -37,7 +38,11 @@ export function pursueOpponent(
         if (length === 0 || length > radius) continue;
         const next = { x: tile.x + dx, y: tile.y + dy };
         if (!canTraverseTile(state, unit, next)) continue;
-        const distance = distances.get(key(tile))! + length;
+        const stepCost =
+          unit.movementMode === "fly" || unit.movementMode === "teleport"
+            ? length
+            : terrainInfoAt(state.grid, next.x, next.y).moveCost + combatWeatherEffects(state.weather).walkingCost;
+        const distance = distances.get(key(tile))! + stepCost;
         if (distance >= (distances.get(key(next)) ?? Infinity)) continue;
         const seen = distances.has(key(next));
         distances.set(key(next), distance);
@@ -59,7 +64,7 @@ export function pursueOpponent(
     budget -=
       unit.movementMode === "fly" || unit.movementMode === "teleport"
         ? manhattan(previous, tile)
-        : terrainInfoAt(state.grid, tile.x, tile.y).moveCost;
+        : terrainInfoAt(state.grid, tile.x, tile.y).moveCost + combatWeatherEffects(state.weather).walkingCost;
     if (budget < 0) break;
     previous = tile;
     if (!occupantAt(state, tile.x, tile.y, unit.id)) to = tile;
@@ -116,6 +121,7 @@ export function decideProfileAction(
         const fc = forecastFrom(state, unit, target, tile, {
           power: skill ? Math.max(1, skill.power) : undefined,
           element: skill?.element,
+          traits: skill ?? unit,
         });
         const counter = forecastFrom(state, target, { ...unit, ...tile }, target, { hitPenalty: 10 });
         const counterRisk =
@@ -133,6 +139,7 @@ export function decideProfileAction(
           const hit = forecastFrom(state, unit, t, tile, {
             power: skill ? Math.max(1, skill.power) : undefined,
             element: skill?.element,
+            traits: skill ?? unit,
           });
           return sum + ((t.side === unit.side ? -2 : 1) * hit.damage * hit.hitChance) / 100 / Math.max(1, t.maxHp);
         }, 0);
@@ -195,5 +202,10 @@ export function decideProfileAction(
   }
   const progressing =
     (unit.tactics.holds ?? 0) >= 1 && candidates.some((c) => !c.hold) ? candidates.filter((c) => !c.hold) : candidates;
-  return chooseCombatCandidate(unit, progressing, state.round);
+  return chooseCombatCandidate(
+    unit,
+    progressing,
+    state.round,
+    unit.side === "enemy" ? normalizeGameDifficulty(state.difficulty) : "normal",
+  );
 }

@@ -28,6 +28,7 @@ import type {
   DiceRollResult,
   SessionSummary,
   Combatant,
+  CombatWeather,
   CombatRoundResult,
   CombatPlayerAction,
   HudWidget,
@@ -857,6 +858,7 @@ export function useTacticalCombatStart() {
       chatId: string;
       party: Combatant[];
       enemies: Combatant[];
+      weather?: CombatWeather | null;
       seed?: number;
       battlefield?: TacticalBattlefieldBrief;
       /** Blueprint scene context — themes the terrain (styleNotes.environmentType). */

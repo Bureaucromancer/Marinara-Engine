@@ -1,3 +1,6 @@
+import { createGameStateStorage } from "../services/storage/game-state.storage.js";
+import { normalizeGameDifficulty, combatWeatherSchema } from "@marinara-engine/shared";
+import { resolveCombatWeather } from "../services/game/weather.service.js";
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -75,6 +78,8 @@ export const directedCombatantSchema = z
       )
       .max(64)
       .optional(),
+    projectile: z.boolean().optional(),
+    requiresSight: z.boolean().optional(),
     combatClass: z.string().max(100).optional(),
     movementMode: z.enum(["walk", "fly", "teleport"]).optional(),
     element: z.string().max(100).optional(),
@@ -166,6 +171,7 @@ export async function combatDirectorRoutes(
       id: key,
       revision: z.number().int().min(0),
       style: z.enum(["classic", "tactical"]),
+      weather: combatWeatherSchema.optional(),
       round: z.number().int().min(1),
       party: z.array(directedCombatantSchema).min(1).max(20),
       enemies: z.array(directedCombatantSchema).min(1).max(20),
@@ -198,6 +204,12 @@ export async function combatDirectorRoutes(
     }).parse(state);
     if ((state.style === "tactical") !== !!state.tactical) throw new Error("Invalid combat mode in save.");
     if (state.tactical) {
+      combatWeatherSchema.optional().parse(state.tactical.weather);
+      if (
+        JSON.stringify(combatWeatherSchema.optional().parse(state.weather)) !==
+        JSON.stringify(combatWeatherSchema.optional().parse(state.tactical.weather))
+      )
+        throw new Error("Inconsistent weather in combat save.");
       const grid = state.tactical.grid;
       if (
         !grid ||
@@ -337,6 +349,19 @@ export async function combatDirectorRoutes(
           randomSeed: () => Math.floor(Math.random() * 0x100000000),
         });
         if (!battlefield.ok) throw new Error(battlefield.error);
+        let checkpointRestore = false;
+        try {
+          checkpointRestore =
+            anchor.role === "system" && JSON.parse(anchor.extra || "{}")?.gameStateAnchor === "checkpoint_restore";
+        } catch {
+          // Legacy malformed extras do not identify a checkpoint restore.
+        }
+        const committedWeather = (await createGameStateStorage(app.db).getLatestCommitted(input.chatId))?.weather;
+        // Restores rewind the committed scene without rewinding campaign metadata.
+        // Fresh starts still prefer metadata, which may be newer than the accepted scene.
+        const weatherSource = checkpointRestore
+          ? (committedWeather ?? meta.gameWeather)
+          : (meta.gameWeather ?? committedWeather);
         const state = createCombatDirector({
           ...input,
           inventory: Array.isArray(meta.gameInventory) ? meta.gameInventory : [],
@@ -344,7 +369,8 @@ export async function combatDirectorRoutes(
           enemies: input.enemies as Combatant[],
           id: randomUUID(),
           gm: setup.gmBossControl === true,
-          difficulty: setup.difficulty ?? "normal",
+          difficulty: normalizeGameDifficulty(setup.difficulty),
+          weather: resolveCombatWeather(weatherSource, input.environment, battlefield.battlefield?.exposure),
           seed: battlefield.seed,
           battlefield: battlefield.battlefield,
         });

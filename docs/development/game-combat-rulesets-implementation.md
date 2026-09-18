@@ -17,6 +17,10 @@ A Cautious Mage must remain cautious in either presentation. Changing ruleset ch
 
 Show readable descriptions in product UI. Avoid comparisons to other games in the Traditional or Tactical description. Rulesets intentionally named for an implemented system must identify the precise supported edition and coverage.
 
+### Difficulty must belong to the ruleset
+
+The current Engine's enemy damage multipliers (Casual 0.6, Normal 1, Hard 1.3, Brutal 1.6) are intended only for Traditional. Revisit them when implementing alternative rulesets: 5e, V20, and later adapters must not automatically inherit these multipliers. Define difficulty using each ruleset's own encounter and resolution model. Keep enemy AI decision tuning separate from arithmetic damage scaling. Add an adapter regression proving that selecting an alternative ruleset does not silently apply the Traditional table. This note does not rename current legacy mechanics to an implemented Traditional ruleset.
+
 ## Current source and constraints
 
 - `packages/shared/src/types/game.ts`: `Combatant`, `CombatSkill`, Classic results and snapshots. Current stats are generic numbers; `speed` is not a tabletop Dexterity score or feet of movement.

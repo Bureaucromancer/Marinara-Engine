@@ -1,3 +1,4 @@
+import type { CombatAttackTraits } from "../features/combat-conditions.js";
 import type { CombatAiHints, CombatController, CombatTactics } from "../features/combat-ai.js";
 // ──────────────────────────────────────────────
 // Game Mode Types
@@ -488,7 +489,7 @@ export interface GameDicePoolSlotName {
 // ── Combat ──
 
 /** A combatant (player or enemy) in the battle system. */
-export interface Combatant {
+export interface Combatant extends CombatAttackTraits {
   boss?: import("../features/combat-director.js").CombatBoss;
   spellSlots?: Record<string, number>;
   combatRound?: number;
@@ -530,7 +531,7 @@ export interface CombatStatusEffect {
   turnsLeft: number;
 }
 
-export interface CombatSkill {
+export interface CombatSkill extends CombatAttackTraits {
   areaRadius?: number;
   friendlyFire?: boolean;
   targetScope?: "single" | "all-enemies";

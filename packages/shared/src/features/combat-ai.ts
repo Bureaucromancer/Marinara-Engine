@@ -1,3 +1,4 @@
+import { ENEMY_AI_VARIATION, type GameDifficulty } from "./combat-conditions.js";
 import { z } from "zod";
 import type { CombatSkill, CombatStatusEffect } from "../types/game.js";
 
@@ -140,7 +141,26 @@ export interface CombatAiCandidate<T> {
   hold?: boolean;
 }
 
-export function chooseCombatCandidate<T>(unit: AiCombatant, candidates: CombatAiCandidate<T>[], turn: number): T {
+export function combatAiScoreNoise(
+  profile: CombatTactics,
+  id: string,
+  turn: number | string,
+  index: number,
+  difficulty: GameDifficulty = "normal",
+): number {
+  const variation = profile.proficiency === "novice" ? 0.12 : profile.proficiency === "trained" ? 0.07 : 0.02;
+  return (
+    (variation * ENEMY_AI_VARIATION[difficulty] * combatAiHash(`${index}:decision:${profile.seed}:${id}:${turn}`)) /
+    0x100000000
+  );
+}
+
+export function chooseCombatCandidate<T>(
+  unit: AiCombatant,
+  candidates: CombatAiCandidate<T>[],
+  turn: number,
+  difficulty: GameDifficulty = "normal",
+): T {
   if (!candidates.length) throw new Error("AI needs at least one legal action.");
   const profile = unit.tactics!;
   const adjective = profile.adjective;
@@ -175,8 +195,7 @@ export function chooseCombatCandidate<T>(unit: AiCombatant, candidates: CombatAi
         if (adjective === "patient") score += 0.65;
         if (adjective === "cowardly" && wounded) score += 0.8;
       }
-      const variation = profile.proficiency === "novice" ? 0.12 : profile.proficiency === "trained" ? 0.07 : 0.02;
-      score += (variation * combatAiHash(`decision:${profile.seed}:${unit.id}:${turn}:${i}`)) / 0x100000000;
+      score += combatAiScoreNoise(profile, unit.id, turn, i, difficulty);
       return { candidate, score };
     })
     .sort((a, b) => b.score - a.score);

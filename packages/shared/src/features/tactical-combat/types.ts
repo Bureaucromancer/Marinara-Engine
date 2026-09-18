@@ -1,3 +1,4 @@
+import type { CombatWeather, CombatAttackTraits, GameDifficulty } from "../combat-conditions.js";
 import type { CombatController, CombatTactics } from "../combat-ai.js";
 // ──────────────────────────────────────────────
 // Tactical Combat — shared types
@@ -41,6 +42,7 @@ export interface TacticalBattlefieldFeature {
  * arbitrary coordinates; exact authored maps remain a later contract.
  */
 export interface TacticalBattlefieldBrief {
+  exposure?: CombatWeather["exposure"];
   size?: TacticalBattlefieldSize;
   features?: TacticalBattlefieldFeature[];
 }
@@ -136,7 +138,7 @@ export interface TacticalAttackRange {
  * A combatant placed on the tactical grid. Carries the source `Combatant`
  * fields verbatim (so summaries + hydration stay lossless) plus grid state.
  */
-export interface TacticalUnit {
+export interface TacticalUnit extends CombatAttackTraits {
   boss?: import("../combat-director.js").CombatBoss;
   spellSlots?: Record<string, number>;
   tactics?: CombatTactics;
@@ -241,9 +243,10 @@ export interface TacticalEvent {
 
 export type TacticalPhase = "player" | "enemy";
 export type TacticalOutcome = "victory" | "defeat" | "fled";
-export type TacticalDifficulty = "casual" | "normal" | "hard" | "brutal";
+export type TacticalDifficulty = GameDifficulty;
 
 export interface TacticalCombatState {
+  weather?: CombatWeather;
   schemaVersion: 1;
   grid: TacticalGrid;
   units: TacticalUnit[];

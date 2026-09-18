@@ -9,6 +9,7 @@ process.env.FILE_STORAGE_DIR = join(dataDir, "storage");
 const { default: Fastify } = await import("../../packages/server/node_modules/fastify/fastify.js");
 const { getDB, closeDB } = await import("../../packages/server/src/db/connection.js");
 const { createChatsStorage } = await import("../../packages/server/src/services/storage/chats.storage.js");
+const { createGameStateStorage } = await import("../../packages/server/src/services/storage/game-state.storage.js");
 const { createGameEngineStateStorage } =
   await import("../../packages/server/src/services/storage/game-engine-state.storage.js");
 const { combatDirectorRoutes, COMBAT_DIRECTOR_NAMESPACE } =
@@ -51,9 +52,10 @@ await chats.patchMetadata(chat.id, {
   gameSetupConfig: {
     combatDirector: true,
     gmBossControl: true,
-    difficulty: "normal",
+    difficulty: "Hard",
     tacticalBattlefield: { seed: 9, size: "small" },
   },
+  gameWeather: { type: "rainy", wind: "windy", visibility: "reduced" },
   gameInventory: [{ name: "Potion", quantity: 2 }],
 });
 const input = {
@@ -63,7 +65,7 @@ const input = {
   party: [unit("hero", "player")],
   enemies: [{ ...unit("boss", "enemy"), boss: { points: 3, anticipation: true, defendCost: 1 } }],
   itemEffects: [{ name: "Potion", target: "ally", type: "heal", description: "Heal", power: 1 }],
-  battlefield: { features: [{ terrain: "forest", placement: "center", shape: "patch" }] },
+  battlefield: { exposure: "exposed", features: [{ terrain: "forest", placement: "center", shape: "patch" }] },
 };
 let s: DirectedCombatView;
 const post = (url: string, payload: unknown) => app.inject({ method: "POST", url, payload });
@@ -89,6 +91,53 @@ const read = async () => {
   return response.json().session as DirectedCombatView;
 };
 try {
+  for (const style of ["classic", "tactical"] as const) {
+    for (const restored of [false, true]) {
+      for (const metadataWeather of ["snow", undefined]) {
+        const weatherChat = await chats.create({ name: "Weather restore proof", mode: "game", characterIds: [] });
+        await chats.patchMetadata(weatherChat.id, {
+          gameSetupConfig: { combatDirector: true },
+          ...(metadataWeather ? { gameWeather: { type: metadataWeather } } : {}),
+        });
+        const anchor = await chats.createMessage({
+          chatId: weatherChat.id,
+          role: restored ? "system" : "assistant",
+          content: restored ? "[Checkpoint restored]" : "[state: combat]",
+          extra: restored ? { gameStateAnchor: "checkpoint_restore" } : {},
+        });
+        const states = createGameStateStorage(db);
+        const accepted = {
+          chatId: weatherChat.id,
+          messageId: anchor.id,
+          swipeIndex: 0,
+          date: "",
+          time: "",
+          location: "forest",
+          weather: "rain",
+          temperature: "",
+          worldCustomFields: [],
+          presentCharacters: [],
+          recentEvents: [],
+          playerStats: null,
+          personaStats: null,
+          fieldLocks: {},
+          hiddenTrackerFields: [],
+          committed: true,
+        };
+        await states.create(accepted);
+        // A fresh weather update can change metadata/the newest unaccepted scene,
+        // while the accepted scene still carries earlier weather.
+        if (!restored) await states.create({ ...accepted, messageId: null, weather: "snow", committed: false });
+        const response = await post("/combat/start", { ...input, chatId: weatherChat.id, anchor: anchor.id, style });
+        assert.equal(response.statusCode, 200, response.body);
+        assert.equal(
+          response.json().session.weather?.type,
+          restored || !metadataWeather ? "rain" : metadataWeather,
+          `${style}: restored weather wins at a checkpoint; fresh starts prefer current metadata with an accepted-scene fallback`,
+        );
+      }
+    }
+  }
   assert.equal((await app.inject({ url: "/combat/state" })).statusCode, 400);
   const bad = await post("/combat/start", { ...input, party: [unit("__proto__", "player")] });
   assert.equal(bad.statusCode, 400);
@@ -96,6 +145,19 @@ try {
   assert.equal(start.statusCode, 200, start.body);
   s = start.json().session;
   assert.equal(s.tactical!.battlefield!.brief!.features![0]!.terrain, "forest");
+  assert.equal(s.weather?.type, "rain");
+  assert.equal(s.weather?.exposure, "exposed");
+  assert.deepEqual(s.tactical!.weather, s.weather);
+  assert.equal(s.tactical!.difficulty, "hard");
+  await chats.patchMetadata(chat.id, {
+    gameWeather: { type: "snow" },
+    gameSetupConfig: { combatDirector: true, gmBossControl: true, difficulty: "Casual" },
+  });
+  assert.deepEqual(
+    (await post("/combat/start", input)).json().session,
+    s,
+    "Reload pins accepted weather and difficulty despite changed campaign settings",
+  );
   await accept({ type: "begin", unitId: "hero" });
   assert.equal(s.window?.kind, "anticipation");
   const snapshot = await store.getByChatAndMessage(chat.id, message.id, 0, COMBAT_DIRECTOR_NAMESPACE);
@@ -258,6 +320,29 @@ try {
     400,
     "Malformed imported saves return a recoverable client error",
   );
+  for (const legacy of [false, true]) {
+    const saved = JSON.parse(snapshot!.state);
+    if (legacy) {
+      delete saved.weather;
+      delete saved.tactical.weather;
+    } else saved.tactical.weather.exposure = "sheltered";
+    await store.create({
+      chatId: chat.id,
+      messageId: message.id,
+      swipeIndex: 0,
+      gameType: COMBAT_DIRECTOR_NAMESPACE,
+      schemaVersion: 1,
+      state: JSON.stringify(saved),
+      committed: true,
+    });
+    const response = await post("/combat/start", input);
+    assert.equal(
+      response.statusCode,
+      legacy ? 200 : 400,
+      "Legacy weather absence stays neutral; contradictory imported weather is refused",
+    );
+    if (legacy) assert.equal(response.json().session.weather, undefined);
+  }
   for (const corrupt of ["{truncated", "null"]) {
     await store.create({
       chatId: chat.id,

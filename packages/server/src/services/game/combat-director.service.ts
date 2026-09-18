@@ -1,4 +1,10 @@
 import {
+  normalizeGameDifficulty,
+  combatAiScoreNoise,
+  type CombatWeather,
+  forecastTacticalAttack,
+} from "@marinara-engine/shared";
+import {
   assignCombatTactics,
   combatAiHash,
   createTacticalCombat,
@@ -22,7 +28,7 @@ import {
   type CombatItemEffect,
   type TacticalBattlefieldBrief,
 } from "@marinara-engine/shared";
-import { chooseClassicAction } from "./combat-ai.service.js";
+import { chooseClassicAction, estimateClassicAttack } from "./combat-ai.service.js";
 import { resolveCombatRound, rollInitiative, canCombatantAct } from "./combat.service.js";
 
 type Unit = Combatant | TacticalUnit;
@@ -55,6 +61,7 @@ export interface CombatDirectorState extends DirectedCombatView {
   anchor: string;
   gm: boolean;
   difficulty: string;
+  weather?: CombatWeather;
   seed: number;
   serial: number;
   tasks: Task[];
@@ -149,6 +156,7 @@ export function combatDirectorView(s: CombatDirectorState): DirectedCombatView {
     enemies,
     inventory,
     tactical,
+    weather,
     window,
     budgets,
     log: entries,
@@ -167,6 +175,7 @@ export function combatDirectorView(s: CombatDirectorState): DirectedCombatView {
     enemies,
     inventory,
     tactical,
+    weather,
     window,
     budgets,
     log: entries,
@@ -182,6 +191,7 @@ export function createCombatDirector(input: {
   style: "classic" | "tactical";
   gm: boolean;
   difficulty: string;
+  weather?: CombatWeather;
   seed: number;
   environment?: string;
   formation?: string;
@@ -210,7 +220,8 @@ export function createCombatDirector(input: {
     budgets: {},
     log: [],
     gm: input.gm,
-    difficulty: input.difficulty,
+    difficulty: normalizeGameDifficulty(input.difficulty),
+    weather: input.weather,
     seed: input.seed,
     serial: 0,
     tasks: [],
@@ -230,6 +241,7 @@ export function createCombatDirector(input: {
     s.tactical = createTacticalCombat(party, enemies, {
       seed: s.seed,
       difficulty: s.difficulty,
+      weather: s.weather,
       environment: input.environment,
       formation: input.formation,
       battlefield: input.battlefield,
@@ -399,6 +411,8 @@ function options(s: CombatDirectorState, u: Unit, legendary = false): Candidate[
           living(s).filter((c) => side(c) === side(u)) as Combatant[],
           living(s).filter((c) => side(c) !== side(u)) as Combatant[],
           s.round,
+          s.difficulty,
+          s.weather,
         );
     if (t && !legendary && (expected.type === "wait" || expected.type === "move")) {
       return [
@@ -607,9 +621,18 @@ function reactionThreat(
     } else if (skill?.type === "buff" || skill?.type === "debuff") {
       value += (allied === (skill.type === "debuff") ? 1 : -1) * 0.5;
     } else {
-      const damage = Math.max(1, caster.attack * (skill?.power ?? 1) - target.defense * 0.5);
-      value += (allied ? 1 : -1) * Math.min(2, damage / Math.max(1, target.hp));
-      lethal ||= damage >= target.hp;
+      const forecast = s.tactical
+        ? forecastTacticalAttack(s.tactical, caster as TacticalUnit, target as TacticalUnit, caster as TacticalUnit, {
+            power: skill ? Math.max(1, skill.power) : 1,
+            element: skill?.element ?? caster.element,
+            traits: skill ?? caster,
+          })
+        : undefined;
+      const estimate = forecast
+        ? { damage: forecast.damage, hitProbability: forecast.hitChance / 100 }
+        : estimateClassicAttack(caster, target, skill, s.difficulty, s.weather);
+      value += (allied ? 1 : -1) * Math.min(2, estimate.damage / Math.max(1, target.hp)) * estimate.hitProbability;
+      lethal ||= allied && estimate.damage >= target.hp && estimate.hitProbability > 0;
     }
   }
   return { value, lethal: value > 0 && lethal };
@@ -625,6 +648,8 @@ export function chooseDirectorFallback(s: CombatDirectorState): string {
           living(s).filter((x) => side(x) === side(u)) as Combatant[],
           living(s).filter((x) => side(x) !== side(u)) as Combatant[],
           s.round,
+          s.difficulty,
+          s.weather,
         );
     const match = s.choices.find(
       (c) =>
@@ -638,15 +663,23 @@ export function chooseDirectorFallback(s: CombatDirectorState): string {
   if (w.kind !== "reaction") return "pass";
   const style = u.tactics?.adjective;
   const threshold = style === "reckless" ? 0.15 : style === "patient" || style === "cautious" ? 0.65 : 0.35;
-  let best = { id: "pass", score: threshold };
+  const difficulty = side(u) === "enemy" ? normalizeGameDifficulty(s.difficulty) : "normal";
+  const noise = (index: number) => (u.tactics ? combatAiScoreNoise(u.tactics, u.id, w.id, index, difficulty) : 0);
+  let best = { id: "pass", score: threshold + noise(0) };
+  let candidateIndex = 0;
   for (const c of s.choices.filter((c) => c.reaction)) {
     const p = s.pending[c.pendingId!]!;
     const threat = reactionThreat(s, p, u, c.reaction === "guard" ? c.targetId : undefined);
+    if (threat.value <= 0) continue;
     const scarcity = c.slotLevel
       ? 1 / Math.max(1, u.spellSlots?.[String(c.slotLevel)] ?? 0)
       : c.mpCost / Math.max(1, u.mp ?? 0);
     const score =
-      threat.value + (threat.lethal ? 2 : 0) + (style === "protective" && threat.value > 0 ? 0.35 : 0) - scarcity * 0.3;
+      threat.value +
+      (threat.lethal ? 2 : 0) +
+      (style === "protective" && threat.value > 0 ? 0.35 : 0) -
+      scarcity * 0.3 +
+      noise(++candidateIndex);
     if (score > best.score) best = { id: c.id, score };
   }
   return best.id;
@@ -738,6 +771,7 @@ function effect(s: CombatDirectorState, p: Pending) {
         side: side(c) === "party" ? ("player" as const) : ("enemy" as const),
       }));
       resolveCombatRound(combatants, s.round, s.difficulty, undefined, undefined, undefined, undefined, undefined, {
+        weather: s.weather,
         actorId: u.id,
         action: {
           type: "item",
@@ -784,6 +818,7 @@ function effect(s: CombatDirectorState, p: Pending) {
           undefined,
           undefined,
           {
+            weather: s.weather,
             actorId: u.id,
             action:
               targetId && p.action.classic?.type === "skill" ? { ...p.action.classic, targetId } : p.action.classic!,
@@ -877,7 +912,13 @@ export function advanceCombatDirector(s: CombatDirectorState) {
           s.mechanics,
           undefined,
           undefined,
-          { actorId: "", action: { type: "defend" }, defendingIds: new Set(s.defending), finishRound: true },
+          {
+            actorId: "",
+            action: { type: "defend" },
+            defendingIds: new Set(s.defending),
+            finishRound: true,
+            weather: s.weather,
+          },
         );
         for (const action of roundResult.actions)
           log(
@@ -981,6 +1022,8 @@ export function advanceCombatDirector(s: CombatDirectorState) {
               living(s).filter((x) => side(x) === side(u)) as Combatant[],
               living(s).filter((x) => side(x) !== side(u)) as Combatant[],
               s.round,
+              s.difficulty,
+              s.weather,
             ) as CombatPlayerAction,
           };
       try {

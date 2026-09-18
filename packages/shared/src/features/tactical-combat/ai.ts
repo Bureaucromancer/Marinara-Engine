@@ -1,3 +1,4 @@
+import { normalizeGameDifficulty } from "../combat-conditions.js";
 import { decideProfileAction } from "./profile-ai.js";
 import { applyAction } from "./engine.js";
 // ──────────────────────────────────────────────
@@ -50,11 +51,22 @@ function buildAttackOptions(state: TacticalCombatState, unit: TacticalUnit): Att
   const evaluate = (
     tile: TacticalCoord,
     target: TacticalUnit,
-    opts: { power?: number; element?: string; skillName?: string; rangeMin: number; rangeMax: number },
+    opts: {
+      power?: number;
+      element?: string;
+      skillName?: string;
+      rangeMin: number;
+      rangeMax: number;
+      traits?: import("../combat-conditions.js").CombatAttackTraits;
+    },
   ): void => {
     const d = manhattan(tile, target);
     if (d < opts.rangeMin || d > opts.rangeMax) return;
-    const fc = forecastFrom(state, unit, target, tile, { power: opts.power, element: opts.element });
+    const fc = forecastFrom(state, unit, target, tile, {
+      power: opts.power,
+      element: opts.element,
+      traits: opts.traits,
+    });
     const hitP = fc.hitChance / 100;
     const expValue = hitP * fc.damage;
     const isKill = fc.damage >= target.hp && fc.hitChance >= 50;
@@ -92,6 +104,7 @@ function buildAttackOptions(state: TacticalCombatState, unit: TacticalUnit): Att
         evaluate(tile, target, {
           power: Math.max(1, skill.power),
           element: skill.element,
+          traits: skill,
           skillName: skill.name,
           rangeMin: 1,
           rangeMax: skill.range ?? Math.max(unit.attackRange.max, 2),
@@ -139,7 +152,7 @@ export function decideTacticalAction(
   rng: () => number = deterministicRng(state.seed, state.actionCounter),
 ): TacticalAction {
   if (unit.tactics) return decideProfileAction(state, { ...unit, tactics: unit.tactics });
-  const greed = GREED[state.difficulty] ?? 0.7;
+  const greed = GREED[normalizeGameDifficulty(state.difficulty)] ?? 0.7;
 
   // Consider healing a hurt ally before committing to aggression.
   const heal = tryHeal(state, unit);

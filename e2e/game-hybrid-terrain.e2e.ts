@@ -224,14 +224,23 @@ test("Hybrid battlefield preserves landmarks through a flying move, reload and r
   request,
 }, testInfo) => {
   const chatId = await createGame(request);
-  const brief: TacticalBattlefieldBrief = { features: [{ terrain: "wall", placement: "west", shape: "barrier" }] };
+  const brief: TacticalBattlefieldBrief = {
+    exposure: "exposed",
+    features: [{ terrain: "wall", placement: "west", shape: "barrier" }],
+  };
   try {
+    const weatherPatch = await request.patch(`/api/chats/${chatId}/metadata`, {
+      data: { gameWeather: { type: "rain", wind: "windy", visibility: "reduced" } },
+    });
+    expect(weatherPatch.ok(), await weatherPatch.text()).toBeTruthy();
     await mountBattle(page, testInfo, chatId, brief);
     const battle = page.locator('[data-component="TacticalCombatUI"]');
     await expect(battle.getByRole("button", { name: "End Turn", exact: true })).toBeVisible();
     await expect.poll(() => snapshot(request, chatId)).toBeTruthy();
     const start = (await snapshot(request, chatId))!;
-    expect(start.seed).toBe(0);
+    expect(Number.isInteger(start.seed)).toBeTruthy();
+    expect(start.weather?.type).toBe("rain");
+    await expect(page.getByLabel("Combat conditions", { exact: true })).toContainText("Rain");
     expect([start.grid.width, start.grid.height]).toEqual([14, 10]);
     expect(start.battlefield?.brief?.features).toEqual(brief.features);
     const scout = start.units.find((unit) => unit.id === "scout")!;
@@ -268,13 +277,18 @@ test("Hybrid battlefield preserves landmarks through a flying move, reload and r
     expect(startRequests).toEqual([]);
     expect(await snapshot(request, chatId)).toEqual(moved);
 
+    const changedWeather = await request.patch(`/api/chats/${chatId}/metadata`, {
+      data: { gameWeather: { type: "snow" } },
+    });
+    expect(changedWeather.ok(), await changedWeather.text()).toBeTruthy();
     await battle.getByTitle("Restart the battle", { exact: true }).click();
     await battle.getByRole("button", { name: "Restart", exact: true }).last().click();
     await expect
       .poll(async () => (await snapshot(request, chatId))?.units.find((unit) => unit.id === "scout")?.hasMoved)
       .toBe(false);
     const restarted = (await snapshot(request, chatId))!;
-    expect(restarted.seed).toBe(0);
+    expect(restarted.seed).toBe(start.seed);
+    expect(restarted.weather).toEqual(start.weather);
     expect(restarted.grid).toEqual(start.grid);
     expect(restarted.battlefield).toEqual(start.battlefield);
     expect(startRequests).toHaveLength(1);
@@ -306,7 +320,7 @@ test("Conflicting terrain requires an explicit generated fallback", async ({ pag
     await expect(page.getByRole("button", { name: "End Turn", exact: true })).toBeVisible();
     await expect.poll(() => snapshot(request, chatId)).toBeTruthy();
     const accepted = (await snapshot(request, chatId))!;
-    expect(accepted.seed).toBe(0);
+    expect(Number.isInteger(accepted.seed)).toBeTruthy();
     expect(accepted.grid.width).toBe(14);
     expect(accepted.battlefield?.brief?.features).toBeUndefined();
     expect(requests).toHaveLength(2);

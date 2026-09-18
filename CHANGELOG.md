@@ -4,6 +4,11 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 
 ## [Unreleased]
 
+- Game difficulty now affects enemy AI decision consistency in Classic and Tactical, while companions retain their own competence. Older title-case settings work throughout combat, encounters and loot; the current Traditional damage modifiers affect enemies only and are explicitly reserved for that ruleset.
+- Combat accepts and saves campaign weather, applying rain's elemental modifiers, tagged projectile/sight penalties, and Tactical snow movement costs. Sheltered or uncertain exposure is neutral; conditions remain visible with weather animations off and stay fixed across reloads.
+- Game creation retains Battlefield Size while removing the unused campaign Battlefield Seed control and “current style” from Classic. New battles receive individual internal seeds, while saved battle maps and restarts retain theirs.
+- Combat started from a restored checkpoint uses the restored scene's weather, and Classic end-of-round elemental mechanics respect the encounter's weather modifiers.
+
 - Linux sandbox regressions probe the actual host process instead of Bubblewrap’s isolated supervisor and accept explicit denial when reading a masked secret file, avoiding false failures without weakening the isolation checks.
 
 - Combat AI review fixes keep Methodical units focused on real opponents, respect legacy skill ranges, and report invalid enemy MP and corrupt saves clearly. Combat events can be translated, item prompts match their targets, and mobile terrain inspection leaves battle controls accessible. Battlefield reload checks no longer depend on browser resource-timing history (#6303).

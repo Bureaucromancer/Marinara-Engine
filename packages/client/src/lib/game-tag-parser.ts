@@ -1052,3 +1052,10 @@ export function stripGmTagsKeepReadables(content: string): string {
   text = stripDanglingTagClosers(text);
   return text.trim();
 }
+
+/** A combat-start message arrives before the rendered game state catches up. */
+export function resolveMessageWeatherAction(state: string, content: string): "travel" | "explore" | "turn" | null {
+  const tags = parseGmTags(content);
+  if (state === "combat" || tags.stateChange === "combat" || tags.combatEncounter) return null;
+  return state === "travel_rest" ? "travel" : state === "exploration" ? "explore" : "turn";
+}
